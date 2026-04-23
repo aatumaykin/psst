@@ -19,11 +19,13 @@ type SecretMeta struct {
 }
 
 type HistoryEntry struct {
-	ID         int64
-	Name       string
-	Version    int
-	Tags       []string
-	ArchivedAt time.Time
+	ID             int64
+	Name           string
+	Version        int
+	EncryptedValue []byte
+	IV             []byte
+	Tags           []string
+	ArchivedAt     time.Time
 }
 
 type SecretStore interface {

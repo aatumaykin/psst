@@ -95,7 +95,7 @@ func (s *SQLiteStore) ListSecrets() ([]SecretMeta, error) {
 
 func (s *SQLiteStore) GetHistory(name string) ([]HistoryEntry, error) {
 	rows, err := s.db.Query(
-		"SELECT id, name, version, tags, archived_at FROM secrets_history WHERE name = ? ORDER BY version DESC",
+		"SELECT id, name, version, encrypted_value, iv, tags, archived_at FROM secrets_history WHERE name = ? ORDER BY version DESC",
 		name,
 	)
 	if err != nil {
@@ -108,7 +108,7 @@ func (s *SQLiteStore) GetHistory(name string) ([]HistoryEntry, error) {
 		var e HistoryEntry
 		var tagsJSON string
 		var archivedAt string
-		if err := rows.Scan(&e.ID, &e.Name, &e.Version, &tagsJSON, &archivedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.Name, &e.Version, &e.EncryptedValue, &e.IV, &tagsJSON, &archivedAt); err != nil {
 			return nil, err
 		}
 		json.Unmarshal([]byte(tagsJSON), &e.Tags)
