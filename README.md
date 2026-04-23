@@ -48,6 +48,10 @@ sudo install psst /usr/local/bin/
 # Создать vault (ключ шифрования сохраняется в OS keychain)
 psst init
 
+# На сервере без OS keychain — использовать PSST_PASSWORD:
+export PSST_PASSWORD="your-password"
+psst init                    # создаст vault с ключом из пароля
+
 # Добавить секреты
 echo "sk-live-abc123" | psst set STRIPE_KEY --stdin
 echo "postgres://db:5432/app" | psst set DATABASE_URL --stdin
@@ -60,6 +64,15 @@ psst list
 psst STRIPE_KEY -- curl -H "Authorization: Bearer $STRIPE_KEY" https://api.stripe.com
 psst run -- ./deploy.sh             # внедрить все секреты
 ```
+
+> **Важно:** На Linux без `libsecret` (серверы, CI) ключ нельзя сохранить в OS keychain.
+> Используйте `PSST_PASSWORD` — его нужно задавать перед каждым запуском:
+> ```bash
+> export PSST_PASSWORD="your-password"
+> psst init
+> psst set KEY --stdin <<< "value"
+> psst list
+> ```
 
 ## Команды
 
@@ -154,14 +167,16 @@ psst list-envs                        # Список всех окружений
 
 ## CI / Работа без OS keychain
 
-Когда OS keychain недоступен, используйте `PSST_PASSWORD`:
+Когда OS keychain недоступен (серверы, Docker, CI), используйте `PSST_PASSWORD`:
 
 ```bash
-export PSST_PASSWORD="ваш-мастер-пароль"
-psst STRIPE_KEY -- ./deploy.sh
+export PSST_PASSWORD="your-password"   # задать один раз в сессии
+psst init                              # создать vault
+psst set API_KEY --stdin <<< "value"
+psst run -- ./deploy.sh                # секреты внедряются в env, вывод маскируется
 ```
 
-Ключ выводится из пароля через SHA-256.
+Ключ выводится из пароля через SHA-256. `PSST_PASSWORD` нужно задавать перед каждым использованием psst.
 
 ## Архитектура
 

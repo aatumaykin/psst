@@ -26,12 +26,15 @@ func (o *OSKeyring) SetKey(service, account string, key []byte) error {
 }
 
 func (o *OSKeyring) IsAvailable() bool {
-	err := keyring.Set("psst-test", "availability-check", "test")
-	if err != nil {
+	const testSvc = "psst-avail-check"
+	const testAcc = "test"
+	const testVal = "psst-availability-probe"
+	if err := keyring.Set(testSvc, testAcc, testVal); err != nil {
 		return false
 	}
-	keyring.Delete("psst-test", "availability-check")
-	return true
+	got, err := keyring.Get(testSvc, testAcc)
+	keyring.Delete(testSvc, testAcc)
+	return err == nil && got == testVal
 }
 
 func (o *OSKeyring) GenerateKey() ([]byte, error) {

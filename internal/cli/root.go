@@ -115,7 +115,11 @@ func printNoVault(jsonOut, quiet bool) {
 
 func printAuthFailed(jsonOut, quiet bool) {
 	f := output.NewFormatter(jsonOut, quiet)
-	f.Error("Failed to unlock vault. Set PSST_PASSWORD or check keychain access.")
+	if keyring.IsKeychainAvailable() {
+		f.Error("Failed to unlock vault. Check keychain access.")
+	} else {
+		f.Error("Failed to unlock vault. Set PSST_PASSWORD:\n  export PSST_PASSWORD=\"your-password\"")
+	}
 }
 
 func exitWithError(msg string) {

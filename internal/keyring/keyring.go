@@ -1,6 +1,10 @@
 package keyring
 
-import "github.com/user/psst/internal/crypto"
+import (
+	"os"
+
+	"github.com/user/psst/internal/crypto"
+)
 
 type KeyProvider interface {
 	GetKey(service, account string) ([]byte, error)
@@ -15,4 +19,12 @@ func NewProvider(enc *crypto.AESGCM) KeyProvider {
 		return os
 	}
 	return &EnvVarProvider{enc: enc}
+}
+
+func IsKeychainAvailable() bool {
+	return (&OSKeyring{}).IsAvailable()
+}
+
+func IsEnvPasswordSet() bool {
+	return os.Getenv("PSST_PASSWORD") != ""
 }

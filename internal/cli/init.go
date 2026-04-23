@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/spf13/cobra"
 	"github.com/user/psst/internal/crypto"
 	"github.com/user/psst/internal/keyring"
@@ -19,6 +22,13 @@ var initCmd = &cobra.Command{
 			exitWithError(err.Error())
 		}
 
+		keychainAvailable := keyring.IsKeychainAvailable()
+		envPasswordSet := keyring.IsEnvPasswordSet()
+
+		if !keychainAvailable && !envPasswordSet {
+			exitWithError("OS keychain unavailable. Set PSST_PASSWORD before running init:\n  export PSST_PASSWORD=\"your-password\"\n  psst init")
+		}
+
 		enc := crypto.NewAESGCM()
 		kp := keyring.NewProvider(enc)
 
@@ -32,6 +42,12 @@ var initCmd = &cobra.Command{
 		}
 
 		f.Success("Vault created at " + vaultPath)
+
+		if !keychainAvailable {
+			fmt.Fprintln(os.Stderr, "⚠ Using PSST_PASSWORD (OS keychain unavailable)")
+			fmt.Fprintln(os.Stderr, "  Set PSST_PASSWORD before each use:")
+			fmt.Fprintln(os.Stderr, "    export PSST_PASSWORD=\"your-password\"")
+		}
 	},
 }
 
