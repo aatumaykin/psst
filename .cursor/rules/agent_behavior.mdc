@@ -1,0 +1,23 @@
+---
+alwaysApply: true
+description: "psst — secrets manager for AI agents. Read AGENTS.md first, then follow docs/rules/*.md."
+language: en
+globs:
+---
+
+# psst — Cursor Agent Behavior
+
+You are working on the **psst** project: a Go CLI tool for managing secrets for AI agents.
+
+## Instructions
+
+1. **First, read `AGENTS.md` in the repository root.** It is the main entry point with the lazy loading strategy for all rule modules.
+2. **Then follow instructions from `AGENTS.md`** and use modules in `docs/rules/*.md` as needed for your current task.
+3. **All substantive rules live in `docs/rules/*.md`**, not in this file. Use lazy loading as described in `AGENTS.md`.
+
+## Key Points
+
+- This is a security-critical project (secrets manager). Always check `docs/rules/security.md` before making changes.
+- Run `make test` before committing.
+- Follow conventional commits: `feat:`, `fix:`, `docs:`, `chore:`.
+- No comments unless asked.
