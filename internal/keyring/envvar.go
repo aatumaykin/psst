@@ -20,7 +20,7 @@ func (e *EnvVarProvider) GetKey(service, account string) ([]byte, error) {
 }
 
 func (e *EnvVarProvider) SetKey(service, account string, key []byte) error {
-	return fmt.Errorf("cannot set key: PSST_PASSWORD env var is read-only")
+	return nil
 }
 
 func (e *EnvVarProvider) IsAvailable() bool {

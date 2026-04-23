@@ -34,13 +34,13 @@ func TestEnvVarProviderNotAvailable(t *testing.T) {
 	}
 }
 
-func TestEnvVarProviderSetKeyFails(t *testing.T) {
+func TestEnvVarProviderSetKeyNoop(t *testing.T) {
 	enc := crypto.NewAESGCM()
 	p := &EnvVarProvider{enc: enc}
 
 	err := p.SetKey("psst", "vault-key", nil)
-	if err == nil {
-		t.Fatal("SetKey should fail for env var provider")
+	if err != nil {
+		t.Fatalf("SetKey should be a no-op for env var provider, got: %v", err)
 	}
 }
 
