@@ -1,19 +1,19 @@
-# psst Go Rewrite — Design Spec
+# psst — Перепись на Go — Спецификация дизайна
 
-**Date:** 2026-04-23
-**Status:** Approved
-**Target:** Full 1:1 rewrite of https://github.com/Michaelliv/psst (TypeScript/Bun) in Go
-**Platforms:** Linux amd64 + arm64
+**Дата:** 2026-04-23
+**Статус:** Утверждено
+**Цель:** Полный 1:1 перенос https://github.com/Michaelliv/psst (TypeScript/Bun) на Go
+**Платформы:** Linux amd64 + arm64
 
-## Overview
+## Обзор
 
-psst — AI-native secrets manager. CLI-инструмент, позволяющий AI-агентам использовать секреты (API keys, passwords) без прямого доступа к их значениям. Секреты шифруются (AES-256-GCM), хранятся в SQLite vault, а ключ шифрования — в OS keychain.
+psst — AI-ориентированный менеджер секретов. CLI-инструмент, позволяющий AI-агентам использовать секреты (API keys, passwords) без прямого доступа к их значениям. Секреты шифруются (AES-256-GCM), хранятся в SQLite vault, а ключ шифрования — в OS keychain.
 
 Переписываем на Go для: единого бинарника без runtime-зависимостей, производительности, простоты дистрибуции.
 
-## Architecture
+## Архитектура
 
-### Approach: Idiomatic Go with interfaces and DI
+### Подход: Идиоматичный Go с интерфейсами и DI
 
 Структура проекта:
 
@@ -21,9 +21,9 @@ psst — AI-native secrets manager. CLI-инструмент, позволяющ
 psst/
 ├── cmd/
 │   └── psst/
-│       └── main.go              # entry point: DI wiring, cobra execute
+│       └── main.go              # точка входа: DI-связывание, вызов cobra
 ├── internal/
-│   ├── cli/                     # cobra commands
+│   ├── cli/                     # cobra-команды
 │   │   ├── root.go              # root + persistent flags
 │   │   ├── init.go              # psst init
 │   │   ├── set.go               # psst set
@@ -38,42 +38,42 @@ psst/
 │   │   ├── history.go           # psst history
 │   │   ├── rollback.go          # psst rollback
 │   │   └── tag.go               # psst tag/untag
-│   ├── vault/                   # business logic facade
-│   │   ├── vault.go             # Vault struct (main entry point)
-│   │   ├── types.go             # Secret, SecretMeta, SecretHistoryEntry, etc.
+│   ├── vault/                   # фасад бизнес-логики
+│   │   ├── vault.go             # Vault struct (главная точка входа)
+│   │   ├── types.go             # Secret, SecretMeta, SecretHistoryEntry и др.
 │   │   └── vault_test.go
-│   ├── store/                   # persistence layer
-│   │   ├── store.go             # SecretStore interface
-│   │   ├── sqlite.go            # SQLite implementation
-│   │   ├── migrations.go        # schema creation + ALTER TABLE
+│   ├── store/                   # слой хранения
+│   │   ├── store.go             # интерфейс SecretStore
+│   │   ├── sqlite.go            # реализация SQLite
+│   │   ├── migrations.go        # создание схемы + ALTER TABLE
 │   │   └── sqlite_test.go
-│   ├── crypto/                  # encryption
-│   │   ├── crypto.go            # Encryptor interface
-│   │   ├── aesgcm.go            # AES-256-GCM implementation
+│   ├── crypto/                  # шифрование
+│   │   ├── crypto.go            # интерфейс Encryptor
+│   │   ├── aesgcm.go            # реализация AES-256-GCM
 │   │   └── aesgcm_test.go
-│   ├── keyring/                 # encryption key storage
-│   │   ├── keyring.go           # KeyProvider interface
-│   │   ├── oskeyring.go         # zalando/go-keyring (libsecret on Linux)
-│   │   ├── envvar.go            # PSST_PASSWORD env var fallback
+│   ├── keyring/                 # хранение ключа шифрования
+│   │   ├── keyring.go           # интерфейс KeyProvider
+│   │   ├── oskeyring.go         # zalando/go-keyring (libsecret на Linux)
+│   │   ├── envvar.go            # fallback на PSST_PASSWORD env var
 │   │   └── keyring_test.go
-│   ├── runner/                  # subprocess execution
+│   ├── runner/                  # выполнение подпроцессов
 │   │   ├── runner.go            # Runner struct
-│   │   ├── mask.go              # output masking
+│   │   ├── mask.go              # маскирование вывода
 │   │   └── runner_test.go
-│   └── output/                  # output formatting
-│       ├── output.go            # Formatter + human/json/quiet modes
+│   └── output/                  # форматирование вывода
+│       ├── output.go            # Formatter + режимы human/json/quiet
 │       └── output_test.go
 ├── go.mod
 ├── go.sum
 └── .gitignore
 ```
 
-### DI wiring (main.go)
+### DI-связывание (main.go)
 
 ```go
 func main() {
     enc := crypto.NewAESGCM()
-    kp := keyring.NewProvider()  // oskeyring with envvar fallback
+    kp := keyring.NewProvider()  // oskeyring с fallback на envvar
     store := store.NewSQLite(vaultPath)
     v := vault.New(enc, kp, store)
     r := runner.New()
@@ -83,7 +83,7 @@ func main() {
 }
 ```
 
-## Interfaces
+## Интерфейсы
 
 ### Encryptor (`internal/crypto/crypto.go`)
 
@@ -161,38 +161,38 @@ type Formatter interface {
 }
 ```
 
-## Crypto (AES-256-GCM)
+## Криптография (AES-256-GCM)
 
-**Package:** `internal/crypto/`
-**Implementation:** `crypto/aes` + `crypto/cipher` + `crypto/rand` (stdlib)
+**Пакет:** `internal/crypto/`
+**Реализация:** `crypto/aes` + `crypto/cipher` + `crypto/rand` (stdlib)
 
-### Constants
-- Key length: 32 bytes (AES-256)
-- IV length: 12 bytes (standard GCM)
+### Константы
+- Длина ключа: 32 байта (AES-256)
+- Длина IV: 12 байт (стандартный GCM)
 
 ### KeyToBuffer(key string) ([]byte, error)
-1. Try base64 decode -> if result is exactly 32 bytes, use directly
-2. Otherwise: SHA-256 hash of the string -> use as key
+1. Попробовать base64 decode -> если результат ровно 32 байта, использовать напрямую
+2. Иначе: SHA-256 хеш строки -> использовать как ключ
 
 ### Encrypt(plaintext []byte) (ciphertext, iv []byte, err error)
-1. Generate random 12-byte IV via `crypto/rand`
-2. Create AES cipher block from key
-3. Create GCM mode (`cipher.NewGCM`)
+1. Генерация случайного 12-байтового IV через `crypto/rand`
+2. Создание AES cipher block из ключа
+3. Создание GCM mode (`cipher.NewGCM`)
 4. Seal: `gcm.Seal(nil, iv, plaintext, nil)`
-5. Return ciphertext + iv
+5. Возврат ciphertext + iv
 
 ### Decrypt(ciphertext, iv []byte) ([]byte, error)
-1. Create AES cipher block from key
-2. Create GCM mode
+1. Создание AES cipher block из ключа
+2. Создание GCM mode
 3. Open: `gcm.Open(nil, iv, ciphertext, nil)`
-4. Return plaintext
+4. Возврат plaintext
 
-## SQLite Schema
+## Схема SQLite
 
-**Package:** `internal/store/`
-**Driver:** `github.com/mattn/go-sqlite3`
+**Пакет:** `internal/store/`
+**Драйвер:** `github.com/mattn/go-sqlite3`
 
-### Table: secrets
+### Таблица: secrets
 
 ```sql
 CREATE TABLE IF NOT EXISTS secrets (
@@ -205,7 +205,7 @@ CREATE TABLE IF NOT EXISTS secrets (
 );
 ```
 
-### Table: secrets_history
+### Таблица: secrets_history
 
 ```sql
 CREATE TABLE IF NOT EXISTS secrets_history (
@@ -222,32 +222,32 @@ CREATE TABLE IF NOT EXISTS secrets_history (
 CREATE INDEX IF NOT EXISTS idx_secrets_history_name ON secrets_history(name);
 ```
 
-### Migrations
+### Миграции
 
-Run on every `InitSchema()`:
-1. `CREATE TABLE IF NOT EXISTS` for both tables (idempotent)
-2. Check if `tags` column exists in `secrets` via `PRAGMA table_info` -> if not, `ALTER TABLE secrets ADD COLUMN tags TEXT DEFAULT '[]'`
-3. Same for `secrets_history`
+Выполняются при каждом `InitSchema()`:
+1. `CREATE TABLE IF NOT EXISTS` для обеих таблиц (идемпотентно)
+2. Проверить наличие колонки `tags` в `secrets` через `PRAGMA table_info` -> если нет, `ALTER TABLE secrets ADD COLUMN tags TEXT DEFAULT '[]'`
+3. То же для `secrets_history`
 
 ## Keyring
 
-**Package:** `internal/keyring/`
-**Library:** `github.com/zalando/go-keyring`
+**Пакет:** `internal/keyring/`
+**Библиотека:** `github.com/zalando/go-keyring`
 
-### KeyProvider implementations
+### Реализации KeyProvider
 
 #### oskeyring (Linux)
-- `GetKey`: `keyring.Get(service, account)` -> base64 decode -> 32 bytes
+- `GetKey`: `keyring.Get(service, account)` -> base64 decode -> 32 байта
 - `SetKey`: base64 encode -> `keyring.Set(service, account, encoded)`
-- `IsAvailable`: try `keyring.Get("psst", "test")`, check for `keyring.ErrNotFound` vs other errors
-- `GenerateKey`: `crypto/rand` -> 32 bytes -> base64
+- `IsAvailable`: попробовать `keyring.Get("psst", "test")`, проверить ошибку
+- `GenerateKey`: `crypto/rand` -> 32 байта -> base64
 
 #### envvar (fallback)
-- `GetKey`: read `PSST_PASSWORD` from env -> `KeyToBuffer()`
-- `SetKey`: no-op (env var is read-only)
+- `GetKey`: прочитать `PSST_PASSWORD` из env -> `KeyToBuffer()`
+- `SetKey`: no-op (env var только для чтения)
 - `IsAvailable`: `os.Getenv("PSST_PASSWORD") != ""`
 
-### Provider selection
+### Выбор провайдера
 ```go
 func NewProvider() KeyProvider {
     os := &OSKeyring{}
@@ -258,20 +258,20 @@ func NewProvider() KeyProvider {
 }
 ```
 
-### Constants
+### Константы
 - Service: `"psst"`
 - Account: `"vault-key"`
 
-## Vault (Facade)
+## Vault (Фасад)
 
-**Package:** `internal/vault/`
+**Пакет:** `internal/vault/`
 
-### Types
+### Типы
 
 ```go
 type Secret struct {
     Name      string
-    Value     string    // decrypted
+    Value     string    // расшифрованное значение
     Tags      []string
     CreatedAt string
     UpdatedAt string
@@ -291,7 +291,7 @@ type SecretHistoryEntry struct {
 }
 ```
 
-### Vault struct
+### Структура Vault
 
 ```go
 type Vault struct {
@@ -303,56 +303,56 @@ type Vault struct {
 }
 ```
 
-### Key methods
+### Ключевые методы
 
 - `New(enc, kp, store) *Vault`
-- `Init(opts InitOptions) error` — create directory, init schema, generate key, store in keychain
-- `Unlock() error` — get key from keychain/PSST_PASSWORD
-- `SetSecret(name, value string, tags []string) error` — archive current to history, encrypt, store
-- `GetSecret(name string) (*Secret, error)` — read, decrypt
+- `Init(opts InitOptions) error` — создать директорию, инициализировать схему, сгенерировать ключ, сохранить в keychain
+- `Unlock() error` — получить ключ из keychain/PSST_PASSWORD
+- `SetSecret(name, value string, tags []string) error` — архивировать текущее в history, зашифровать, сохранить
+- `GetSecret(name string) (*Secret, error)` — прочитать, расшифровать
 - `ListSecrets() ([]SecretMeta, error)`
-- `DeleteSecret(name string) error` — delete secret + history
+- `DeleteSecret(name string) error` — удалить секрет + историю
 - `GetHistory(name string) ([]SecretHistoryEntry, error)`
-- `Rollback(name string, version int) error` — archive current, restore version
+- `Rollback(name string, version int) error` — архивировать текущее, восстановить версию
 - `AddTag(name, tag string) error`
 - `RemoveTag(name, tag string) error`
-- `GetSecretsByTags(tags []string) ([]SecretMeta, error)` — OR logic
-- `GetAllSecrets() ([]Secret, error)` — decrypt all (for run/export)
+- `GetSecretsByTags(tags []string) ([]SecretMeta, error)` — логика OR
+- `GetAllSecrets() ([]Secret, error)` — расшифровать все (для run/export)
 - `Close()`
 
-### Vault discovery (from original)
+### Обнаружение vault
 
 ```go
 func FindVaultPath(global bool, env string) (string, error)
 ```
 
-Priority:
-1. If `--global`: `~/.psst/` (or `~/.psst/envs/<name>/`)
-2. If `--env`: `.psst/envs/<name>/` (local) or `~/.psst/envs/<name>/` (global)
-3. Default: `.psst/` in current directory
+Приоритет:
+1. Если `--global`: `~/.psst/` (или `~/.psst/envs/<name>/`)
+2. Если `--env`: `.psst/envs/<name>/` (local) или `~/.psst/envs/<name>/` (global)
+3. По умолчанию: `.psst/` в текущей директории
 
-## Runner (Subprocess Execution)
+## Runner (Выполнение подпроцессов)
 
-**Package:** `internal/runner/`
+**Пакет:** `internal/runner/`
 
-### Exec (named secrets)
+### Exec (именованные секреты)
 
 ```go
 func (r *Runner) Exec(secrets map[string]string, command string, args []string, opts ExecOptions) (int, error)
 ```
 
-1. Build env: `os.Environ()` + secrets map - `PSST_PASSWORD`
-2. Expand `$VAR` and `${VAR}` in args using secrets map
+1. Построить env: `os.Environ()` + карта секретов - `PSST_PASSWORD`
+2. Раскрыть `$VAR` и `${VAR}` в аргументах используя карту секретов
 3. `exec.Command(command, expandedArgs...)`
-4. Set `cmd.Env`
-5. If `opts.MaskOutput`: pipe stdout/stderr through masking, else inherit
-6. Wait for completion, return exit code
+4. Установить `cmd.Env`
+5. Если `opts.MaskOutput`: перенаправить stdout/stderr через маскирование, иначе inherit
+6. Дождаться завершения, вернуть exit code
 
-### Run (all secrets)
+### Run (все секреты)
 
-Same as Exec but secrets come from `vault.GetAllSecrets()`.
+Аналогично Exec, но секреты из `vault.GetAllSecrets()`.
 
-### Output Masking
+### Маскирование вывода
 
 ```go
 func MaskSecrets(text string, secrets []string) string {
@@ -365,150 +365,148 @@ func MaskSecrets(text string, secrets []string) string {
 }
 ```
 
-Applied to stdout/stderr streams in real-time.
+Применяется к потокам stdout/stderr в реальном времени.
 
-### Env var expansion
+### Раскрытие переменных окружения
 
 ```go
 func ExpandEnvVars(arg string, env map[string]string) string
 ```
 
-Replaces `$NAME` and `${NAME}` patterns with values from env map.
+Заменяет паттерны `$NAME` и `${NAME}` на значения из карты env.
 
-## CLI Commands
+## CLI-команды
 
-**Package:** `internal/cli/`
-**Framework:** `github.com/spf13/cobra`
+**Пакет:** `internal/cli/`
+**Фреймворк:** `github.com/spf13/cobra`
 
-### Root command
+### Корневая команда
 
 Persistent flags:
-- `--json` / `-j`: JSON output
-- `--quiet` / `-q`: Quiet mode
-- `--global` / `-g`: Global vault
-- `--env <name>`: Environment name
-- `--tag <name>` (repeatable): Tag filter
+- `--json` / `-j`: JSON-вывод
+- `--quiet` / `-q`: Тихий режим
+- `--global` / `-g`: Глобальный vault
+- `--env <name>`: Имя окружения
+- `--tag <name>` (повторяемый): Фильтр по тегу
 
-Env var fallbacks: `PSST_GLOBAL`, `PSST_ENV`
+Резервные env vars: `PSST_GLOBAL`, `PSST_ENV`
 
-### Command list
+### Список команд
 
-| Command | Description |
-|---------|-------------|
-| `psst init [--global] [--env <name>]` | Create vault, generate key, store in keychain |
-| `psst set <name> [--stdin] [--tag <t>]...` | Set secret (interactive prompt or stdin) |
-| `psst get <name>` | Print decrypted value |
-| `psst list [envs] [--tag <t>]...` | List secret names (or environments) |
-| `psst rm <name>` | Delete secret + history |
-| `psst run <command> [args...]` | Run with all secrets injected |
-| `psst <SECRET>... -- <command> [args...]` | Run with specific secrets |
-| `psst import [--stdin \| --from-env \| <file>]` | Import from .env/stdin/env |
-| `psst export [--env-file <path>]` | Export in .env format |
-| `psst scan [--staged] [--path <dir>]` | Scan files for leaked secrets |
-| `psst history <name>` | Show version history |
-| `psst rollback <name> --to <version>` | Restore previous version |
-| `psst tag <name> <tag>` | Add tag to secret |
-| `psst untag <name> <tag>` | Remove tag from secret |
+| Команда | Описание |
+|---------|----------|
+| `psst init [--global] [--env <name>]` | Создать vault, сгенерировать ключ, сохранить в keychain |
+| `psst set <name> [--stdin] [--tag <t>]...` | Установить секрет (интерактивный ввод или stdin) |
+| `psst get <name>` | Вывести расшифрованное значение |
+| `psst list [envs] [--tag <t>]...` | Список имён секретов (или окружений) |
+| `psst rm <name>` | Удалить секрет + историю |
+| `psst run <command> [args...]` | Запустить со всеми секретами |
+| `psst <SECRET>... -- <command> [args...]` | Запустить с конкретными секретами |
+| `psst import [--stdin \| --from-env \| <file>]` | Импорт из .env/stdin/env |
+| `psst export [--env-file <path>]` | Экспорт в .env формате |
+| `psst scan [--staged] [--path <dir>]` | Сканер утечек секретов в файлах |
+| `psst history <name>` | Показать историю версий |
+| `psst rollback <name> --to <version>` | Восстановить предыдущую версию |
+| `psst tag <name> <tag>` | Добавить тег секрету |
+| `psst untag <name> <tag>` | Удалить тег у секрета |
 
-### Exec pattern handling
+### Обработка exec-паттерна
 
-The `psst SECRET1 SECRET2 -- command args` pattern requires custom parsing before cobra:
-1. Find `--` index in args
-2. Everything before `--` = secret names (or empty if tags present)
-3. Everything after `--` = command + args
-4. Delegate to `exec.go` command
+Паттерн `psst SECRET1 SECRET2 -- command args` требует парсинга до cobra:
+1. Найти индекс `--` в аргументах
+2. Всё до `--` = имена секретов (или пусто, если есть теги)
+3. Всё после `--` = команда + аргументы
+4. Передать в `exec.go`
 
-This is handled in `root.go`'s `PreRunE` or as a special case in arg parsing.
+## Форматирование вывода
 
-## Output Formatting
+**Пакет:** `internal/output/`
 
-**Package:** `internal/output/`
+Три режима, управляемые флагами:
+- **Human** (по умолчанию): цветной вывод, Unicode-символы (✓, ✗, ●)
+- **JSON** (`--json`): `encoding/json` маршализация
+- **Quiet** (`--quiet`): минимальный вывод, только exit codes
 
-Three modes controlled by flags:
-- **Human** (default): colored output, Unicode symbols (✓, ✗, ●)
-- **JSON** (`--json`): `encoding/json` marshaling
-- **Quiet** (`--quiet`): minimal output, exit codes only
+Цвета: ANSI escape codes напрямую (без библиотеки, только Linux).
 
-Colors: use ANSI escape codes directly (no library needed for Linux-only).
-
-## Exit Codes
+## Коды возврата
 
 ```go
 const (
-    ExitSuccess    = 0
-    ExitError      = 1
-    ExitUserError  = 2
-    ExitNoVault    = 3
-    ExitAuthFailed = 5
+    ExitSuccess    = 0  // Успех
+    ExitError      = 1  // Ошибка
+    ExitUserError  = 2  // Ошибка пользователя
+    ExitNoVault    = 3  // Vault не найден
+    ExitAuthFailed = 5  // Ошибка аутентификации
 )
 ```
 
-## Secret Scanner
+## Сканер секретов
 
-**Package:** `internal/runner/` (or `internal/cli/scan.go`)
+**Пакет:** `internal/runner/` (или `internal/cli/scan.go`)
 
-### Algorithm:
-1. Get all decrypted secrets from vault
-2. Collect file list: git tracked files, staged files, or specific path
-3. For each file:
-   - Skip binary files (null byte check)
-   - Skip files > 1MB
-   - Skip non-text extensions
-   - For each secret (len >= 4): `strings.Contains(content, secretValue)`
-4. Report: filename:line -> which secret was found
+### Алгоритм:
+1. Получить все расшифрованные секреты из vault
+2. Собрать список файлов: git tracked, staged или конкретный путь
+3. Для каждого файла:
+   - Пропускать бинарные (проверка на null byte)
+   - Пропускать файлы > 1MB
+   - Пропускать нетекстовые расширения
+   - Для каждого секрета (len >= 4): `strings.Contains(content, secretValue)`
+4. Отчёт: filename:line -> какой секрет найден
 
-### Scan result type:
+### Тип результата сканирования:
 ```go
 type ScanResult struct {
     File    string
     Line    int
-    Secret  string  // secret name, not value
+    Secret  string  // имя секрета, не значение
 }
 ```
 
-## Import/Export
+## Импорт/Экспорт
 
-### Import
-- Parse `.env` files: `KEY=VALUE` with quote handling (single, double, no quotes)
-- `--stdin`: read from stdin
-- `--from-env`: read from `os.Environ()`
-- Validate names: `^[A-Z][A-Z0-9_]*$`
+### Импорт
+- Парсинг `.env` файлов: `KEY=VALUE` с обработкой кавычек (одинарные, двойные, без кавычек)
+- `--stdin`: чтение из stdin
+- `--from-env`: чтение из `os.Environ()`
+- Валидация имён: `^[A-Z][A-Z0-9_]*$`
 
-### Export
-- Write `KEY=VALUE` format to stdout or file
-- Quote values containing spaces/special chars
+### Экспорт
+- Запись в формате `KEY=VALUE` в stdout или файл
+- Экранирование значений с пробелами/спецсимволами
 
-## Environments
+## Окружения (Environments)
 
-- Default vault: `.psst/vault.db` (local) or `~/.psst/vault.db` (global)
-- Named env: `.psst/envs/<name>/vault.db` or `~/.psst/envs/<name>/vault.db`
-- `psst list envs`: scan both local and global for env directories
-- `PSST_ENV` env var as fallback for `--env`
+- Vault по умолчанию: `.psst/vault.db` (local) или `~/.psst/vault.db` (global)
+- Именованное окружение: `.psst/envs/<name>/vault.db` или `~/.psst/envs/<name>/vault.db`
+- `psst list envs`: сканирование local и global на наличие env-директорий
+- `PSST_ENV` env var как fallback для `--env`
 
-## History & Rollback
+## История и откат
 
-- On every `SetSecret`: archive current value to `secrets_history` with incremented version
-- Auto-prune: keep last 10 versions
-- `Rollback(name, version)`: archive current (as new version), then restore specified version
-- Rollback is reversible (current is never lost)
+- При каждом `SetSecret`: архивировать текущее значение в `secrets_history` с инкрементальным version
+- Автообрезка: хранить последние 10 версий
+- `Rollback(name, version)`: архивировать текущее (как новую версию), затем восстановить указанную версию
+- Откат обратим (текущее значение никогда не теряется)
 
-## Tags
+## Теги
 
-- Stored as JSON array in `tags` TEXT column
-- `AddTag` / `RemoveTag`: read JSON, modify, write back
-- Filter by tags with OR logic: secret matches if it has ANY of the requested tags
+- Хранятся как JSON-массив в колонке `tags` TEXT
+- `AddTag` / `RemoveTag`: прочитать JSON, модифицировать, записать обратно
+- Фильтрация по тегам с логикой OR: секрет подходит, если есть ХОТЯ БЫ ОДИН из запрошенных тегов
 
-## Dependencies
+## Зависимости
 
 ```
-github.com/spf13/cobra        # CLI framework
-github.com/mattn/go-sqlite3   # SQLite driver (CGo)
-github.com/zalando/go-keyring # OS keychain integration
+github.com/spf13/cobra        # CLI-фреймворк
+github.com/mattn/go-sqlite3   # SQLite-драйвер (CGo)
+github.com/zalando/go-keyring # Интеграция с OS keychain
 ```
 
-Stdlib packages used:
-- `crypto/aes`, `crypto/cipher`, `crypto/rand`, `crypto/sha256` — encryption
-- `encoding/base64`, `encoding/json` — encoding
-- `os/exec` — subprocess execution
-- `database/sql` — SQLite interface
-- `fmt`, `text/template` — output formatting
+Используемые пакеты stdlib:
+- `crypto/aes`, `crypto/cipher`, `crypto/rand`, `crypto/sha256` — шифрование
+- `encoding/base64`, `encoding/json` — кодирование
+- `os/exec` — выполнение подпроцессов
+- `database/sql` — интерфейс SQLite
+- `fmt`, `text/template` — форматирование вывода

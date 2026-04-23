@@ -1,16 +1,16 @@
-# psst Go Rewrite — Implementation Plan
+# psst — Перепись на Go — План реализации
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Для агентных работников:** ОБЯЗАТЕЛЬНЫЙ SUB-SKILL: Используйте superpowers:subagent-driven-development (рекомендуется) или superpowers:executing-plans для выполнения этого плана задача за задачей. Шаги используют синтаксис чекбоксов (`- [ ]`).
 
-**Goal:** Full 1:1 rewrite of psst (TypeScript/Bun secrets manager) in Go as a static CLI binary for Linux.
+**Цель:** Полный 1:1 перенос psst (менеджер секретов на TypeScript/Bun) на Go как статический CLI-бинарник для Linux.
 
-**Architecture:** Idiomatic Go with interfaces (Encryptor, KeyProvider, SecretStore, Formatter) and dependency injection. Cobra for CLI. SQLite for vault storage. AES-256-GCM encryption. go-keyring for OS keychain.
+**Архитектура:** Идиоматичный Go с интерфейсами (Encryptor, KeyProvider, SecretStore, Formatter) и dependency injection. Cobra для CLI. SQLite для хранения vault. Шифрование AES-256-GCM. go-keyring для OS keychain.
 
-**Tech Stack:** Go 1.22+, spf13/cobra, mattn/go-sqlite3, zalando/go-keyring, stdlib crypto
+**Технологии:** Go 1.22+, spf13/cobra, mattn/go-sqlite3, zalando/go-keyring, stdlib crypto
 
 ---
 
-## File Structure
+## Структура файлов
 
 ```
 psst/
@@ -64,7 +64,7 @@ psst/
 
 ---
 
-### Task 1: Project Scaffolding
+### Задача 1: Каркас проекта
 
 **Files:**
 - Create: `go.mod`
@@ -189,7 +189,7 @@ git add -A && git commit -m "feat: project scaffolding with cobra skeleton"
 
 ---
 
-### Task 2: Crypto Package
+### Задача 2: Пакет Crypto
 
 **Files:**
 - Create: `internal/crypto/crypto.go`
@@ -424,7 +424,7 @@ git add -A && git commit -m "feat: crypto package with AES-256-GCM encryption"
 
 ---
 
-### Task 3: Store Package (SQLite)
+### Задача 3: Пакет Store (SQLite)
 
 **Files:**
 - Create: `internal/store/store.go`
@@ -869,7 +869,7 @@ git add -A && git commit -m "feat: store package with SQLite persistence"
 
 ---
 
-### Task 4: Keyring Package
+### Задача 4: Пакет Keyring
 
 **Files:**
 - Create: `internal/keyring/keyring.go`
@@ -1076,7 +1076,7 @@ git add -A && git commit -m "feat: keyring package with OS keyring and env var f
 
 ---
 
-### Task 5: Vault Package (Facade)
+### Задача 5: Пакет Vault (фасад)
 
 **Files:**
 - Create: `internal/vault/types.go`
@@ -1739,7 +1739,7 @@ git add -A && git commit -m "feat: vault facade with CRUD, history, tags"
 
 ---
 
-### Task 6: Output Package
+### Задача 6: Пакет Output
 
 **Files:**
 - Create: `internal/output/output.go`
@@ -2019,7 +2019,7 @@ git add -A && git commit -m "feat: output formatter with human/json/quiet modes"
 
 ---
 
-### Task 7: Runner Package
+### Задача 7: Пакет Runner
 
 **Files:**
 - Create: `internal/runner/runner.go`
@@ -2306,7 +2306,7 @@ git add -A && git commit -m "feat: runner package with subprocess exec and outpu
 
 ---
 
-### Task 8: CLI Root + Init Command
+### Задача 8: CLI — корень + команда Init
 
 **Files:**
 - Modify: `internal/cli/root.go`
@@ -2484,7 +2484,7 @@ git add -A && git commit -m "feat: init command with vault creation"
 
 ---
 
-### Task 9: CLI Set/Get/List/Rm Commands
+### Задача 9: CLI — команды Set/Get/List/Rm
 
 **Files:**
 - Create: `internal/cli/set.go`
@@ -2725,7 +2725,7 @@ git add -A && git commit -m "feat: set/get/list/rm commands"
 
 ---
 
-### Task 10: CLI Import/Export Commands
+### Задача 10: CLI — команды Import/Export
 
 **Files:**
 - Create: `internal/cli/import.go`
@@ -2948,7 +2948,7 @@ git add -A && git commit -m "feat: import/export commands"
 
 ---
 
-### Task 11: CLI Exec/Run Commands
+### Задача 11: CLI — команды Exec/Run
 
 **Files:**
 - Create: `internal/cli/run.go`
@@ -3277,7 +3277,7 @@ git add -A && git commit -m "feat: exec/run commands with secret injection and m
 
 ---
 
-### Task 12: CLI Scan Command
+### Задача 12: CLI — команда Scan
 
 **Files:**
 - Create: `internal/cli/scan.go`
@@ -3446,7 +3446,7 @@ git add -A && git commit -m "feat: scan command for detecting leaked secrets"
 
 ---
 
-### Task 13: CLI History/Rollback Commands
+### Задача 13: CLI — команды History/Rollback
 
 **Files:**
 - Create: `internal/cli/history.go`
@@ -3564,7 +3564,7 @@ git add -A && git commit -m "feat: history and rollback commands"
 
 ---
 
-### Task 14: CLI Tag/Untag/ListEnvs Commands
+### Задача 14: CLI — команды Tag/Untag/ListEnvs
 
 **Files:**
 - Create: `internal/cli/tag.go`
@@ -3727,7 +3727,7 @@ git add -A && git commit -m "feat: tag/untag and list-envs commands"
 
 ---
 
-### Task 15: Integration Testing + Final Build
+### Задача 15: Интеграционное тестирование + финальная сборка
 
 **Files:**
 - Create: `Makefile`
@@ -3794,9 +3794,9 @@ git add -A && git commit -m "feat: Makefile and final integration"
 
 ---
 
-## Self-Review
+## Самопроверка
 
-**1. Spec coverage:**
+**1. Покрытие спецификации:**
 - AES-256-GCM crypto: Task 2 ✓
 - SQLite schema + migrations: Task 3 ✓
 - OS keyring + env var fallback: Task 4 ✓
@@ -3812,6 +3812,6 @@ git add -A && git commit -m "feat: Makefile and final integration"
 - CLI tag/untag/list-envs: Task 14 ✓
 - Build + integration: Task 15 ✓
 
-**2. Placeholder scan:** No TBD/TODO found. All code is complete.
+**2. Проверка плейсхолдеров:** Нет TBD/TODO. Весь код полный.
 
-**3. Type consistency:** All types and method signatures are consistent across tasks. The `vault.Vault` struct methods match what CLI commands call. The `output.Formatter` methods match what commands use. The `runner.ExecOptions` type is used consistently.
+**3. Консистентность типов:** Все типы и сигнатуры методов согласованы между задачами. Методы `vault.Vault` совпадают с вызовами из CLI-команд. Методы `output.Formatter` совпадают с использованием в командах. Тип `runner.ExecOptions` используется согласованно.
