@@ -1,6 +1,6 @@
 package cli
 
-import "github.com/user/psst/internal/runner"
+import "github.com/aatumaykin/psst/internal/runner"
 
 func handleExecPatternDirect(secretNames []string, commandArgs []string, jsonOut, quiet, global bool, env string, tags []string, noMask bool) {
 	v, err := getUnlockedVault(jsonOut, quiet, global, env)

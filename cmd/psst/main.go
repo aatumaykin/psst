@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/user/psst/internal/cli"
+	"github.com/aatumaykin/psst/internal/cli"
 )
 
 func main() {

@@ -1,72 +1,77 @@
 # psst
 
-Менеджер секретов для AI-агентов. Агенты используют секреты, не видя их значений.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Go 1.22+](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go)](https://go.dev/)
 
-Переписано на Go из [Michaelliv/psst](https://github.com/Michaelliv/psst) (оригинал на TypeScript/Bun).
+**[Документация на русском](docs/ru/README.md)**
 
-## Зачем
+Secrets manager for AI agents. Agents use secrets without seeing their values.
 
-Когда вы вставляете API-ключи в контекст AI-агента, они попадают в:
+Rewritten in Go from [Michaelliv/psst](https://github.com/Michaelliv/psst) (original in TypeScript/Bun).
 
-- Контекстное окно модели
-- Историю терминала
-- Лог-файлы
-- Скриншоты
+## Why
 
-psst внедряет секреты в окружение подпроцесса при запуске. Агент управляет, psst обрабатывает секреты.
+When you paste API keys into an AI agent's context, they end up in:
+
+- The model's context window
+- Terminal history
+- Log files
+- Screenshots
+
+psst injects secrets into the subprocess environment at runtime. The agent orchestrates, psst handles the secrets.
 
 ```
-# Агент пишет:
+# Agent writes:
 psst STRIPE_KEY -- curl -H "Authorization: Bearer $STRIPE_KEY" https://api.stripe.com
 
-# Что видит агент:
-# ✓ Команда выполнена успешно
+# What the agent sees:
+# ✓ Command executed successfully
 
-# Что выполнилось на самом деле:
+# What actually ran:
 # curl -H "Authorization: Bearer sk_live_abc123..." https://api.stripe.com
 ```
 
-## Установка
+## Installation
 
-### Из исходников
+### From source
 
 ```bash
-git clone <url-репозитория> && cd psst
+git clone https://github.com/aatumaykin/psst.git && cd psst
 make build
 sudo install psst /usr/local/bin/
 ```
 
-### Требования
+### Requirements
 
-- Go 1.22+ (для сборки)
-- gcc (для CGo — mattn/go-sqlite3)
-- На Linux: заголовки `libsecret` (для поддержки OS keyring)
+- Go 1.22+ (for building)
+- gcc (for CGo — mattn/go-sqlite3)
+- On Linux: `libsecret` headers (for OS keyring support)
 
-## Быстрый старт
+## Quick Start
 
 ```bash
-# Создать vault (ключ шифрования сохраняется в OS keychain)
+# Create vault (encryption key stored in OS keychain)
 psst init
 
-# На сервере без OS keychain — использовать PSST_PASSWORD:
+# On a server without OS keychain — use PSST_PASSWORD:
 export PSST_PASSWORD="your-password"
-psst init                    # создаст vault с ключом из пароля
+psst init                    # creates vault with key derived from password
 
-# Добавить секреты
+# Add secrets
 echo "sk-live-abc123" | psst set STRIPE_KEY --stdin
 echo "postgres://db:5432/app" | psst set DATABASE_URL --stdin
-psst set API_KEY                    # интерактивный ввод
+psst set API_KEY                    # interactive prompt
 
-# Проверить
+# Verify
 psst list
 
-# Использовать с агентом
+# Use with an agent
 psst STRIPE_KEY -- curl -H "Authorization: Bearer $STRIPE_KEY" https://api.stripe.com
-psst run -- ./deploy.sh             # внедрить все секреты
+psst run -- ./deploy.sh             # inject all secrets
 ```
 
-> **Важно:** На Linux без `libsecret` (серверы, CI) ключ нельзя сохранить в OS keychain.
-> Используйте `PSST_PASSWORD` — его нужно задавать перед каждым запуском:
+> **Note:** On Linux without `libsecret` (servers, CI), the key cannot be stored in OS keychain.
+> Use `PSST_PASSWORD` — it must be set before each invocation:
 > ```bash
 > export PSST_PASSWORD="your-password"
 > psst init
@@ -74,125 +79,125 @@ psst run -- ./deploy.sh             # внедрить все секреты
 > psst list
 > ```
 
-## Команды
+## Commands
 
-### Управление секретами
+### Managing Secrets
 
 ```bash
-psst init [--global] [--env <name>]   # Создать vault
-psst set <NAME> [--stdin] [--tag T]   # Добавить/обновить секрет
-psst get <NAME>                       # Показать значение (для отладки)
-psst list [--tag T]                   # Список имён секретов
-psst rm <NAME>                        # Удалить секрет + историю
+psst init [--global] [--env <name>]   # Create vault
+psst set <NAME> [--stdin] [--tag T]   # Add/update secret
+psst get <NAME>                       # Show value (debugging only)
+psst list [--tag T]                   # List secret names
+psst rm <NAME>                        # Delete secret + history
 ```
 
-### Использование секретов
+### Using Secrets
 
 ```bash
-psst run <команда> [аргументы...]        # Запустить со всеми секретами
-psst <СЕКРЕТ>... -- <команда> [аргументы] # Запустить с конкретными секретами
+psst run <command> [args...]              # Run with all secrets
+psst <SECRET>... -- <command> [args...]    # Run with specific secrets
 ```
 
-### Импорт / Экспорт
+### Import / Export
 
 ```bash
-psst import .env                      # Импорт из .env файла
-psst import --stdin                   # Импорт из stdin
-psst import --from-env                # Импорт из переменных окружения
-psst export                           # Экспорт в stdout (.env формат)
-psst export --env-file .env           # Экспорт в файл
+psst import .env                      # Import from .env file
+psst import --stdin                   # Import from stdin
+psst import --from-env                # Import from environment variables
+psst export                           # Export to stdout (.env format)
+psst export --env-file .env           # Export to file
 ```
 
-### История и откат
+### History & Rollback
 
 ```bash
-psst history <NAME>                   # Посмотреть историю версий (последние 10)
-psst rollback <NAME> --to <версия>    # Восстановить предыдущую версию
+psst history <NAME>                   # View version history (last 10)
+psst rollback <NAME> --to <version>   # Restore previous version
 ```
 
-### Теги
+### Tags
 
 ```bash
-psst tag <NAME> <TAG>                 # Добавить тег
-psst untag <NAME> <TAG>               # Удалить тег
-psst list --tag prod                  # Фильтр по тегу (логика OR)
-psst --tag aws -- aws s3 ls           # Запустить только с тегированными секретами
+psst tag <NAME> <TAG>                 # Add tag
+psst untag <NAME> <TAG>               # Remove tag
+psst list --tag prod                  # Filter by tag (OR logic)
+psst --tag aws -- aws s3 ls           # Run with tagged secrets only
 ```
 
-### Сканер утечек
+### Secret Scanner
 
 ```bash
-psst scan                             # Проверить git-отслеживаемые файлы
-psst scan --staged                    # Только staged файлы
-psst scan --path ./src                # Конкретная директория
+psst scan                             # Check git-tracked files
+psst scan --staged                    # Only staged files
+psst scan --path ./src                # Specific directory
 ```
 
-Проверяет файлы на наличие реальных значений секретов из vault — нет ложных срабатываний на regex.
+Scans files for actual vault secret values — no regex false positives.
 
-### Окружения (Environments)
+### Environments
 
 ```bash
-psst init --env prod                  # Создать vault для "prod"
+psst init --env prod                  # Create vault for "prod"
 psst --env prod set API_KEY --stdin
 psst --env prod list
 psst --env prod API_KEY -- curl ...
 
-psst list-envs                        # Список всех окружений
+psst list-envs                        # List all environments
 ```
 
-Хранятся в `.psst/envs/<name>/vault.db` (или `~/.psst/envs/<name>/` с `--global`).
+Stored in `.psst/envs/<name>/vault.db` (or `~/.psst/envs/<name>/` with `--global`).
 
-### Глобальные флаги
+### Global Flags
 
-Все команды поддерживают:
+All commands support:
 
 ```
---json              Структурированный JSON-вывод
--q, --quiet         Минимальный вывод
--g, --global        Использовать глобальный vault (~/.psst/)
---env <name>        Использовать конкретное окружение
---tag <name>        Фильтр по тегу (повторяемый, логика OR)
+--json              Structured JSON output
+-q, --quiet         Minimal output
+-g, --global        Use global vault (~/.psst/)
+--env <name>        Use specific environment
+--tag <name>        Filter by tag (repeatable, OR logic)
 ```
 
-Резервные переменные окружения: `PSST_GLOBAL=1`, `PSST_ENV=<name>`.
+Fallback environment variables: `PSST_GLOBAL=1`, `PSST_ENV=<name>`.
 
-## Безопасность
+## Security
 
-- Секреты шифруются при хранении **AES-256-GCM**
-- Уникальный случайный IV при каждом шифровании
-- Ключ шифрования хранится в OS keychain (libsecret на Linux)
-- Секреты автоматически маскируются в выводе команд (`[REDACTED]`)
-- Секреты никогда не попадают в контекст агента
-- `PSST_PASSWORD` удаляется из окружения дочернего процесса
+- Secrets encrypted at rest with **AES-256-GCM**
+- Unique random IV per encryption
+- Encryption key stored in OS keychain (libsecret on Linux)
+- Secrets automatically redacted in command output (`[REDACTED]`)
+- Secrets never exposed to agent context
+- `PSST_PASSWORD` removed from child process environment
 
-## CI / Работа без OS keychain
+## CI / Headless Environments
 
-Когда OS keychain недоступен (серверы, Docker, CI), используйте `PSST_PASSWORD`:
+When OS keychain is unavailable (servers, Docker, CI), use `PSST_PASSWORD`:
 
 ```bash
-export PSST_PASSWORD="your-password"   # задать один раз в сессии
-psst init                              # создать vault
+export PSST_PASSWORD="your-password"   # set once per session
+psst init                              # create vault
 psst set API_KEY --stdin <<< "value"
-psst run -- ./deploy.sh                # секреты внедряются в env, вывод маскируется
+psst run -- ./deploy.sh                # secrets injected into env, output masked
 ```
 
-Ключ выводится из пароля через SHA-256. `PSST_PASSWORD` нужно задавать перед каждым использованием psst.
+Key is derived from password via SHA-256. `PSST_PASSWORD` must be set before each psst invocation.
 
-## Архитектура
+## Architecture
 
 ```
-cmd/psst/main.go          Точка входа (DI-связывание)
+cmd/psst/main.go          Entry point (DI wiring)
 internal/
-├── crypto/               Шифрование AES-256-GCM (интерфейс Encryptor)
-├── store/                Хранение SQLite (интерфейс SecretStore)
-├── keyring/              OS keychain + fallback на env var (интерфейс KeyProvider)
-├── vault/                Фасад бизнес-логики
-├── output/               Форматирование human/JSON/quiet
-├── runner/               Выполнение подпроцессов + маскирование вывода
-└── cli/                  Cobra-команды (14 команд)
+├── crypto/               AES-256-GCM encryption (Encryptor interface)
+├── store/                SQLite storage (SecretStore interface)
+├── keyring/              OS keychain + env var fallback (KeyProvider interface)
+├── vault/                Business logic facade
+├── output/               Human/JSON/quiet formatting
+├── runner/               Subprocess execution + output masking
+└── cli/                  Cobra commands (14 commands)
 ```
 
-### Ключевые интерфейсы
+### Key Interfaces
 
 ```go
 type Encryptor interface {
@@ -213,31 +218,31 @@ type SecretStore interface {
     InitSchema() error
     GetSecret(name string) (*StoredSecret, error)
     SetSecret(name string, encValue, iv []byte, tags []string) error
-    // ... (полный интерфейс в internal/store/store.go)
+    // ... (full interface in internal/store/store.go)
 }
 ```
 
-## Разработка
+## Development
 
 ```bash
-make build              # Собрать бинарник
-make test               # Запустить все тесты
-make clean              # Удалить бинарник
+make build              # Build binary
+make test               # Run all tests
+make clean              # Remove binary
 
-# Кросс-компиляция
+# Cross-compilation
 make build-linux-amd64
 make build-linux-arm64
 ```
 
-### Зависимости
+### Dependencies
 
-| Пакет | Назначение |
-|-------|------------|
-| `spf13/cobra` | CLI-фреймворк |
-| `mattn/go-sqlite3` | SQLite-драйвер (CGo) |
-| `zalando/go-keyring` | Интеграция с OS keychain |
+| Package | Purpose |
+|---------|---------|
+| `spf13/cobra` | CLI framework |
+| `mattn/go-sqlite3` | SQLite driver (CGo) |
+| `zalando/go-keyring` | OS keychain integration |
 
-### Схема SQLite
+### SQLite Schema
 
 ```sql
 CREATE TABLE secrets (
@@ -261,18 +266,18 @@ CREATE TABLE secrets_history (
 );
 ```
 
-## Отличия от оригинала (TypeScript/Bun)
+## Differences from Original (TypeScript/Bun)
 
-| Свойство | Оригинал (TS) | Здесь (Go) |
-|----------|---------------|------------|
-| Runtime | Bun | Статический бинарник |
+| Property | Original (TS) | This (Go) |
+|----------|---------------|-----------|
+| Runtime | Bun | Static binary |
 | SQLite | bun:sqlite / better-sqlite3 | mattn/go-sqlite3 |
-| Криптография | Web Crypto API | stdlib crypto/aes + crypto/cipher |
-| Keychain | Вызов CLI-утилит | zalando/go-keyring |
-| CLI | Ручной парсинг аргументов | spf13/cobra |
-| Платформы | macOS, Linux, Windows | Linux (amd64, arm64) |
-| SDK | Да (подключаемая библиотека) | Только CLI |
+| Crypto | Web Crypto API | stdlib crypto/aes + crypto/cipher |
+| Keychain | CLI utility calls | zalando/go-keyring |
+| CLI | Manual argument parsing | spf13/cobra |
+| Platforms | macOS, Linux, Windows | Linux (amd64, arm64) |
+| SDK | Yes (importable library) | CLI only |
 
-## Лицензия
+## License
 
-MIT
+[MIT](LICENSE)

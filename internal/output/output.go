@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/user/psst/internal/vault"
+	"github.com/aatumaykin/psst/internal/vault"
 )
 
 type ScanMatch struct {

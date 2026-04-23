@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/user/psst/internal/runner"
+	"github.com/aatumaykin/psst/internal/runner"
 )
 
 var runCmd = &cobra.Command{

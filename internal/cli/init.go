@@ -5,9 +5,9 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/user/psst/internal/crypto"
-	"github.com/user/psst/internal/keyring"
-	"github.com/user/psst/internal/vault"
+	"github.com/aatumaykin/psst/internal/crypto"
+	"github.com/aatumaykin/psst/internal/keyring"
+	"github.com/aatumaykin/psst/internal/vault"
 )
 
 var initCmd = &cobra.Command{

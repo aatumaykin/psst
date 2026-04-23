@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/user/psst/internal/crypto"
+	"github.com/aatumaykin/psst/internal/crypto"
 )
 
 func TestEnvVarProviderGetKey(t *testing.T) {

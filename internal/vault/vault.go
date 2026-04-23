@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/user/psst/internal/crypto"
-	"github.com/user/psst/internal/keyring"
-	"github.com/user/psst/internal/store"
+	"github.com/aatumaykin/psst/internal/crypto"
+	"github.com/aatumaykin/psst/internal/keyring"
+	"github.com/aatumaykin/psst/internal/store"
 )
 
 const (

@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/user/psst/internal/output"
+	"github.com/aatumaykin/psst/internal/output"
 )
 
 var scanCmd = &cobra.Command{

@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/user/psst/internal/crypto"
-	"github.com/user/psst/internal/store"
+	"github.com/aatumaykin/psst/internal/crypto"
+	"github.com/aatumaykin/psst/internal/store"
 )
 
 type testKeyProvider struct {

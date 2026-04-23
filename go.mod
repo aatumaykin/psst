@@ -1,4 +1,4 @@
-module github.com/user/psst
+module github.com/aatumaykin/psst
 
 go 1.25.0
 

@@ -6,12 +6,12 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/user/psst/internal/crypto"
-	"github.com/user/psst/internal/keyring"
-	"github.com/user/psst/internal/output"
-	"github.com/user/psst/internal/runner"
-	"github.com/user/psst/internal/store"
-	"github.com/user/psst/internal/vault"
+	"github.com/aatumaykin/psst/internal/crypto"
+	"github.com/aatumaykin/psst/internal/keyring"
+	"github.com/aatumaykin/psst/internal/output"
+	"github.com/aatumaykin/psst/internal/runner"
+	"github.com/aatumaykin/psst/internal/store"
+	"github.com/aatumaykin/psst/internal/vault"
 )
 
 var rootCmd = &cobra.Command{

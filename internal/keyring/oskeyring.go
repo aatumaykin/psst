@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	"github.com/user/psst/internal/crypto"
+	"github.com/aatumaykin/psst/internal/crypto"
 	keyring "github.com/zalando/go-keyring"
 )
 

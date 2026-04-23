@@ -3,7 +3,7 @@ package keyring
 import (
 	"os"
 
-	"github.com/user/psst/internal/crypto"
+	"github.com/aatumaykin/psst/internal/crypto"
 )
 
 type KeyProvider interface {
