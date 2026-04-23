@@ -1,0 +1,7 @@
+/psst
+/psst-*
+*.db
+*.test
+dist/
+.env
+.env.*
