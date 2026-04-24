@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -19,6 +20,7 @@ func NewSQLite(dbPath string) (*SQLiteStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
+	os.Chmod(dbPath, 0600)
 	return &SQLiteStore{db: db}, nil
 }
 

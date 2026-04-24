@@ -127,6 +127,27 @@ func TestPruneHistory(t *testing.T) {
 	}
 }
 
+func TestNewSQLite_FilePermissions(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	s, err := NewSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLite failed: %v", err)
+	}
+	s.Close()
+
+	info, err := os.Stat(dbPath)
+	if err != nil {
+		t.Fatalf("Stat failed: %v", err)
+	}
+
+	perm := info.Mode().Perm()
+	if perm&0077 != 0 {
+		t.Fatalf("file permissions = %o, want no group/other access", perm)
+	}
+}
+
 func TestVaultFileCreated(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "vault.db")
