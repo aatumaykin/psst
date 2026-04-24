@@ -1,6 +1,11 @@
 package cli
 
-import "github.com/aatumaykin/psst/internal/runner"
+import (
+	"fmt"
+	"os"
+
+	"github.com/aatumaykin/psst/internal/runner"
+)
 
 func handleExecPatternDirect(secretNames []string, commandArgs []string, jsonOut, quiet, global bool, env string, tags []string, noMask bool) {
 	v, err := getUnlockedVault(jsonOut, quiet, global, env)
@@ -33,10 +38,7 @@ func handleExecPatternDirect(secretNames []string, commandArgs []string, jsonOut
 	maskOutput := !noMask
 	code, err := r.Exec(secrets, commandArgs[0], commandArgs[1:], runner.ExecOptions{MaskOutput: maskOutput})
 	if err != nil {
-		exitWithError(err.Error())
+		fmt.Fprintf(os.Stderr, "Command failed: %v\n", err)
 	}
-
-	if code != 0 {
-		exitWithError("command exited with non-zero code")
-	}
+	os.Exit(code)
 }
