@@ -109,6 +109,11 @@ func getUnlockedVault(jsonOut, quiet, global bool, env string) (*vault.Vault, er
 		return nil, fmt.Errorf("open vault: %w", err)
 	}
 
+	if schemaErr := s.InitSchema(); schemaErr != nil {
+		_ = s.Close()
+		return nil, fmt.Errorf("init schema: %w", schemaErr)
+	}
+
 	v := vault.New(enc, kp, s)
 	if unlockErr := v.Unlock(); unlockErr != nil {
 		_ = s.Close()
