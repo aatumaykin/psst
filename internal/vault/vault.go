@@ -164,6 +164,12 @@ func (v *Vault) GetSecret(name string) (*Secret, error) {
 		return nil, fmt.Errorf("decrypt: %w", err)
 	}
 
+	defer func() {
+		for i := range plaintext {
+			plaintext[i] = 0
+		}
+	}()
+
 	return &Secret{
 		Name:      stored.Name,
 		Value:     string(plaintext),
@@ -309,6 +315,9 @@ func (v *Vault) GetAllSecrets() (map[string]string, error) {
 			return nil, fmt.Errorf("decrypt %s: %w", s.Name, err)
 		}
 		result[s.Name] = string(plaintext)
+		for i := range plaintext {
+			plaintext[i] = 0
+		}
 	}
 	return result, nil
 }
@@ -326,6 +335,10 @@ func (v *Vault) GetSecretNamesByTags(tags []string) ([]string, error) {
 }
 
 func (v *Vault) Close() error {
+	for i := range v.key {
+		v.key[i] = 0
+	}
+	v.key = nil
 	return v.store.Close()
 }
 
