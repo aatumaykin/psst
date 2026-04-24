@@ -1,13 +1,13 @@
 package cli
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var validName = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
@@ -36,9 +36,12 @@ var setCmd = &cobra.Command{
 			}
 		} else {
 			fmt.Printf("Enter value for %s: ", name)
-			reader := bufio.NewReader(os.Stdin)
-			line, _ := reader.ReadString('\n')
-			value = strings.TrimSpace(line)
+			passwordBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Println()
+			if err != nil {
+				exitWithError(fmt.Sprintf("Failed to read password: %v", err))
+			}
+			value = strings.TrimSpace(string(passwordBytes))
 		}
 
 		if value == "" {
