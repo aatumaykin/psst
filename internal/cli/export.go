@@ -26,7 +26,7 @@ var exportCmd = &cobra.Command{
 		}
 
 		if envFile != "" {
-			file, err := os.Create(envFile)
+			file, err := os.OpenFile(envFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 			if err != nil {
 				exitWithError("Cannot create file: " + err.Error())
 			}
