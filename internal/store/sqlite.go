@@ -12,7 +12,7 @@ import (
 
 type SQLiteStore struct {
 	db *sql.DB
-	tx *sql.Tx
+	currentTx *sql.Tx
 }
 
 func NewSQLite(dbPath string) (*SQLiteStore, error) {
@@ -25,22 +25,22 @@ func NewSQLite(dbPath string) (*SQLiteStore, error) {
 }
 
 func (s *SQLiteStore) exec(query string, args ...any) (sql.Result, error) {
-	if s.tx != nil {
-		return s.tx.Exec(query, args...)
+	if s.currentTx != nil {
+		return s.currentTx.Exec(query, args...)
 	}
 	return s.db.Exec(query, args...)
 }
 
 func (s *SQLiteStore) query(query string, args ...any) (*sql.Rows, error) {
-	if s.tx != nil {
-		return s.tx.Query(query, args...)
+	if s.currentTx != nil {
+		return s.currentTx.Query(query, args...)
 	}
 	return s.db.Query(query, args...)
 }
 
 func (s *SQLiteStore) queryRow(query string, args ...any) *sql.Row {
-	if s.tx != nil {
-		return s.tx.QueryRow(query, args...)
+	if s.currentTx != nil {
+		return s.currentTx.QueryRow(query, args...)
 	}
 	return s.db.QueryRow(query, args...)
 }
@@ -200,8 +200,8 @@ func (s *SQLiteStore) ExecTx(fn func() error) error {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 
-	s.tx = tx
-	defer func() { s.tx = nil }()
+	s.currentTx = tx
+	defer func() { s.currentTx = nil }()
 
 	if err := fn(); err != nil {
 		tx.Rollback()
