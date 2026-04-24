@@ -20,6 +20,23 @@ func TestMaskSecrets(t *testing.T) {
 	}
 }
 
+func TestMaskSecrets_SubstringOrder(t *testing.T) {
+	secrets := []string{"sk-abc", "sk-abc123def"}
+	text := "key=sk-abc123def and short=sk-abc"
+
+	result := MaskSecrets(text, secrets)
+	if strings.Contains(result, "sk-abc123def") {
+		t.Fatal("longer secret should be masked")
+	}
+	if strings.Contains(result, "sk-abc") {
+		t.Fatal("shorter secret should be masked")
+	}
+	count := strings.Count(result, "[REDACTED]")
+	if count != 2 {
+		t.Fatalf("expected 2 [REDACTED] occurrences, got %d", count)
+	}
+}
+
 func TestMaskSecretsEmpty(t *testing.T) {
 	text := "hello world"
 	result := MaskSecrets(text, []string{""})
