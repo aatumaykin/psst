@@ -8,6 +8,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+
+	"golang.org/x/crypto/argon2"
 )
 
 type AESGCM struct{}
@@ -63,6 +65,16 @@ func (a *AESGCM) KeyToBuffer(key string) ([]byte, error) {
 
 	hash := sha256.Sum256([]byte(key))
 	return hash[:], nil
+}
+
+func (a *AESGCM) KeyToBufferV2(key string) ([]byte, error) {
+	decoded, err := base64.StdEncoding.DecodeString(key)
+	if err == nil && len(decoded) == 32 {
+		return decoded, nil
+	}
+
+	salt := sha256.Sum256([]byte("psst-argon2id-v2-salt"))
+	return argon2.IDKey([]byte(key), salt[:], 3, 64*1024, 4, 32), nil
 }
 
 func (a *AESGCM) GenerateKey() ([]byte, error) {

@@ -40,5 +40,7 @@ type SecretStore interface {
 	AddHistory(name string, version int, encValue, iv []byte, tags []string) error
 	PruneHistory(name string, keepVersions int) error
 	ExecTx(fn func() error) error
+	GetMeta(key string) (string, error)
+	SetMeta(key, value string) error
 	Close() error
 }

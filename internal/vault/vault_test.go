@@ -21,6 +21,13 @@ func (t *testKeyProvider) GetKey(service, account string) ([]byte, error) {
 	return t.key, nil
 }
 
+func (t *testKeyProvider) GetRawKey(service, account string) (string, error) {
+	if t.key == nil {
+		return "", fmt.Errorf("no key")
+	}
+	return fmt.Sprintf("%x", t.key), nil
+}
+
 func (t *testKeyProvider) SetKey(service, account string, key []byte) error {
 	t.key = key
 	return nil

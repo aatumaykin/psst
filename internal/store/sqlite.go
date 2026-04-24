@@ -207,3 +207,17 @@ func (s *SQLiteStore) ExecTx(fn func() error) error {
 	}
 	return tx.Commit()
 }
+
+func (s *SQLiteStore) GetMeta(key string) (string, error) {
+	var value string
+	err := s.queryRow("SELECT value FROM vault_meta WHERE key = ?", key).Scan(&value)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return value, err
+}
+
+func (s *SQLiteStore) SetMeta(key, value string) error {
+	_, err := s.exec(`INSERT INTO vault_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value)
+	return err
+}

@@ -20,6 +20,14 @@ func (o *OSKeyring) GetKey(service, account string) ([]byte, error) {
 	return o.enc.KeyToBuffer(encoded)
 }
 
+func (o *OSKeyring) GetRawKey(service, account string) (string, error) {
+	encoded, err := keyring.Get(service, account)
+	if err != nil {
+		return "", fmt.Errorf("get from keychain: %w", err)
+	}
+	return encoded, nil
+}
+
 func (o *OSKeyring) SetKey(service, account string, key []byte) error {
 	encoded := base64.StdEncoding.EncodeToString(key)
 	return keyring.Set(service, account, encoded)

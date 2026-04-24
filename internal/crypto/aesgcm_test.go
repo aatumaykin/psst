@@ -99,3 +99,48 @@ func TestGenerateKey(t *testing.T) {
 		t.Fatal("two generated keys should be different")
 	}
 }
+
+func TestKeyToBufferV2_Argon2id(t *testing.T) {
+	enc := NewAESGCM()
+	key1, err := enc.KeyToBufferV2("mypassword")
+	if err != nil {
+		t.Fatalf("KeyToBufferV2 failed: %v", err)
+	}
+	if len(key1) != 32 {
+		t.Fatalf("key length = %d, want 32", len(key1))
+	}
+
+	key2, _ := enc.KeyToBufferV2("mypassword")
+	if string(key1) != string(key2) {
+		t.Fatal("same password should produce same key with Argon2id")
+	}
+
+	key3, _ := enc.KeyToBufferV2("otherpassword")
+	if string(key1) == string(key3) {
+		t.Fatal("different passwords should produce different keys")
+	}
+}
+
+func TestKeyToBufferV2_Base64Passthrough(t *testing.T) {
+	enc := NewAESGCM()
+	raw := make([]byte, 32)
+	raw[0] = 42
+	b64 := base64.StdEncoding.EncodeToString(raw)
+
+	result, err := enc.KeyToBufferV2(b64)
+	if err != nil {
+		t.Fatalf("KeyToBufferV2 failed: %v", err)
+	}
+	if result[0] != 42 {
+		t.Fatalf("first byte = %d, want 42", result[0])
+	}
+}
+
+func TestKeyToBufferV1_V2_ProduceDifferentKeys(t *testing.T) {
+	enc := NewAESGCM()
+	v1, _ := enc.KeyToBuffer("mypassword")
+	v2, _ := enc.KeyToBufferV2("mypassword")
+	if string(v1) == string(v2) {
+		t.Fatal("v1 and v2 KDF should produce different keys from same password")
+	}
+}

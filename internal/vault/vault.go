@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 
 	"github.com/aatumaykin/psst/internal/crypto"
 	"github.com/aatumaykin/psst/internal/keyring"
@@ -61,6 +62,10 @@ func InitVault(vaultPath string, enc crypto.Encryptor, kp keyring.KeyProvider, o
 		return fmt.Errorf("init schema: %w", err)
 	}
 
+	if err := s.SetMeta("kdf_version", strconv.Itoa(crypto.CurrentKDFVersion)); err != nil {
+		return fmt.Errorf("set vault metadata: %w", err)
+	}
+
 	if !opts.SkipKeychain {
 		key, err := kp.GenerateKey()
 		if err != nil {
@@ -75,12 +80,37 @@ func InitVault(vaultPath string, enc crypto.Encryptor, kp keyring.KeyProvider, o
 }
 
 func (v *Vault) Unlock() error {
-	key, err := v.kp.GetKey(serviceName, accountName)
+	rawKey, err := v.kp.GetRawKey(serviceName, accountName)
 	if err != nil {
 		return fmt.Errorf("unlock vault: %w", err)
 	}
+
+	kdfVersion := v.readKDFVersion()
+	var key []byte
+	switch kdfVersion {
+	case crypto.KDFVersion2:
+		key, err = v.enc.KeyToBufferV2(rawKey)
+	default:
+		key, err = v.enc.KeyToBuffer(rawKey)
+	}
+	if err != nil {
+		return fmt.Errorf("derive key: %w", err)
+	}
+
 	v.key = key
 	return nil
+}
+
+func (v *Vault) readKDFVersion() int {
+	val, _ := v.store.GetMeta("kdf_version")
+	if val == "" {
+		return 1
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil {
+		return 1
+	}
+	return n
 }
 
 func (v *Vault) SetSecret(name string, value string, tags []string) error {
@@ -297,4 +327,45 @@ func (v *Vault) GetSecretNamesByTags(tags []string) ([]string, error) {
 
 func (v *Vault) Close() error {
 	return v.store.Close()
+}
+
+func (v *Vault) MigrateKDF() error {
+	if v.key == nil {
+		return fmt.Errorf("vault is locked")
+	}
+
+	all, err := v.store.GetAllSecrets()
+	if err != nil {
+		return fmt.Errorf("get secrets: %w", err)
+	}
+
+	rawKey, err := v.kp.GetRawKey(serviceName, accountName)
+	if err != nil {
+		return fmt.Errorf("get raw key: %w", err)
+	}
+
+	newKey, err := v.enc.KeyToBufferV2(rawKey)
+	if err != nil {
+		return fmt.Errorf("derive new key: %w", err)
+	}
+
+	return v.store.ExecTx(func() error {
+		for _, s := range all {
+			plaintext, err := v.enc.Decrypt(s.EncryptedValue, s.IV, v.key)
+			if err != nil {
+				return fmt.Errorf("decrypt %s: %w", s.Name, err)
+			}
+			ciphertext, iv, err := v.enc.Encrypt(plaintext, newKey)
+			for i := range plaintext {
+				plaintext[i] = 0
+			}
+			if err != nil {
+				return fmt.Errorf("encrypt %s: %w", s.Name, err)
+			}
+			if err := v.store.SetSecret(s.Name, ciphertext, iv, s.Tags); err != nil {
+				return fmt.Errorf("update %s: %w", s.Name, err)
+			}
+		}
+		return v.store.SetMeta("kdf_version", strconv.Itoa(crypto.CurrentKDFVersion))
+	})
 }
