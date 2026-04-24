@@ -1,6 +1,8 @@
 package runner
 
 import (
+	"bytes"
+	"io"
 	"strings"
 	"testing"
 )
@@ -84,5 +86,30 @@ func TestBuildEnv(t *testing.T) {
 	}
 	if hasPssPassword {
 		t.Fatal("should not contain PSST_PASSWORD")
+	}
+}
+
+func TestStreamWithMasking_BoundarySplit(t *testing.T) {
+	secret := "SECRETVALUE"
+	chunk1 := "prefix" + secret[:6]
+	chunk2 := secret[6:] + "suffix"
+
+	var buf bytes.Buffer
+	r, w := io.Pipe()
+
+	go func() {
+		w.Write([]byte(chunk1))
+		w.Write([]byte(chunk2))
+		w.Close()
+	}()
+
+	streamWithMasking(r, &buf, []string{secret})
+
+	result := buf.String()
+	if strings.Contains(result, secret) {
+		t.Fatalf("secret leaked in output: %q", result)
+	}
+	if !strings.Contains(result, "[REDACTED]") {
+		t.Fatalf("expected [REDACTED] in output, got: %q", result)
 	}
 }

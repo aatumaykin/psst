@@ -65,15 +65,45 @@ func (r *Runner) runWithMasking(cmd *exec.Cmd, secrets map[string]string) (int, 
 }
 
 func streamWithMasking(src io.Reader, dst io.Writer, secrets []string) {
+	maxLen := 0
+	for _, s := range secrets {
+		if len(s) > maxLen {
+			maxLen = len(s)
+		}
+	}
+
+	overlap := 0
 	buf := make([]byte, 4096)
+	carry := make([]byte, 0, maxLen)
+
 	for {
 		n, err := src.Read(buf)
 		if n > 0 {
-			masked := MaskSecrets(string(buf[:n]), secrets)
-			dst.Write([]byte(masked))
+			chunk := append(carry, buf[:n]...)
+
+			if overlap > 0 && len(chunk) > overlap {
+				masked := MaskSecrets(string(chunk), secrets)
+				safeEnd := len(chunk) - overlap
+				if safeEnd > len(masked) {
+					safeEnd = len(masked)
+				}
+				dst.Write([]byte(masked[:safeEnd]))
+				carry = append(carry[:0], chunk[len(chunk)-overlap:]...)
+			} else {
+				masked := MaskSecrets(string(chunk), secrets)
+				dst.Write([]byte(masked))
+				carry = carry[:0]
+			}
 		}
 		if err != nil {
+			if len(carry) > 0 {
+				masked := MaskSecrets(string(carry), secrets)
+				dst.Write([]byte(masked))
+			}
 			return
+		}
+		if maxLen > 0 {
+			overlap = maxLen - 1
 		}
 	}
 }
