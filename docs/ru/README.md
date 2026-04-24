@@ -1,7 +1,7 @@
 # psst
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../../LICENSE)
-[![Go 1.22+](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go)](https://go.dev/)
+[![Go 1.26+](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go)](https://go.dev/)
 
 **[Documentation in English](../../README.md)**
 
@@ -43,7 +43,7 @@ sudo install psst /usr/local/bin/
 
 ### Требования
 
-- Go 1.22+ (для сборки)
+- Go 1.26+ (для сборки)
 - gcc (для CGo — mattn/go-sqlite3)
 - На Linux: заголовки `libsecret` (для поддержки OS keyring)
 
@@ -89,6 +89,7 @@ psst set <NAME> [--stdin] [--tag T]   # Добавить/обновить сек
 psst get <NAME>                       # Показать значение (для отладки)
 psst list [--tag T]                   # Список имён секретов
 psst rm <NAME>                        # Удалить секрет + историю
+psst migrate                          # Обновить vault до последней версии KDF
 ```
 
 ### Использование секретов
@@ -164,11 +165,14 @@ psst list-envs                        # Список всех окружений
 ## Безопасность
 
 - Секреты шифруются при хранении **AES-256-GCM**
+- **Argon2id** KDF для парольных vaults (v2), SHA-256 для legacy (v1)
 - Уникальный случайный IV при каждом шифровании
 - Ключ шифрования хранится в OS keychain (libsecret на Linux)
 - Секреты автоматически маскируются в выводе команд (`[REDACTED]`)
 - Секреты никогда не попадают в контекст агента
 - `PSST_PASSWORD` удаляется из окружения дочернего процесса
+- Права на файл vault БД установлены в `0600`
+- Best-effort обнуление ключей и plaintext в памяти
 
 ## CI / Работа без OS keychain
 
@@ -181,7 +185,7 @@ psst set API_KEY --stdin <<< "value"
 psst run -- ./deploy.sh                # секреты внедряются в env, вывод маскируется
 ```
 
-Ключ выводится из пароля через SHA-256. `PSST_PASSWORD` нужно задавать перед каждым использованием psst.
+Ключ выводится из пароля через Argon2id (новые vaults) или SHA-256 (legacy, обновление через `psst migrate`). `PSST_PASSWORD` нужно задавать перед каждым использованием psst.
 
 ## Архитектура
 
@@ -194,7 +198,7 @@ internal/
 ├── vault/                Фасад бизнес-логики
 ├── output/               Форматирование human/JSON/quiet
 ├── runner/               Выполнение подпроцессов + маскирование вывода
-└── cli/                  Cobra-команды (14 команд)
+└── cli/                  Cobra-команды (15 команд)
 ```
 
 ### Ключевые интерфейсы
@@ -204,11 +208,13 @@ type Encryptor interface {
     Encrypt(plaintext, key []byte) (ciphertext, iv []byte, err error)
     Decrypt(ciphertext, iv, key []byte) ([]byte, error)
     KeyToBuffer(key string) ([]byte, error)
+    KeyToBufferV2(key string) ([]byte, error)
     GenerateKey() ([]byte, error)
 }
 
 type KeyProvider interface {
     GetKey(service, account string) ([]byte, error)
+    GetRawKey(service, account string) (string, error)
     SetKey(service, account string, key []byte) error
     IsAvailable() bool
     GenerateKey() ([]byte, error)
@@ -241,10 +247,17 @@ make build-linux-arm64
 | `spf13/cobra` | CLI-фреймворк |
 | `mattn/go-sqlite3` | SQLite-драйвер (CGo) |
 | `zalando/go-keyring` | Интеграция с OS keychain |
+| `golang.org/x/term` | Безопасный ввод в терминале |
+| `golang.org/x/crypto` | Argon2id KDF |
 
 ### Схема SQLite
 
 ```sql
+CREATE TABLE vault_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE TABLE secrets (
     name TEXT PRIMARY KEY,
     encrypted_value BLOB NOT NULL,

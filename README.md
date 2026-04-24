@@ -1,7 +1,7 @@
 # psst
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Go 1.22+](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go)](https://go.dev/)
+[![Go 1.26+](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go)](https://go.dev/)
 
 **[Документация на русском](docs/ru/README.md)**
 
@@ -43,7 +43,7 @@ sudo install psst /usr/local/bin/
 
 ### Requirements
 
-- Go 1.22+ (for building)
+- Go 1.26+ (for building)
 - gcc (for CGo — mattn/go-sqlite3)
 - On Linux: `libsecret` headers (for OS keyring support)
 
@@ -89,6 +89,7 @@ psst set <NAME> [--stdin] [--tag T]   # Add/update secret
 psst get <NAME>                       # Show value (debugging only)
 psst list [--tag T]                   # List secret names
 psst rm <NAME>                        # Delete secret + history
+psst migrate                          # Upgrade vault to latest KDF
 ```
 
 ### Using Secrets
@@ -164,11 +165,14 @@ Fallback environment variables: `PSST_GLOBAL=1`, `PSST_ENV=<name>`.
 ## Security
 
 - Secrets encrypted at rest with **AES-256-GCM**
+- **Argon2id** KDF for password-based vaults (v2), SHA-256 for legacy (v1)
 - Unique random IV per encryption
 - Encryption key stored in OS keychain (libsecret on Linux)
 - Secrets automatically redacted in command output (`[REDACTED]`)
 - Secrets never exposed to agent context
 - `PSST_PASSWORD` removed from child process environment
+- Vault database file permissions set to `0600`
+- Best-effort memory zeroing for keys and plaintext
 
 ## CI / Headless Environments
 
@@ -181,7 +185,7 @@ psst set API_KEY --stdin <<< "value"
 psst run -- ./deploy.sh                # secrets injected into env, output masked
 ```
 
-Key is derived from password via SHA-256. `PSST_PASSWORD` must be set before each psst invocation.
+Key is derived from password via Argon2id (new vaults) or SHA-256 (legacy vaults, upgrade with `psst migrate`). `PSST_PASSWORD` must be set before each psst invocation.
 
 ## Architecture
 
@@ -194,7 +198,7 @@ internal/
 ├── vault/                Business logic facade
 ├── output/               Human/JSON/quiet formatting
 ├── runner/               Subprocess execution + output masking
-└── cli/                  Cobra commands (14 commands)
+└── cli/                  Cobra commands (15 commands)
 ```
 
 ### Key Interfaces
@@ -204,11 +208,13 @@ type Encryptor interface {
     Encrypt(plaintext, key []byte) (ciphertext, iv []byte, err error)
     Decrypt(ciphertext, iv, key []byte) ([]byte, error)
     KeyToBuffer(key string) ([]byte, error)
+    KeyToBufferV2(key string) ([]byte, error)
     GenerateKey() ([]byte, error)
 }
 
 type KeyProvider interface {
     GetKey(service, account string) ([]byte, error)
+    GetRawKey(service, account string) (string, error)
     SetKey(service, account string, key []byte) error
     IsAvailable() bool
     GenerateKey() ([]byte, error)
@@ -241,10 +247,17 @@ make build-linux-arm64
 | `spf13/cobra` | CLI framework |
 | `mattn/go-sqlite3` | SQLite driver (CGo) |
 | `zalando/go-keyring` | OS keychain integration |
+| `golang.org/x/term` | Secure terminal input |
+| `golang.org/x/crypto` | Argon2id KDF |
 
 ### SQLite Schema
 
 ```sql
+CREATE TABLE vault_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE TABLE secrets (
     name TEXT PRIMARY KEY,
     encrypted_value BLOB NOT NULL,
