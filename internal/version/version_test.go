@@ -2,6 +2,7 @@ package version
 
 import (
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -22,10 +23,10 @@ func TestString(t *testing.T) {
 	if s == "" {
 		t.Fatal("String() returned empty string")
 	}
-	if !contains(s, "dev") {
+	if !strings.Contains(s, "dev") {
 		t.Errorf("String() should contain default version, got: %s", s)
 	}
-	if !contains(s, runtime.Version()) {
+	if !strings.Contains(s, runtime.Version()) {
 		t.Errorf("String() should contain Go version, got: %s", s)
 	}
 }
@@ -47,17 +48,4 @@ func TestJSON(t *testing.T) {
 	if info.OSArch != runtime.GOOS+"/"+runtime.GOARCH {
 		t.Errorf("JSON().OSArch = %q, want %q", info.OSArch, runtime.GOOS+"/"+runtime.GOARCH)
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && findSubstring(s, substr))
-}
-
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
