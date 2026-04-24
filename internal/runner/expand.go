@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -16,7 +17,9 @@ func ExpandEnvVars(arg string, env map[string]string) string {
 	for _, name := range names {
 		value := env[name]
 		result = strings.ReplaceAll(result, "${"+name+"}", value)
-		result = strings.ReplaceAll(result, "$"+name, value)
+
+		pattern := regexp.MustCompile(`\$` + regexp.QuoteMeta(name) + `(?![A-Za-z0-9_])`)
+		result = pattern.ReplaceAllString(result, value)
 	}
 
 	return result

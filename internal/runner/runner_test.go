@@ -69,6 +69,19 @@ func TestExpandEnvVars(t *testing.T) {
 	}
 }
 
+func TestExpandEnvVars_WordBoundary(t *testing.T) {
+	env := map[string]string{
+		"API": "api-value",
+	}
+	got := ExpandEnvVars("$API_KEY", env)
+	if got == "api-value_Key" || got == "api-value_KEY" {
+		t.Fatalf("$API should not partially expand inside $API_KEY, got: %q", got)
+	}
+	if got != "$API_KEY" {
+		t.Fatalf("expected $API_KEY to remain unexpanded, got: %q", got)
+	}
+}
+
 func TestFilterEmpty(t *testing.T) {
 	secrets := map[string]string{
 		"A": "value",
