@@ -3,12 +3,10 @@ package keyring
 import (
 	"fmt"
 	"os"
-
-	"github.com/aatumaykin/psst/internal/crypto"
 )
 
 type EnvVarProvider struct {
-	enc *crypto.AESGCM
+	deriver KeyDeriver
 }
 
 func (e *EnvVarProvider) GetKey(service, account string) ([]byte, error) {
@@ -16,7 +14,7 @@ func (e *EnvVarProvider) GetKey(service, account string) ([]byte, error) {
 	if password == "" {
 		return nil, fmt.Errorf("PSST_PASSWORD not set and OS keychain unavailable")
 	}
-	return e.enc.KeyToBuffer(password)
+	return e.deriver.KeyToBuffer(password)
 }
 
 func (e *EnvVarProvider) GetRawKey(service, account string) (string, error) {
@@ -36,5 +34,5 @@ func (e *EnvVarProvider) IsAvailable() bool {
 }
 
 func (e *EnvVarProvider) GenerateKey() ([]byte, error) {
-	return e.enc.GenerateKey()
+	return e.deriver.GenerateKey()
 }

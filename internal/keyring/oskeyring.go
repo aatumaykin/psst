@@ -4,12 +4,11 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	"github.com/aatumaykin/psst/internal/crypto"
 	keyring "github.com/zalando/go-keyring"
 )
 
 type OSKeyring struct {
-	enc *crypto.AESGCM
+	deriver KeyDeriver
 }
 
 func (o *OSKeyring) GetKey(service, account string) ([]byte, error) {
@@ -17,7 +16,14 @@ func (o *OSKeyring) GetKey(service, account string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get from keychain: %w", err)
 	}
-	return o.enc.KeyToBuffer(encoded)
+	if o.deriver != nil {
+		return o.deriver.KeyToBuffer(encoded)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("decode key: %w", err)
+	}
+	return decoded, nil
 }
 
 func (o *OSKeyring) GetRawKey(service, account string) (string, error) {
@@ -46,5 +52,8 @@ func (o *OSKeyring) IsAvailable() bool {
 }
 
 func (o *OSKeyring) GenerateKey() ([]byte, error) {
-	return o.enc.GenerateKey()
+	if o.deriver != nil {
+		return o.deriver.GenerateKey()
+	}
+	return nil, fmt.Errorf("no key deriver available")
 }

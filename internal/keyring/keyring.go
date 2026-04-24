@@ -2,9 +2,13 @@ package keyring
 
 import (
 	"os"
-
-	"github.com/aatumaykin/psst/internal/crypto"
 )
+
+type KeyDeriver interface {
+	KeyToBuffer(key string) ([]byte, error)
+	KeyToBufferV2(key string) ([]byte, error)
+	GenerateKey() ([]byte, error)
+}
 
 type KeyProvider interface {
 	GetKey(service, account string) ([]byte, error)
@@ -14,12 +18,12 @@ type KeyProvider interface {
 	GenerateKey() ([]byte, error)
 }
 
-func NewProvider(enc *crypto.AESGCM) KeyProvider {
-	os := &OSKeyring{enc: enc}
-	if os.IsAvailable() {
-		return os
+func NewProvider(deriver KeyDeriver) KeyProvider {
+	oskr := &OSKeyring{deriver: deriver}
+	if oskr.IsAvailable() {
+		return oskr
 	}
-	return &EnvVarProvider{enc: enc}
+	return &EnvVarProvider{deriver: deriver}
 }
 
 func IsKeychainAvailable() bool {
