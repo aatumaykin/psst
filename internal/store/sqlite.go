@@ -45,6 +45,32 @@ func (s *SQLiteStore) queryRow(query string, args ...any) *sql.Row {
 	return s.db.QueryRow(query, args...)
 }
 
+func scanTagsAndTimes(tagsJSON string, createdAt, updatedAt string) (tags []string, created, updated time.Time, err error) {
+	if err := json.Unmarshal([]byte(tagsJSON), &tags); err != nil {
+		return nil, time.Time{}, time.Time{}, fmt.Errorf("parse tags: %w", err)
+	}
+	created, err = time.Parse("2006-01-02 15:04:05", createdAt)
+	if err != nil {
+		return nil, time.Time{}, time.Time{}, fmt.Errorf("parse created_at: %w", err)
+	}
+	updated, err = time.Parse("2006-01-02 15:04:05", updatedAt)
+	if err != nil {
+		return nil, time.Time{}, time.Time{}, fmt.Errorf("parse updated_at: %w", err)
+	}
+	return tags, created, updated, nil
+}
+
+func scanHistoryTagsAndTime(tagsJSON, archivedAtStr string) (tags []string, archivedAt time.Time, err error) {
+	if err := json.Unmarshal([]byte(tagsJSON), &tags); err != nil {
+		return nil, time.Time{}, fmt.Errorf("parse tags: %w", err)
+	}
+	archivedAt, err = time.Parse("2006-01-02 15:04:05", archivedAtStr)
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("parse archived_at: %w", err)
+	}
+	return tags, archivedAt, nil
+}
+
 func (s *SQLiteStore) InitSchema() error {
 	return initSchema(s.db)
 }
@@ -57,15 +83,17 @@ func (s *SQLiteStore) GetSecret(name string) (*StoredSecret, error) {
 	var sec StoredSecret
 	var tagsJSON string
 	var createdAt, updatedAt string
-	if err := row.Scan(&sec.Name, &sec.EncryptedValue, &sec.IV, &tagsJSON, &createdAt, &updatedAt); err != nil {
+	var err error
+	if err = row.Scan(&sec.Name, &sec.EncryptedValue, &sec.IV, &tagsJSON, &createdAt, &updatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("get secret: %w", err)
 	}
-	json.Unmarshal([]byte(tagsJSON), &sec.Tags)
-	sec.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
-	sec.UpdatedAt, _ = time.Parse("2006-01-02 15:04:05", updatedAt)
+	sec.Tags, sec.CreatedAt, sec.UpdatedAt, err = scanTagsAndTimes(tagsJSON, createdAt, updatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("parse secret metadata: %w", err)
+	}
 	return &sec, nil
 }
 
@@ -84,9 +112,10 @@ func (s *SQLiteStore) GetAllSecrets() ([]StoredSecret, error) {
 		if err := rows.Scan(&sec.Name, &sec.EncryptedValue, &sec.IV, &tagsJSON, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
-		json.Unmarshal([]byte(tagsJSON), &sec.Tags)
-		sec.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
-		sec.UpdatedAt, _ = time.Parse("2006-01-02 15:04:05", updatedAt)
+		sec.Tags, sec.CreatedAt, sec.UpdatedAt, err = scanTagsAndTimes(tagsJSON, createdAt, updatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse secret metadata: %w", err)
+		}
 		result = append(result, sec)
 	}
 	return result, nil
@@ -135,9 +164,10 @@ func (s *SQLiteStore) ListSecrets() ([]SecretMeta, error) {
 		if err := rows.Scan(&m.Name, &tagsJSON, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
-		json.Unmarshal([]byte(tagsJSON), &m.Tags)
-		m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
-		m.UpdatedAt, _ = time.Parse("2006-01-02 15:04:05", updatedAt)
+		m.Tags, m.CreatedAt, m.UpdatedAt, err = scanTagsAndTimes(tagsJSON, createdAt, updatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse secret metadata: %w", err)
+		}
 		result = append(result, m)
 	}
 	return result, nil
@@ -161,8 +191,10 @@ func (s *SQLiteStore) GetHistory(name string) ([]HistoryEntry, error) {
 		if err := rows.Scan(&e.ID, &e.Name, &e.Version, &e.EncryptedValue, &e.IV, &tagsJSON, &archivedAt); err != nil {
 			return nil, err
 		}
-		json.Unmarshal([]byte(tagsJSON), &e.Tags)
-		e.ArchivedAt, _ = time.Parse("2006-01-02 15:04:05", archivedAt)
+		e.Tags, e.ArchivedAt, err = scanHistoryTagsAndTime(tagsJSON, archivedAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse history metadata: %w", err)
+		}
 		result = append(result, e)
 	}
 	return result, nil
