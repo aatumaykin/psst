@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"regexp"
@@ -35,13 +36,19 @@ var setCmd = &cobra.Command{
 				value = scanner.Text()
 			}
 		} else {
-			fmt.Printf("Enter value for %s: ", name)
-			passwordBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
-			fmt.Println()
-			if err != nil {
-				exitWithError(fmt.Sprintf("Failed to read password: %v", err))
+			if term.IsTerminal(int(os.Stdin.Fd())) {
+				fmt.Printf("Enter value for %s: ", name)
+				passwordBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+				fmt.Println()
+				if err != nil {
+					exitWithError(fmt.Sprintf("Failed to read password: %v", err))
+				}
+				value = strings.TrimSpace(string(passwordBytes))
+			} else {
+				reader := bufio.NewReader(os.Stdin)
+				line, _ := reader.ReadString('\n')
+				value = strings.TrimSpace(line)
 			}
-			value = strings.TrimSpace(string(passwordBytes))
 		}
 
 		if value == "" {

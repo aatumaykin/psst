@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -65,46 +66,16 @@ func (r *Runner) runWithMasking(cmd *exec.Cmd, secrets map[string]string) (int, 
 }
 
 func streamWithMasking(src io.Reader, dst io.Writer, secrets []string) {
-	maxLen := 0
-	for _, s := range secrets {
-		if len(s) > maxLen {
-			maxLen = len(s)
-		}
+	if len(secrets) == 0 {
+		io.Copy(dst, src)
+		return
 	}
 
-	overlap := 0
-	buf := make([]byte, 4096)
-	carry := make([]byte, 0, maxLen)
-
-	for {
-		n, err := src.Read(buf)
-		if n > 0 {
-			chunk := append(carry, buf[:n]...)
-
-			if overlap > 0 && len(chunk) > overlap {
-				masked := MaskSecrets(string(chunk), secrets)
-				safeEnd := len(chunk) - overlap
-				if safeEnd > len(masked) {
-					safeEnd = len(masked)
-				}
-				dst.Write([]byte(masked[:safeEnd]))
-				carry = append(carry[:0], chunk[len(chunk)-overlap:]...)
-			} else {
-				masked := MaskSecrets(string(chunk), secrets)
-				dst.Write([]byte(masked))
-				carry = carry[:0]
-			}
-		}
-		if err != nil {
-			if len(carry) > 0 {
-				masked := MaskSecrets(string(carry), secrets)
-				dst.Write([]byte(masked))
-			}
-			return
-		}
-		if maxLen > 0 {
-			overlap = maxLen - 1
-		}
+	scanner := bufio.NewScanner(src)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text() + "\n"
+		dst.Write([]byte(MaskSecrets(line, secrets)))
 	}
 }
 

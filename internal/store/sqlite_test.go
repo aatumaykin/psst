@@ -136,6 +136,7 @@ func TestNewSQLite_FilePermissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSQLite failed: %v", err)
 	}
+	s.InitSchema()
 	s.Close()
 
 	info, err := os.Stat(dbPath)

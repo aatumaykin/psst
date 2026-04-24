@@ -11,8 +11,9 @@ import (
 )
 
 type SQLiteStore struct {
-	db *sql.DB
+	db        *sql.DB
 	currentTx *sql.Tx
+	dbPath    string
 }
 
 func NewSQLite(dbPath string) (*SQLiteStore, error) {
@@ -20,8 +21,7 @@ func NewSQLite(dbPath string) (*SQLiteStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
-	os.Chmod(dbPath, 0600)
-	return &SQLiteStore{db: db}, nil
+	return &SQLiteStore{db: db, dbPath: dbPath}, nil
 }
 
 func (s *SQLiteStore) exec(query string, args ...any) (sql.Result, error) {
@@ -72,7 +72,11 @@ func scanHistoryTagsAndTime(tagsJSON, archivedAtStr string) (tags []string, arch
 }
 
 func (s *SQLiteStore) InitSchema() error {
-	return initSchema(s.db)
+	err := initSchema(s.db)
+	if s.dbPath != "" {
+		os.Chmod(s.dbPath, 0600)
+	}
+	return err
 }
 
 func (s *SQLiteStore) GetSecret(name string) (*StoredSecret, error) {

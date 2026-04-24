@@ -9,7 +9,7 @@ import (
 
 func TestEnvVarProviderGetKey(t *testing.T) {
 	enc := crypto.NewAESGCM()
-	p := &EnvVarProvider{enc: enc}
+	p := &EnvVarProvider{deriver: enc}
 
 	os.Setenv("PSST_PASSWORD", "test-password")
 	defer os.Unsetenv("PSST_PASSWORD")
@@ -25,7 +25,7 @@ func TestEnvVarProviderGetKey(t *testing.T) {
 
 func TestEnvVarProviderNotAvailable(t *testing.T) {
 	enc := crypto.NewAESGCM()
-	p := &EnvVarProvider{enc: enc}
+	p := &EnvVarProvider{deriver: enc}
 
 	os.Unsetenv("PSST_PASSWORD")
 
@@ -36,7 +36,7 @@ func TestEnvVarProviderNotAvailable(t *testing.T) {
 
 func TestEnvVarProviderSetKeyNoop(t *testing.T) {
 	enc := crypto.NewAESGCM()
-	p := &EnvVarProvider{enc: enc}
+	p := &EnvVarProvider{deriver: enc}
 
 	err := p.SetKey("psst", "vault-key", nil)
 	if err != nil {
@@ -46,7 +46,7 @@ func TestEnvVarProviderSetKeyNoop(t *testing.T) {
 
 func TestEnvVarProviderAvailable(t *testing.T) {
 	enc := crypto.NewAESGCM()
-	p := &EnvVarProvider{enc: enc}
+	p := &EnvVarProvider{deriver: enc}
 
 	os.Setenv("PSST_PASSWORD", "test")
 	defer os.Unsetenv("PSST_PASSWORD")
@@ -58,7 +58,7 @@ func TestEnvVarProviderAvailable(t *testing.T) {
 
 func TestEnvVarProviderGenerateKey(t *testing.T) {
 	enc := crypto.NewAESGCM()
-	p := &EnvVarProvider{enc: enc}
+	p := &EnvVarProvider{deriver: enc}
 
 	key, err := p.GenerateKey()
 	if err != nil {

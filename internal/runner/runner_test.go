@@ -122,7 +122,7 @@ func TestBuildEnv(t *testing.T) {
 func TestStreamWithMasking_BoundarySplit(t *testing.T) {
 	secret := "SECRETVALUE"
 	chunk1 := "prefix" + secret[:6]
-	chunk2 := secret[6:] + "suffix"
+	chunk2 := secret[6:] + "suffix\n"
 
 	var buf bytes.Buffer
 	r, w := io.Pipe()
