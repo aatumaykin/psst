@@ -3,6 +3,7 @@ package vault
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/aatumaykin/psst/internal/crypto"
@@ -195,5 +196,70 @@ func TestGetAllSecrets(t *testing.T) {
 	}
 	if all["A"] != "val_a" || all["B"] != "val_b" {
 		t.Fatalf("all = %v", all)
+	}
+}
+
+func TestVault_LockedOperations(t *testing.T) {
+	enc := crypto.NewAESGCM()
+	kp := &testKeyProvider{key: nil}
+	s, err := store.NewSQLite(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.InitSchema()
+
+	v := New(enc, kp, s)
+
+	if err := v.SetSecret("A", "val", nil); err == nil {
+		t.Fatal("SetSecret on locked vault should fail")
+	}
+	if _, err := v.GetSecret("A"); err == nil {
+		t.Fatal("GetSecret on locked vault should fail")
+	}
+	if _, err := v.GetAllSecrets(); err == nil {
+		t.Fatal("GetAllSecrets on locked vault should fail")
+	}
+}
+
+func TestFindVaultPath(t *testing.T) {
+	tests := []struct {
+		name   string
+		global bool
+		env    string
+		want   string
+	}{
+		{"default", false, "", ".psst/vault.db"},
+		{"env_prod", false, "prod", ".psst/envs/prod/vault.db"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := FindVaultPath(tt.global, tt.env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasSuffix(got, tt.want) {
+				t.Fatalf("got %q, want suffix %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRollback_SecretNotFound(t *testing.T) {
+	v := setupTestVault(t)
+	defer v.Close()
+	err := v.Rollback("NONEXISTENT", 1)
+	if err == nil {
+		t.Fatal("rollback nonexistent secret should fail")
+	}
+}
+
+func TestRollback_VersionNotFound(t *testing.T) {
+	v := setupTestVault(t)
+	defer v.Close()
+	v.SetSecret("TEST", "val", nil)
+	err := v.Rollback("TEST", 999)
+	if err == nil {
+		t.Fatal("rollback nonexistent version should fail")
 	}
 }
