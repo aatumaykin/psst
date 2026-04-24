@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -145,6 +146,90 @@ func TestNewSQLite_FilePermissions(t *testing.T) {
 	perm := info.Mode().Perm()
 	if perm&0077 != 0 {
 		t.Fatalf("file permissions = %o, want no group/other access", perm)
+	}
+}
+
+func TestGetAllSecrets(t *testing.T) {
+	s := setupTestStore(t)
+
+	s.SetSecret("A", []byte("encA"), []byte("ivA"), []string{"tag1"})
+	s.SetSecret("B", []byte("encB"), []byte("ivB"), nil)
+
+	all, err := s.GetAllSecrets()
+	if err != nil {
+		t.Fatalf("GetAllSecrets failed: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("len = %d, want 2", len(all))
+	}
+}
+
+func TestExecTx_Commit(t *testing.T) {
+	s := setupTestStore(t)
+
+	err := s.ExecTx(func() error {
+		return s.SetSecret("TX", []byte("enc"), []byte("iv"), nil)
+	})
+	if err != nil {
+		t.Fatalf("ExecTx failed: %v", err)
+	}
+
+	sec, _ := s.GetSecret("TX")
+	if sec == nil {
+		t.Fatal("secret should exist after commit")
+	}
+}
+
+func TestExecTx_Rollback(t *testing.T) {
+	s := setupTestStore(t)
+
+	err := s.ExecTx(func() error {
+		s.SetSecret("TX", []byte("enc"), []byte("iv"), nil)
+		return fmt.Errorf("intentional error")
+	})
+	if err == nil {
+		t.Fatal("ExecTx should return error")
+	}
+
+	sec, _ := s.GetSecret("TX")
+	if sec != nil {
+		t.Fatal("secret should not exist after rollback")
+	}
+}
+
+func TestSetSecret_Upsert(t *testing.T) {
+	s := setupTestStore(t)
+
+	s.SetSecret("K", []byte("enc1"), []byte("iv1"), nil)
+	s.SetSecret("K", []byte("enc2"), []byte("iv2"), []string{"t"})
+
+	sec, _ := s.GetSecret("K")
+	if sec == nil {
+		t.Fatal("secret should exist")
+	}
+	if string(sec.EncryptedValue) != "enc2" {
+		t.Fatalf("value = %q, want %q", sec.EncryptedValue, "enc2")
+	}
+}
+
+func TestMeta(t *testing.T) {
+	s := setupTestStore(t)
+
+	val, err := s.GetMeta("kdf_version")
+	if err != nil {
+		t.Fatalf("GetMeta failed: %v", err)
+	}
+	if val != "" {
+		t.Fatalf("expected empty, got %q", val)
+	}
+
+	if err := s.SetMeta("kdf_version", "2"); err != nil {
+		t.Fatalf("SetMeta failed: %v", err)
+	}
+
+	val, _ = s.GetMeta("kdf_version")
+	if val != "2" {
+		t.Fatalf("expected '2', got %q", val)
 	}
 }
 
