@@ -434,3 +434,25 @@ func TestExportToFile(t *testing.T) {
 		t.Fatalf("unexpected file content: %s", string(data))
 	}
 }
+
+func TestVersion(t *testing.T) {
+	e := newTestEnv(t)
+	stdout, _, code := e.run("version")
+	if code != 0 {
+		t.Fatalf("version failed: %s", stdout)
+	}
+	if !strings.Contains(stdout, "psst") {
+		t.Fatalf("expected 'psst' in version output, got: %s", stdout)
+	}
+}
+
+func TestVersionJSON(t *testing.T) {
+	e := newTestEnv(t)
+	stdout, _, code := e.run("version", "--json")
+	if code != 0 {
+		t.Fatalf("version --json failed: %s", stdout)
+	}
+	if !strings.Contains(stdout, `"version"`) {
+		t.Fatalf("expected JSON with version field, got: %s", stdout)
+	}
+}
