@@ -1,7 +1,6 @@
 package runner
 
 import (
-	"regexp"
 	"slices"
 	"strings"
 )
@@ -17,10 +16,36 @@ func ExpandEnvVars(arg string, env map[string]string) string {
 	for _, name := range names {
 		value := env[name]
 		result = strings.ReplaceAll(result, "${"+name+"}", value)
-
-		pattern := regexp.MustCompile(`\$` + regexp.QuoteMeta(name) + `(?![A-Za-z0-9_])`)
-		result = pattern.ReplaceAllString(result, value)
+		result = replaceBareVar(result, name, value)
 	}
 
 	return result
+}
+
+func replaceBareVar(s, name, value string) string {
+	needle := "$" + name
+	var b strings.Builder
+	i := 0
+	for {
+		idx := strings.Index(s[i:], needle)
+		if idx == -1 {
+			b.WriteString(s[i:])
+			break
+		}
+		idx += i
+		after := idx + len(needle)
+		if after < len(s) && isWordChar(s[after]) {
+			b.WriteString(s[i : idx+1])
+			i = idx + 1
+			continue
+		}
+		b.WriteString(s[i:idx])
+		b.WriteString(value)
+		i = after
+	}
+	return b.String()
+}
+
+func isWordChar(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'
 }

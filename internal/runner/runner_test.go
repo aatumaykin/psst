@@ -143,3 +143,47 @@ func TestStreamWithMasking_BoundarySplit(t *testing.T) {
 		t.Fatalf("expected [REDACTED] in output, got: %q", result)
 	}
 }
+
+func TestExitCode(t *testing.T) {
+	if code := exitCode(nil); code != 0 {
+		t.Fatalf("exitCode(nil) = %d, want 0", code)
+	}
+}
+
+func TestMaskSecrets_MultipleSecrets(t *testing.T) {
+	secrets := []string{"alpha", "beta"}
+	text := "alpha and beta"
+	result := MaskSecrets(text, secrets)
+	if strings.Contains(result, "alpha") || strings.Contains(result, "beta") {
+		t.Fatalf("secrets leaked: %q", result)
+	}
+	if strings.Count(result, "[REDACTED]") != 2 {
+		t.Fatalf("expected 2 [REDACTED], got: %q", result)
+	}
+}
+
+func TestExpandEnvVars_EmptyEnv(t *testing.T) {
+	got := ExpandEnvVars("$FOO", map[string]string{})
+	if got != "$FOO" {
+		t.Fatalf("expected $FOO unchanged, got %q", got)
+	}
+}
+
+func TestExpandEnvVars_LongerNameFirst(t *testing.T) {
+	env := map[string]string{
+		"A":   "short",
+		"ABC": "long",
+	}
+	got := ExpandEnvVars("$ABC", env)
+	if got != "long" {
+		t.Fatalf("expected 'long', got %q", got)
+	}
+}
+
+func TestExpandEnvVars_BothForms(t *testing.T) {
+	env := map[string]string{"KEY": "val"}
+	got := ExpandEnvVars("prefix-${KEY}-$KEY-suffix", env)
+	if got != "prefix-val-val-suffix" {
+		t.Fatalf("got %q", got)
+	}
+}
