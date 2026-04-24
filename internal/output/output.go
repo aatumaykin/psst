@@ -80,7 +80,7 @@ func (f *Formatter) SecretValue(name, value string) {
 	fmt.Printf("%s=%s\n", name, value)
 }
 
-func (f *Formatter) HistoryEntries(name string, entries []vault.SecretHistoryEntry, current *vault.Secret) {
+func (f *Formatter) HistoryEntries(name string, entries []vault.SecretHistoryEntry) {
 	if f.jsonMode {
 		f.printJSON(entries)
 		return
@@ -157,7 +157,9 @@ func (f *Formatter) IsQuiet() bool {
 func (f *Formatter) printJSON(data any) {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	enc.Encode(data)
+	if err := enc.Encode(data); err != nil {
+		fmt.Fprintf(os.Stderr, "JSON encoding error: %v\n", err)
+	}
 }
 
 func quoteValue(v string) string {

@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -69,9 +70,9 @@ var importCmd = &cobra.Command{
 	},
 }
 
-func parseEnvFromReader(file *os.File) (map[string]string, error) {
+func parseEnvFromReader(r io.Reader) (map[string]string, error) {
 	entries := make(map[string]string)
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {

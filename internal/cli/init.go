@@ -1,9 +1,6 @@
 package cli
 
 import (
-	"fmt"
-	"os"
-
 	"github.com/spf13/cobra"
 	"github.com/aatumaykin/psst/internal/keyring"
 	"github.com/aatumaykin/psst/internal/vault"
@@ -42,9 +39,9 @@ var initCmd = &cobra.Command{
 		f.Success("Vault created at " + vaultPath)
 
 		if !keychainAvailable {
-			fmt.Fprintln(os.Stderr, "⚠ Using PSST_PASSWORD (OS keychain unavailable)")
-			fmt.Fprintln(os.Stderr, "  Set PSST_PASSWORD before each use:")
-			fmt.Fprintln(os.Stderr, "    export PSST_PASSWORD=\"your-password\"")
+			f.Warning("Using PSST_PASSWORD (OS keychain unavailable)")
+			f.Bullet("Set PSST_PASSWORD before each use:")
+			f.Bullet(`export PSST_PASSWORD="your-password"`)
 		}
 	},
 }

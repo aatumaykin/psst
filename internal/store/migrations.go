@@ -1,6 +1,9 @@
 package store
 
-import "database/sql"
+import (
+	"database/sql"
+	"fmt"
+)
 
 func initSchema(db *sql.DB) error {
 	_, err := db.Exec(`
@@ -52,6 +55,10 @@ func initSchema(db *sql.DB) error {
 }
 
 func migrateAddTagsColumn(db *sql.DB, table string) error {
+	allowed := map[string]bool{"secrets": true, "secrets_history": true}
+	if !allowed[table] {
+		return fmt.Errorf("unknown table: %s", table)
+	}
 	rows, err := db.Query("PRAGMA table_info(" + table + ")")
 	if err != nil {
 		return err

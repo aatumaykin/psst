@@ -15,6 +15,10 @@ var getCmd = &cobra.Command{
 		f := getFormatter(jsonOut, quiet)
 		name := args[0]
 
+		if !validName.MatchString(name) {
+			exitWithError(fmt.Sprintf("Invalid secret name %q. Must match [A-Z][A-Z0-9_]*", name))
+		}
+
 		v, err := getUnlockedVault(jsonOut, quiet, global, env)
 		if err != nil {
 			exitWithError(err.Error())

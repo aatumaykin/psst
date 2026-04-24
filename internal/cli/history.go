@@ -33,8 +33,7 @@ var historyCmd = &cobra.Command{
 			return
 		}
 
-		sec, _ := v.GetSecret(name)
-		f.HistoryEntries(name, entries, sec)
+		f.HistoryEntries(name, entries)
 	},
 }
 

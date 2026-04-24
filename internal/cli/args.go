@@ -37,9 +37,17 @@ func parseGlobalFlagsFromArgs(args []string) (jsonOut, quiet, global bool, env s
 
 func filterSecretNames(args []string, jsonOut, quiet, global bool, env string, tags []string) []string {
 	skip := map[string]bool{"--json": true, "--quiet": true, "-q": true, "--global": true, "-g": true, "--no-mask": true}
+	valueArgs := map[int]bool{}
+	for i := 0; i < len(args); i++ {
+		if (args[i] == "--env" || args[i] == "--tag") && i+1 < len(args) {
+			valueArgs[i] = true
+			valueArgs[i+1] = true
+			i++
+		}
+	}
 	var names []string
-	for _, a := range args {
-		if skip[a] || a == "--env" || a == "--tag" || a == env {
+	for i, a := range args {
+		if skip[a] || valueArgs[i] {
 			continue
 		}
 		if !strings.HasPrefix(a, "-") {
