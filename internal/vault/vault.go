@@ -235,10 +235,13 @@ func (v *Vault) Rollback(name string, version int) error {
 		return fmt.Errorf("version %d not found", version)
 	}
 
-	newVersion := len(history) + 1
-	v.store.AddHistory(name, newVersion, current.EncryptedValue, current.IV, current.Tags)
-
-	return v.store.SetSecret(name, target.EncryptedValue, target.IV, target.Tags)
+	return v.store.ExecTx(func() error {
+		newVersion := len(history) + 1
+		if err := v.store.AddHistory(name, newVersion, current.EncryptedValue, current.IV, current.Tags); err != nil {
+			return fmt.Errorf("archive history: %w", err)
+		}
+		return v.store.SetSecret(name, target.EncryptedValue, target.IV, target.Tags)
+	})
 }
 
 func (v *Vault) AddTag(name string, tag string) error {
