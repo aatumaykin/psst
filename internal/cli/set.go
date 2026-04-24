@@ -37,11 +37,11 @@ var setCmd = &cobra.Command{
 			}
 		} else {
 			if term.IsTerminal(int(os.Stdin.Fd())) {
-				fmt.Printf("Enter value for %s: ", name)
-				passwordBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
-				fmt.Println()
-				if err != nil {
-					exitWithError(fmt.Sprintf("Failed to read password: %v", err))
+				fmt.Fprintf(os.Stdout, "Enter value for %s: ", name)
+				passwordBytes, readErr := term.ReadPassword(int(os.Stdin.Fd()))
+				fmt.Fprintln(os.Stdout)
+				if readErr != nil {
+					exitWithError(fmt.Sprintf("Failed to read password: %v", readErr))
 				}
 				value = strings.TrimSpace(string(passwordBytes))
 			} else {
@@ -61,14 +61,15 @@ var setCmd = &cobra.Command{
 		}
 		defer v.Close()
 
-		if err := v.SetSecret(name, value, tags); err != nil {
-			exitWithError(err.Error())
+		if setErr := v.SetSecret(name, value, tags); setErr != nil {
+			exitWithError(setErr.Error())
 		}
 
 		f.Success(fmt.Sprintf("Secret %s set", name))
 	},
 }
 
+//nolint:gochecknoinits // cobra command registration
 func init() {
 	setCmd.Flags().Bool("stdin", false, "Read value from stdin")
 	rootCmd.AddCommand(setCmd)

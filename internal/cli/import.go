@@ -37,9 +37,9 @@ var importCmd = &cobra.Command{
 			}
 		default:
 			if len(args) > 0 {
-				file, err := os.Open(args[0])
-				if err != nil {
-					exitWithError(fmt.Sprintf("Cannot open file: %v", err))
+				file, openErr := os.Open(args[0])
+				if openErr != nil {
+					exitWithError(fmt.Sprintf("Cannot open file: %v", openErr))
 				}
 				defer file.Close()
 				entries, err = parseEnvFromReader(file)
@@ -60,8 +60,8 @@ var importCmd = &cobra.Command{
 				}
 				continue
 			}
-			if err := v.SetSecret(name, value, nil); err != nil {
-				exitWithError(fmt.Sprintf("Failed to set %s: %v", name, err))
+			if setErr := v.SetSecret(name, value, nil); setErr != nil {
+				exitWithError(fmt.Sprintf("Failed to set %s: %v", name, setErr))
 			}
 			count++
 		}
@@ -87,13 +87,13 @@ func parseEnvFromReader(r io.Reader) (map[string]string, error) {
 	return entries, scanner.Err()
 }
 
-func parseEnvLine(line string) (name, value string, ok bool) {
-	idx := strings.Index(line, "=")
-	if idx < 0 {
+func parseEnvLine(line string) (string, string, bool) {
+	name, value, ok := strings.Cut(line, "=")
+	if !ok {
 		return "", "", false
 	}
-	name = strings.TrimSpace(line[:idx])
-	value = strings.TrimSpace(line[idx+1:])
+	name = strings.TrimSpace(name)
+	value = strings.TrimSpace(value)
 	value = strings.TrimPrefix(value, `"`)
 	value = strings.TrimSuffix(value, `"`)
 	value = strings.TrimPrefix(value, `'`)
@@ -104,12 +104,10 @@ func parseEnvLine(line string) (name, value string, ok bool) {
 func readFromEnv() map[string]string {
 	entries := make(map[string]string)
 	for _, e := range os.Environ() {
-		idx := strings.Index(e, "=")
-		if idx < 0 {
+		name, value, ok := strings.Cut(e, "=")
+		if !ok {
 			continue
 		}
-		name := e[:idx]
-		value := e[idx+1:]
 		if validName.MatchString(name) {
 			entries[name] = value
 		}
@@ -117,6 +115,7 @@ func readFromEnv() map[string]string {
 	return entries
 }
 
+//nolint:gochecknoinits // cobra command registration
 func init() {
 	importCmd.Flags().Bool("stdin", false, "Read from stdin")
 	importCmd.Flags().Bool("from-env", false, "Import from environment variables")

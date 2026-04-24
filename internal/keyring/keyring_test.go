@@ -11,8 +11,7 @@ func TestEnvVarProviderGetKey(t *testing.T) {
 	enc := crypto.NewAESGCM()
 	p := &EnvVarProvider{deriver: enc}
 
-	os.Setenv("PSST_PASSWORD", "test-password")
-	defer os.Unsetenv("PSST_PASSWORD")
+	t.Setenv("PSST_PASSWORD", "test-password")
 
 	key, err := p.GetKey("psst", "vault-key")
 	if err != nil {
@@ -48,8 +47,7 @@ func TestEnvVarProviderAvailable(t *testing.T) {
 	enc := crypto.NewAESGCM()
 	p := &EnvVarProvider{deriver: enc}
 
-	os.Setenv("PSST_PASSWORD", "test")
-	defer os.Unsetenv("PSST_PASSWORD")
+	t.Setenv("PSST_PASSWORD", "test")
 
 	if !p.IsAvailable() {
 		t.Fatal("should be available with PSST_PASSWORD set")

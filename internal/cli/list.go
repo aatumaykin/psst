@@ -7,7 +7,7 @@ import (
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all secrets",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
 		jsonOut, quiet, global, env, tags := getGlobalFlags(cmd)
 		f := getFormatter(jsonOut, quiet)
 
@@ -18,9 +18,9 @@ var listCmd = &cobra.Command{
 		defer v.Close()
 
 		if len(tags) > 0 {
-			filtered, err := v.GetSecretsByTags(tags)
-			if err != nil {
-				exitWithError(err.Error())
+			filtered, tagErr := v.GetSecretsByTags(tags)
+			if tagErr != nil {
+				exitWithError(tagErr.Error())
 			}
 			f.SecretList(filtered)
 			return
@@ -34,6 +34,7 @@ var listCmd = &cobra.Command{
 	},
 }
 
+//nolint:gochecknoinits // cobra command registration
 func init() {
 	rootCmd.AddCommand(listCmd)
 }

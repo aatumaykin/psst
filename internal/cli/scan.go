@@ -2,19 +2,21 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
+
 	"github.com/aatumaykin/psst/internal/output"
 )
 
 var scanCmd = &cobra.Command{
 	Use:   "scan",
 	Short: "Scan files for leaked secrets",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
 		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
 		f := getFormatter(jsonOut, quiet)
 		staged, _ := cmd.Flags().GetBool("staged")
@@ -57,24 +59,31 @@ var scanCmd = &cobra.Command{
 func getScanFiles(staged bool, scanPath string) ([]string, error) {
 	if scanPath != "" {
 		var files []string
-		filepath.Walk(scanPath, func(path string, info os.FileInfo, err error) error {
-			if err == nil && !info.IsDir() {
+		err := filepath.Walk(scanPath, func(path string, info os.FileInfo, walkErr error) error {
+			if walkErr == nil && !info.IsDir() {
 				files = append(files, path)
 			}
 			return nil
 		})
+		if err != nil {
+			return nil, err
+		}
 		return files, nil
 	}
 
 	if staged {
-		out, err := exec.Command("git", "diff", "--cached", "--name-only").Output()
+		out, err := exec.CommandContext(
+			context.Background(), "git", "diff", "--cached", "--name-only",
+		).Output()
 		if err != nil {
 			return nil, err
 		}
 		return splitLines(string(out)), nil
 	}
 
-	out, err := exec.Command("git", "ls-files").Output()
+	out, err := exec.CommandContext(
+		context.Background(), "git", "ls-files",
+	).Output()
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +142,7 @@ func isBinaryExtension(path string) bool {
 
 func splitLines(s string) []string {
 	var result []string
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" {
 			result = append(result, line)
@@ -142,6 +151,7 @@ func splitLines(s string) []string {
 	return result
 }
 
+//nolint:gochecknoinits // cobra command registration
 func init() {
 	scanCmd.Flags().Bool("staged", false, "Scan only staged files")
 	scanCmd.Flags().String("path", "", "Scan specific directory")

@@ -1,13 +1,15 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3" //nolint:revive,nolintlint
 )
 
 type SQLiteStore struct {
@@ -25,46 +27,53 @@ func NewSQLite(dbPath string) (*SQLiteStore, error) {
 }
 
 func (s *SQLiteStore) exec(query string, args ...any) (sql.Result, error) {
+	ctx := context.Background()
 	if s.currentTx != nil {
-		return s.currentTx.Exec(query, args...)
+		return s.currentTx.ExecContext(ctx, query, args...)
 	}
-	return s.db.Exec(query, args...)
+	return s.db.ExecContext(ctx, query, args...)
 }
 
 func (s *SQLiteStore) query(query string, args ...any) (*sql.Rows, error) {
+	ctx := context.Background()
 	if s.currentTx != nil {
-		return s.currentTx.Query(query, args...)
+		return s.currentTx.QueryContext(ctx, query, args...)
 	}
-	return s.db.Query(query, args...)
+	return s.db.QueryContext(ctx, query, args...)
 }
 
 func (s *SQLiteStore) queryRow(query string, args ...any) *sql.Row {
+	ctx := context.Background()
 	if s.currentTx != nil {
-		return s.currentTx.QueryRow(query, args...)
+		return s.currentTx.QueryRowContext(ctx, query, args...)
 	}
-	return s.db.QueryRow(query, args...)
+	return s.db.QueryRowContext(ctx, query, args...)
 }
 
-func scanTagsAndTimes(tagsJSON string, createdAt, updatedAt string) (tags []string, created, updated time.Time, err error) {
-	if err := json.Unmarshal([]byte(tagsJSON), &tags); err != nil {
-		return nil, time.Time{}, time.Time{}, fmt.Errorf("parse tags: %w", err)
+func scanTagsAndTimes(
+	tagsJSON string, createdAt, updatedAt string,
+) ([]string, time.Time, time.Time, error) {
+	var tags []string
+	if unmarshalErr := json.Unmarshal([]byte(tagsJSON), &tags); unmarshalErr != nil {
+		return nil, time.Time{}, time.Time{}, fmt.Errorf("parse tags: %w", unmarshalErr)
 	}
-	created, err = time.Parse("2006-01-02 15:04:05", createdAt)
+	created, err := time.Parse("2006-01-02 15:04:05", createdAt)
 	if err != nil {
 		return nil, time.Time{}, time.Time{}, fmt.Errorf("parse created_at: %w", err)
 	}
-	updated, err = time.Parse("2006-01-02 15:04:05", updatedAt)
+	updated, err := time.Parse("2006-01-02 15:04:05", updatedAt)
 	if err != nil {
 		return nil, time.Time{}, time.Time{}, fmt.Errorf("parse updated_at: %w", err)
 	}
 	return tags, created, updated, nil
 }
 
-func scanHistoryTagsAndTime(tagsJSON, archivedAtStr string) (tags []string, archivedAt time.Time, err error) {
-	if err := json.Unmarshal([]byte(tagsJSON), &tags); err != nil {
-		return nil, time.Time{}, fmt.Errorf("parse tags: %w", err)
+func scanHistoryTagsAndTime(tagsJSON, archivedAtStr string) ([]string, time.Time, error) {
+	var tags []string
+	if unmarshalErr := json.Unmarshal([]byte(tagsJSON), &tags); unmarshalErr != nil {
+		return nil, time.Time{}, fmt.Errorf("parse tags: %w", unmarshalErr)
 	}
-	archivedAt, err = time.Parse("2006-01-02 15:04:05", archivedAtStr)
+	archivedAt, err := time.Parse("2006-01-02 15:04:05", archivedAtStr)
 	if err != nil {
 		return nil, time.Time{}, fmt.Errorf("parse archived_at: %w", err)
 	}
@@ -74,7 +83,9 @@ func scanHistoryTagsAndTime(tagsJSON, archivedAtStr string) (tags []string, arch
 func (s *SQLiteStore) InitSchema() error {
 	err := initSchema(s.db)
 	if s.dbPath != "" {
-		os.Chmod(s.dbPath, 0600)
+		if chmodErr := os.Chmod(s.dbPath, 0600); chmodErr != nil {
+			return chmodErr
+		}
 	}
 	return err
 }
@@ -87,17 +98,19 @@ func (s *SQLiteStore) GetSecret(name string) (*StoredSecret, error) {
 	var sec StoredSecret
 	var tagsJSON string
 	var createdAt, updatedAt string
-	var err error
-	if err = row.Scan(&sec.Name, &sec.EncryptedValue, &sec.IV, &tagsJSON, &createdAt, &updatedAt); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
+	if scanErr := row.Scan(&sec.Name, &sec.EncryptedValue, &sec.IV, &tagsJSON, &createdAt, &updatedAt); scanErr != nil {
+		if errors.Is(scanErr, sql.ErrNoRows) {
+			return nil, nil //nolint:nilnil // not-found is not an error
 		}
-		return nil, fmt.Errorf("get secret: %w", err)
+		return nil, fmt.Errorf("get secret: %w", scanErr)
 	}
-	sec.Tags, sec.CreatedAt, sec.UpdatedAt, err = scanTagsAndTimes(tagsJSON, createdAt, updatedAt)
+	tags, created, updated, err := scanTagsAndTimes(tagsJSON, createdAt, updatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("parse secret metadata: %w", err)
 	}
+	sec.Tags = tags
+	sec.CreatedAt = created
+	sec.UpdatedAt = updated
 	return &sec, nil
 }
 
@@ -113,13 +126,20 @@ func (s *SQLiteStore) GetAllSecrets() ([]StoredSecret, error) {
 		var sec StoredSecret
 		var tagsJSON string
 		var createdAt, updatedAt string
-		if err := rows.Scan(&sec.Name, &sec.EncryptedValue, &sec.IV, &tagsJSON, &createdAt, &updatedAt); err != nil {
-			return nil, err
+		scanErr := rows.Scan(
+			&sec.Name, &sec.EncryptedValue, &sec.IV,
+			&tagsJSON, &createdAt, &updatedAt,
+		)
+		if scanErr != nil {
+			return nil, scanErr
 		}
-		sec.Tags, sec.CreatedAt, sec.UpdatedAt, err = scanTagsAndTimes(tagsJSON, createdAt, updatedAt)
-		if err != nil {
-			return nil, fmt.Errorf("parse secret metadata: %w", err)
+		tags, created, updated, scanErr := scanTagsAndTimes(tagsJSON, createdAt, updatedAt)
+		if scanErr != nil {
+			return nil, fmt.Errorf("parse secret metadata: %w", scanErr)
 		}
+		sec.Tags = tags
+		sec.CreatedAt = created
+		sec.UpdatedAt = updated
 		result = append(result, sec)
 	}
 	return result, nil
@@ -165,13 +185,16 @@ func (s *SQLiteStore) ListSecrets() ([]SecretMeta, error) {
 		var m SecretMeta
 		var tagsJSON string
 		var createdAt, updatedAt string
-		if err := rows.Scan(&m.Name, &tagsJSON, &createdAt, &updatedAt); err != nil {
-			return nil, err
+		if scanErr := rows.Scan(&m.Name, &tagsJSON, &createdAt, &updatedAt); scanErr != nil {
+			return nil, scanErr
 		}
-		m.Tags, m.CreatedAt, m.UpdatedAt, err = scanTagsAndTimes(tagsJSON, createdAt, updatedAt)
-		if err != nil {
-			return nil, fmt.Errorf("parse secret metadata: %w", err)
+		tags, created, updated, scanErr := scanTagsAndTimes(tagsJSON, createdAt, updatedAt)
+		if scanErr != nil {
+			return nil, fmt.Errorf("parse secret metadata: %w", scanErr)
 		}
+		m.Tags = tags
+		m.CreatedAt = created
+		m.UpdatedAt = updated
 		result = append(result, m)
 	}
 	return result, nil
@@ -192,13 +215,19 @@ func (s *SQLiteStore) GetHistory(name string) ([]HistoryEntry, error) {
 		var e HistoryEntry
 		var tagsJSON string
 		var archivedAt string
-		if err := rows.Scan(&e.ID, &e.Name, &e.Version, &e.EncryptedValue, &e.IV, &tagsJSON, &archivedAt); err != nil {
-			return nil, err
+		scanErr := rows.Scan(
+			&e.ID, &e.Name, &e.Version,
+			&e.EncryptedValue, &e.IV, &tagsJSON, &archivedAt,
+		)
+		if scanErr != nil {
+			return nil, scanErr
 		}
-		e.Tags, e.ArchivedAt, err = scanHistoryTagsAndTime(tagsJSON, archivedAt)
-		if err != nil {
-			return nil, fmt.Errorf("parse history metadata: %w", err)
+		tags, archived, scanErr := scanHistoryTagsAndTime(tagsJSON, archivedAt)
+		if scanErr != nil {
+			return nil, fmt.Errorf("parse history metadata: %w", scanErr)
 		}
+		e.Tags = tags
+		e.ArchivedAt = archived
 		result = append(result, e)
 	}
 	return result, nil
@@ -231,7 +260,7 @@ func (s *SQLiteStore) Close() error {
 }
 
 func (s *SQLiteStore) ExecTx(fn func() error) error {
-	tx, err := s.db.Begin()
+	tx, err := s.db.BeginTx(context.Background(), nil)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
@@ -239,9 +268,9 @@ func (s *SQLiteStore) ExecTx(fn func() error) error {
 	s.currentTx = tx
 	defer func() { s.currentTx = nil }()
 
-	if err := fn(); err != nil {
-		tx.Rollback()
-		return err
+	if fnErr := fn(); fnErr != nil {
+		_ = tx.Rollback()
+		return fnErr
 	}
 	return tx.Commit()
 }
@@ -256,6 +285,8 @@ func (s *SQLiteStore) GetMeta(key string) (string, error) {
 }
 
 func (s *SQLiteStore) SetMeta(key, value string) error {
-	_, err := s.exec(`INSERT INTO vault_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value)
+	q := `INSERT INTO vault_meta (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+	_, err := s.exec(q, key, value)
 	return err
 }

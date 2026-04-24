@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,7 +21,8 @@ func TestMain(m *testing.M) {
 
 	cmd := exec.Command("go", "build", "-o", binary, "./cmd/psst")
 	cmd.Dir = repoRoot()
-	if out, err := cmd.CombinedOutput(); err != nil {
+	out, buildErr := cmd.CombinedOutput()
+	if buildErr != nil {
 		os.Stderr.WriteString("build failed: " + string(out))
 		os.Exit(1)
 	}
@@ -56,7 +58,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	return &testEnv{dir: dir, binary: binary, t: t}
 }
 
-func (e *testEnv) run(args ...string) (stdout, stderr string, exitCode int) {
+func (e *testEnv) run(args ...string) (string, string, int) {
 	e.t.Helper()
 	cmd := exec.Command(e.binary, args...)
 	cmd.Dir = e.dir
@@ -68,16 +70,18 @@ func (e *testEnv) run(args ...string) (stdout, stderr string, exitCode int) {
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
 	err := cmd.Run()
-	stdout = outBuf.String()
-	stderr = errBuf.String()
+	stdout := outBuf.String()
+	stderr := errBuf.String()
+	exitCode := 0
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
 			exitCode = -1
 		}
 	}
-	return
+	return stdout, stderr, exitCode
 }
 
 func (e *testEnv) initVault() {
@@ -86,15 +90,6 @@ func (e *testEnv) initVault() {
 	if code != 0 {
 		e.t.Fatalf("init failed: %s", stdout)
 	}
-}
-
-func (e *testEnv) setSecret(name, value string) {
-	e.t.Helper()
-	stdout, _, code := e.run("set", name, "--stdin")
-	if code != 0 {
-		e.t.Fatalf("set %s failed: %s", name, stdout)
-	}
-	_ = value
 }
 
 func (e *testEnv) writeFile(name, content string) {
@@ -186,7 +181,7 @@ func TestRm(t *testing.T) {
 		t.Fatalf("rm failed: %s", stdout)
 	}
 
-	stdout, _, code = e.run("get", "MY_KEY")
+	_, _, code = e.run("get", "MY_KEY")
 	if code == 0 {
 		t.Fatal("expected non-zero exit for deleted secret")
 	}

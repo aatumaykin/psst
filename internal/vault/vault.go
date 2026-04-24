@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -46,7 +47,7 @@ func FindVaultPath(global bool, env string) (string, error) {
 	return filepath.Join(baseDir, "vault.db"), nil
 }
 
-func InitVault(vaultPath string, enc crypto.Encryptor, kp keyring.KeyProvider, opts InitOptions) error {
+func InitVault(vaultPath string, _ crypto.Encryptor, kp keyring.KeyProvider, opts InitOptions) error {
 	dir := filepath.Dir(vaultPath)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("create vault directory: %w", err)
@@ -58,20 +59,21 @@ func InitVault(vaultPath string, enc crypto.Encryptor, kp keyring.KeyProvider, o
 	}
 	defer s.Close()
 
-	if err := s.InitSchema(); err != nil {
+	if err = s.InitSchema(); err != nil {
 		return fmt.Errorf("init schema: %w", err)
 	}
 
-	if err := s.SetMeta("kdf_version", strconv.Itoa(crypto.CurrentKDFVersion)); err != nil {
+	if err = s.SetMeta("kdf_version", strconv.Itoa(crypto.CurrentKDFVersion)); err != nil {
 		return fmt.Errorf("set vault metadata: %w", err)
 	}
 
 	if !opts.SkipKeychain {
-		key, err := kp.GenerateKey()
+		var key []byte
+		key, err = kp.GenerateKey()
 		if err != nil {
 			return fmt.Errorf("generate key: %w", err)
 		}
-		if err := kp.SetKey(serviceName, accountName, key); err != nil {
+		if err = kp.SetKey(serviceName, accountName, key); err != nil {
 			return fmt.Errorf("store key in keychain: %w", err)
 		}
 	}
@@ -115,7 +117,7 @@ func (v *Vault) readKDFVersion() int {
 
 func (v *Vault) SetSecret(name string, value string, tags []string) error {
 	if v.key == nil {
-		return fmt.Errorf("vault is locked")
+		return errors.New("vault is locked")
 	}
 
 	return v.store.ExecTx(func() error {
@@ -124,15 +126,19 @@ func (v *Vault) SetSecret(name string, value string, tags []string) error {
 			return fmt.Errorf("get existing secret: %w", err)
 		}
 		if existing != nil {
-			history, err := v.store.GetHistory(name)
+			var history []store.HistoryEntry
+			history, err = v.store.GetHistory(name)
 			if err != nil {
 				return fmt.Errorf("get history: %w", err)
 			}
 			version := len(history) + 1
-			if err := v.store.AddHistory(name, version, existing.EncryptedValue, existing.IV, existing.Tags); err != nil {
+			if err = v.store.AddHistory(
+				name, version,
+				existing.EncryptedValue, existing.IV, existing.Tags,
+			); err != nil {
 				return fmt.Errorf("archive history: %w", err)
 			}
-			if err := v.store.PruneHistory(name, maxHistory); err != nil {
+			if err = v.store.PruneHistory(name, maxHistory); err != nil {
 				return fmt.Errorf("prune history: %w", err)
 			}
 		}
@@ -146,9 +152,11 @@ func (v *Vault) SetSecret(name string, value string, tags []string) error {
 	})
 }
 
+var ErrSecretNotFound = errors.New("secret not found")
+
 func (v *Vault) GetSecret(name string) (*Secret, error) {
 	if v.key == nil {
-		return nil, fmt.Errorf("vault is locked")
+		return nil, errors.New("vault is locked")
 	}
 
 	stored, err := v.store.GetSecret(name)
@@ -156,7 +164,7 @@ func (v *Vault) GetSecret(name string) (*Secret, error) {
 		return nil, err
 	}
 	if stored == nil {
-		return nil, nil
+		return nil, ErrSecretNotFound
 	}
 
 	plaintext, err := v.enc.Decrypt(stored.EncryptedValue, stored.IV, v.key)
@@ -221,7 +229,7 @@ func (v *Vault) GetHistory(name string) ([]SecretHistoryEntry, error) {
 
 func (v *Vault) Rollback(name string, version int) error {
 	if v.key == nil {
-		return fmt.Errorf("vault is locked")
+		return errors.New("vault is locked")
 	}
 
 	current, err := v.store.GetSecret(name)
@@ -250,7 +258,7 @@ func (v *Vault) Rollback(name string, version int) error {
 
 	return v.store.ExecTx(func() error {
 		newVersion := len(history) + 1
-		if err := v.store.AddHistory(name, newVersion, current.EncryptedValue, current.IV, current.Tags); err != nil {
+		if err = v.store.AddHistory(name, newVersion, current.EncryptedValue, current.IV, current.Tags); err != nil {
 			return fmt.Errorf("archive history: %w", err)
 		}
 		return v.store.SetSecret(name, target.EncryptedValue, target.IV, target.Tags)
@@ -316,7 +324,7 @@ func (v *Vault) GetSecretsByTags(tags []string) ([]SecretMeta, error) {
 
 func (v *Vault) GetAllSecrets() (map[string]string, error) {
 	if v.key == nil {
-		return nil, fmt.Errorf("vault is locked")
+		return nil, errors.New("vault is locked")
 	}
 
 	all, err := v.store.GetAllSecrets()
@@ -326,7 +334,8 @@ func (v *Vault) GetAllSecrets() (map[string]string, error) {
 
 	result := make(map[string]string, len(all))
 	for _, s := range all {
-		plaintext, err := v.enc.Decrypt(s.EncryptedValue, s.IV, v.key)
+		var plaintext []byte
+		plaintext, err = v.enc.Decrypt(s.EncryptedValue, s.IV, v.key)
 		if err != nil {
 			return nil, fmt.Errorf("decrypt %s: %w", s.Name, err)
 		}
@@ -360,7 +369,7 @@ func (v *Vault) Close() error {
 
 func (v *Vault) MigrateKDF() error {
 	if v.key == nil {
-		return fmt.Errorf("vault is locked")
+		return errors.New("vault is locked")
 	}
 
 	all, err := v.store.GetAllSecrets()
@@ -380,18 +389,21 @@ func (v *Vault) MigrateKDF() error {
 
 	return v.store.ExecTx(func() error {
 		for _, s := range all {
-			plaintext, err := v.enc.Decrypt(s.EncryptedValue, s.IV, v.key)
+			var plaintext []byte
+			plaintext, err = v.enc.Decrypt(s.EncryptedValue, s.IV, v.key)
 			if err != nil {
 				return fmt.Errorf("decrypt %s: %w", s.Name, err)
 			}
-			ciphertext, iv, err := v.enc.Encrypt(plaintext, newKey)
+			var ciphertext, iv []byte
+			ciphertext, iv, err = v.enc.Encrypt(plaintext, newKey)
 			for i := range plaintext {
 				plaintext[i] = 0
 			}
 			if err != nil {
 				return fmt.Errorf("encrypt %s: %w", s.Name, err)
 			}
-			if err := v.store.SetSecret(s.Name, ciphertext, iv, s.Tags); err != nil {
+			err = v.store.SetSecret(s.Name, ciphertext, iv, s.Tags)
+			if err != nil {
 				return fmt.Errorf("update %s: %w", s.Name, err)
 			}
 		}

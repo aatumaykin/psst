@@ -9,7 +9,8 @@ import (
 var tagCmd = &cobra.Command{
 	Use:   "tag <name> <tag>",
 	Short: "Add a tag to a secret",
-	Args:  cobra.ExactArgs(2),
+	//nolint:mnd // exact args count for command
+	Args: cobra.ExactArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
 		f := getFormatter(jsonOut, quiet)
@@ -21,8 +22,8 @@ var tagCmd = &cobra.Command{
 		}
 		defer v.Close()
 
-		if err := v.AddTag(name, tag); err != nil {
-			exitWithError(err.Error())
+		if tagErr := v.AddTag(name, tag); tagErr != nil {
+			exitWithError(tagErr.Error())
 		}
 
 		f.Success(fmt.Sprintf("Tagged %s with %s", name, tag))
@@ -32,7 +33,8 @@ var tagCmd = &cobra.Command{
 var untagCmd = &cobra.Command{
 	Use:   "untag <name> <tag>",
 	Short: "Remove a tag from a secret",
-	Args:  cobra.ExactArgs(2),
+	//nolint:mnd // exact args count for command
+	Args: cobra.ExactArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
 		f := getFormatter(jsonOut, quiet)
@@ -44,14 +46,15 @@ var untagCmd = &cobra.Command{
 		}
 		defer v.Close()
 
-		if err := v.RemoveTag(name, tag); err != nil {
-			exitWithError(err.Error())
+		if tagErr := v.RemoveTag(name, tag); tagErr != nil {
+			exitWithError(tagErr.Error())
 		}
 
 		f.Success(fmt.Sprintf("Removed tag %s from %s", tag, name))
 	},
 }
 
+//nolint:gochecknoinits // cobra command registration
 func init() {
 	rootCmd.AddCommand(tagCmd)
 	rootCmd.AddCommand(untagCmd)

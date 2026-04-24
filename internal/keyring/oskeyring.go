@@ -2,6 +2,7 @@ package keyring
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 
 	keyring "github.com/zalando/go-keyring"
@@ -47,7 +48,7 @@ func (o *OSKeyring) IsAvailable() bool {
 		return false
 	}
 	got, err := keyring.Get(testSvc, testAcc)
-	keyring.Delete(testSvc, testAcc)
+	_ = keyring.Delete(testSvc, testAcc)
 	return err == nil && got == testVal
 }
 
@@ -55,5 +56,5 @@ func (o *OSKeyring) GenerateKey() ([]byte, error) {
 	if o.deriver != nil {
 		return o.deriver.GenerateKey()
 	}
-	return nil, fmt.Errorf("no key deriver available")
+	return nil, errors.New("no key deriver available")
 }

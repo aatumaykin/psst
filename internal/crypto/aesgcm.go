@@ -12,13 +12,20 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
+const (
+	aesKeySize       = 32
+	argon2Iterations = 3
+	argon2Memory     = 64 * 1024
+	argon2Threads    = 4
+)
+
 type AESGCM struct{}
 
 func NewAESGCM() *AESGCM {
 	return &AESGCM{}
 }
 
-func (a *AESGCM) Encrypt(plaintext []byte, key []byte) (ciphertext, iv []byte, err error) {
+func (a *AESGCM) Encrypt(plaintext []byte, key []byte) ([]byte, []byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create cipher: %w", err)
@@ -29,12 +36,12 @@ func (a *AESGCM) Encrypt(plaintext []byte, key []byte) (ciphertext, iv []byte, e
 		return nil, nil, fmt.Errorf("create GCM: %w", err)
 	}
 
-	iv = make([]byte, gcm.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+	iv := make([]byte, gcm.NonceSize())
+	if _, err = io.ReadFull(rand.Reader, iv); err != nil {
 		return nil, nil, fmt.Errorf("generate IV: %w", err)
 	}
 
-	ciphertext = gcm.Seal(nil, iv, plaintext, nil)
+	ciphertext := gcm.Seal(nil, iv, plaintext, nil)
 	return ciphertext, iv, nil
 }
 
@@ -59,7 +66,7 @@ func (a *AESGCM) Decrypt(ciphertext []byte, iv []byte, key []byte) ([]byte, erro
 
 func (a *AESGCM) KeyToBuffer(key string) ([]byte, error) {
 	decoded, err := base64.StdEncoding.DecodeString(key)
-	if err == nil && len(decoded) == 32 {
+	if err == nil && len(decoded) == aesKeySize {
 		return decoded, nil
 	}
 
@@ -69,16 +76,16 @@ func (a *AESGCM) KeyToBuffer(key string) ([]byte, error) {
 
 func (a *AESGCM) KeyToBufferV2(key string) ([]byte, error) {
 	decoded, err := base64.StdEncoding.DecodeString(key)
-	if err == nil && len(decoded) == 32 {
+	if err == nil && len(decoded) == aesKeySize {
 		return decoded, nil
 	}
 
 	salt := sha256.Sum256([]byte("psst-argon2id-v2-salt"))
-	return argon2.IDKey([]byte(key), salt[:], 3, 64*1024, 4, 32), nil
+	return argon2.IDKey([]byte(key), salt[:], argon2Iterations, argon2Memory, argon2Threads, aesKeySize), nil
 }
 
 func (a *AESGCM) GenerateKey() ([]byte, error) {
-	key := make([]byte, 32)
+	key := make([]byte, aesKeySize)
 	if _, err := io.ReadFull(rand.Reader, key); err != nil {
 		return nil, fmt.Errorf("generate key: %w", err)
 	}

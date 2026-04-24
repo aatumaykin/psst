@@ -10,7 +10,7 @@ import (
 var listEnvsCmd = &cobra.Command{
 	Use:   "list-envs",
 	Short: "List all environments",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
 		jsonOut, quiet, _, _, _ := getGlobalFlags(cmd)
 		f := getFormatter(jsonOut, quiet)
 
@@ -39,7 +39,7 @@ func scanEnvDir(dir string) []string {
 	for _, e := range entries {
 		if e.IsDir() {
 			dbPath := filepath.Join(dir, e.Name(), "vault.db")
-			if _, err := os.Stat(dbPath); err == nil {
+			if _, statErr := os.Stat(dbPath); statErr == nil {
 				envs = append(envs, e.Name())
 			}
 		}
@@ -59,6 +59,7 @@ func dedupe(s []string) []string {
 	return result
 }
 
+//nolint:gochecknoinits // cobra command registration
 func init() {
 	rootCmd.AddCommand(listEnvsCmd)
 }

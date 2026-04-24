@@ -7,7 +7,14 @@ import (
 	"github.com/aatumaykin/psst/internal/runner"
 )
 
-func handleExecPatternDirect(secretNames []string, commandArgs []string, jsonOut, quiet, global bool, env string, tags []string, noMask bool) {
+func handleExecPatternDirect(
+	secretNames []string,
+	commandArgs []string,
+	jsonOut, quiet, global bool,
+	env string,
+	tags []string,
+	noMask bool,
+) int {
 	v, err := getUnlockedVault(jsonOut, quiet, global, env)
 	if err != nil {
 		exitWithError(err.Error())
@@ -17,17 +24,17 @@ func handleExecPatternDirect(secretNames []string, commandArgs []string, jsonOut
 	secrets := make(map[string]string)
 
 	if len(tags) > 0 {
-		names, err := v.GetSecretNamesByTags(tags)
-		if err != nil {
-			exitWithError(err.Error())
+		names, tagErr := v.GetSecretNamesByTags(tags)
+		if tagErr != nil {
+			exitWithError(tagErr.Error())
 		}
 		secretNames = append(secretNames, names...)
 	}
 
 	for _, name := range secretNames {
-		sec, err := v.GetSecret(name)
-		if err != nil {
-			exitWithError(err.Error())
+		sec, getErr := v.GetSecret(name)
+		if getErr != nil {
+			exitWithError(getErr.Error())
 		}
 		if sec != nil {
 			secrets[name] = sec.Value
@@ -36,9 +43,9 @@ func handleExecPatternDirect(secretNames []string, commandArgs []string, jsonOut
 
 	r := getRunner()
 	maskOutput := !noMask
-	code, err := r.Exec(secrets, commandArgs[0], commandArgs[1:], runner.ExecOptions{MaskOutput: maskOutput})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Command failed: %v\n", err)
+	code, execErr := r.Exec(secrets, commandArgs[0], commandArgs[1:], runner.ExecOptions{MaskOutput: maskOutput})
+	if execErr != nil {
+		fmt.Fprintf(os.Stderr, "Command failed: %v\n", execErr)
 	}
-	os.Exit(code)
+	return code
 }

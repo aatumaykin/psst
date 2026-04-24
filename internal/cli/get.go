@@ -37,6 +37,7 @@ var getCmd = &cobra.Command{
 	},
 }
 
+//nolint:gochecknoinits // cobra command registration
 func init() {
 	rootCmd.AddCommand(getCmd)
 }

@@ -19,10 +19,10 @@ Examples:
   psst completion zsh > ~/.zfunc/_psst
   psst completion zsh > "${fpath[1]}/_psst"
   psst completion zsh > ~/.oh-my-zsh/custom/plugins/psst/psst.plugin.zsh`,
-	Args:              cobra.ExactArgs(1),
-	ValidArgs:         []string{"zsh"},
+	Args:               cobra.ExactArgs(1),
+	ValidArgs:          []string{"zsh"},
 	DisableFlagParsing: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, args []string) error {
 		switch args[0] {
 		case "zsh":
 			return rootCmd.GenZshCompletion(os.Stdout)
@@ -32,6 +32,7 @@ Examples:
 	},
 }
 
+//nolint:gochecknoinits // cobra command registration
 func init() {
 	rootCmd.AddCommand(completionCmd)
 }

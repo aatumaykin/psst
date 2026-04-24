@@ -1,7 +1,8 @@
 package vault
 
 import (
-	"fmt"
+	"encoding/hex"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,21 +16,21 @@ type testKeyProvider struct {
 	key []byte
 }
 
-func (t *testKeyProvider) GetKey(service, account string) ([]byte, error) {
+func (t *testKeyProvider) GetKey(_, _ string) ([]byte, error) {
 	if t.key == nil {
-		return nil, fmt.Errorf("no key")
+		return nil, errors.New("no key")
 	}
 	return t.key, nil
 }
 
-func (t *testKeyProvider) GetRawKey(service, account string) (string, error) {
+func (t *testKeyProvider) GetRawKey(_, _ string) (string, error) {
 	if t.key == nil {
-		return "", fmt.Errorf("no key")
+		return "", errors.New("no key")
 	}
-	return fmt.Sprintf("%x", t.key), nil
+	return hex.EncodeToString(t.key), nil
 }
 
-func (t *testKeyProvider) SetKey(service, account string, key []byte) error {
+func (t *testKeyProvider) SetKey(_, _ string, key []byte) error {
 	t.key = key
 	return nil
 }
@@ -49,7 +50,7 @@ func setupTestVault(t *testing.T) *Vault {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.InitSchema(); err != nil {
+	if err = s.InitSchema(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -211,13 +212,13 @@ func TestVault_LockedOperations(t *testing.T) {
 
 	v := New(enc, kp, s)
 
-	if err := v.SetSecret("A", "val", nil); err == nil {
+	if err = v.SetSecret("A", "val", nil); err == nil {
 		t.Fatal("SetSecret on locked vault should fail")
 	}
-	if _, err := v.GetSecret("A"); err == nil {
+	if _, err = v.GetSecret("A"); err == nil {
 		t.Fatal("GetSecret on locked vault should fail")
 	}
-	if _, err := v.GetAllSecrets(); err == nil {
+	if _, err = v.GetAllSecrets(); err == nil {
 		t.Fatal("GetAllSecrets on locked vault should fail")
 	}
 }

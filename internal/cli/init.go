@@ -2,6 +2,7 @@ package cli
 
 import (
 	"github.com/spf13/cobra"
+
 	"github.com/aatumaykin/psst/internal/keyring"
 	"github.com/aatumaykin/psst/internal/vault"
 )
@@ -9,7 +10,7 @@ import (
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Create a new vault",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
 		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
 		f := getFormatter(jsonOut, quiet)
 
@@ -22,7 +23,10 @@ var initCmd = &cobra.Command{
 		envPasswordSet := keyring.IsEnvPasswordSet()
 
 		if !keychainAvailable && !envPasswordSet {
-			exitWithError("OS keychain unavailable. Set PSST_PASSWORD before running init:\n  export PSST_PASSWORD=\"your-password\"\n  psst init")
+			exitWithError(
+				"OS keychain unavailable. Set PSST_PASSWORD before running init:\n" +
+					"  export PSST_PASSWORD=\"your-password\"\n" +
+					"  psst init")
 		}
 
 		enc, kp := createDependencies()
@@ -32,8 +36,8 @@ var initCmd = &cobra.Command{
 			Env:    env,
 		}
 
-		if err := vault.InitVault(vaultPath, enc, kp, opts); err != nil {
-			exitWithError(err.Error())
+		if initErr := vault.InitVault(vaultPath, enc, kp, opts); initErr != nil {
+			exitWithError(initErr.Error())
 		}
 
 		f.Success("Vault created at " + vaultPath)
@@ -46,6 +50,7 @@ var initCmd = &cobra.Command{
 	},
 }
 
+//nolint:gochecknoinits // cobra command registration
 func init() {
 	rootCmd.AddCommand(initCmd)
 }

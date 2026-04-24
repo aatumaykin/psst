@@ -1,12 +1,14 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 )
 
 func initSchema(db *sql.DB) error {
-	_, err := db.Exec(`
+	ctx := context.Background()
+	_, err := db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS secrets (
 			name TEXT PRIMARY KEY,
 			encrypted_value BLOB NOT NULL,
@@ -20,7 +22,7 @@ func initSchema(db *sql.DB) error {
 		return err
 	}
 
-	_, err = db.Exec(`
+	_, err = db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS secrets_history (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name TEXT NOT NULL,
@@ -36,12 +38,12 @@ func initSchema(db *sql.DB) error {
 		return err
 	}
 
-	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_secrets_history_name ON secrets_history(name)`)
+	_, err = db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_secrets_history_name ON secrets_history(name)`)
 	if err != nil {
 		return err
 	}
 
-	_, err = db.Exec(`
+	_, err = db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS vault_meta (
 			key TEXT PRIMARY KEY,
 			value TEXT NOT NULL
@@ -55,11 +57,12 @@ func initSchema(db *sql.DB) error {
 }
 
 func migrateAddTagsColumn(db *sql.DB, table string) error {
+	ctx := context.Background()
 	allowed := map[string]bool{"secrets": true, "secrets_history": true}
 	if !allowed[table] {
 		return fmt.Errorf("unknown table: %s", table)
 	}
-	rows, err := db.Query("PRAGMA table_info(" + table + ")")
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info("+table+")")
 	if err != nil {
 		return err
 	}
@@ -70,10 +73,10 @@ func migrateAddTagsColumn(db *sql.DB, table string) error {
 		var cid int
 		var name, colType string
 		var notNull int
-		var dfltValue interface{}
+		var dfltValue any
 		var pk int
-		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
-			return err
+		if scanErr := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); scanErr != nil {
+			return scanErr
 		}
 		if name == "tags" {
 			hasTags = true
@@ -81,9 +84,9 @@ func migrateAddTagsColumn(db *sql.DB, table string) error {
 	}
 
 	if !hasTags {
-		_, err := db.Exec("ALTER TABLE " + table + " ADD COLUMN tags TEXT DEFAULT '[]'")
-		if err != nil {
-			return err
+		q := "ALTER TABLE " + table + " ADD COLUMN tags TEXT DEFAULT '[]'" //nolint:gosec // table validated against allowlist
+		if _, alterErr := db.ExecContext(ctx, q); alterErr != nil {
+			return alterErr
 		}
 	}
 	return nil

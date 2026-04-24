@@ -2,12 +2,16 @@ package runner
 
 import (
 	"bufio"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
 )
+
+const maxScanSize = 1024 * 1024
 
 type ExecOptions struct {
 	MaskOutput bool
@@ -27,7 +31,7 @@ func (r *Runner) Exec(secrets map[string]string, command string, args []string, 
 		expandedArgs[i] = ExpandEnvVars(a, secrets)
 	}
 
-	cmd := exec.Command(command, expandedArgs...)
+	cmd := exec.CommandContext(context.Background(), command, expandedArgs...)
 	cmd.Env = env
 
 	if opts.MaskOutput {
@@ -52,7 +56,7 @@ func (r *Runner) runWithMasking(cmd *exec.Cmd, secrets map[string]string) (int, 
 	}
 	cmd.Stdin = os.Stdin
 
-	if err := cmd.Start(); err != nil {
+	if err = cmd.Start(); err != nil {
 		return 1, err
 	}
 
@@ -67,15 +71,15 @@ func (r *Runner) runWithMasking(cmd *exec.Cmd, secrets map[string]string) (int, 
 
 func streamWithMasking(src io.Reader, dst io.Writer, secrets []string) {
 	if len(secrets) == 0 {
-		io.Copy(dst, src)
+		_, _ = io.Copy(dst, src)
 		return
 	}
 
 	scanner := bufio.NewScanner(src)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	scanner.Buffer(make([]byte, maxScanSize), maxScanSize)
 	for scanner.Scan() {
 		line := scanner.Text() + "\n"
-		dst.Write([]byte(MaskSecrets(line, secrets)))
+		_, _ = dst.Write([]byte(MaskSecrets(line, secrets)))
 	}
 }
 
@@ -107,7 +111,8 @@ func exitCode(err error) int {
 	if err == nil {
 		return 0
 	}
-	if exitErr, ok := err.(*exec.ExitError); ok {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
 		return exitErr.ExitCode()
 	}
 	return 1

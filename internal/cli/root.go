@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
 	"github.com/aatumaykin/psst/internal/crypto"
 	"github.com/aatumaykin/psst/internal/keyring"
 	"github.com/aatumaykin/psst/internal/output"
@@ -14,9 +15,9 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:          "psst",
-	Short:        "AI-native secrets manager",
-	Long:         "Because your agent doesn't need to know your secrets.",
+	Use:           "psst",
+	Short:         "AI-native secrets manager",
+	Long:          "Because your agent doesn't need to know your secrets.",
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }
@@ -39,14 +40,17 @@ func Execute() error {
 
 		if len(commandArgs) > 0 && (len(secretNames) > 0 || len(tags) > 0) {
 			noMask := containsFlag(args, "--no-mask")
-			handleExecPatternDirect(secretNames, commandArgs, jsonOut, quiet, global, env, tags, noMask)
-			return nil
+			os.Exit(handleExecPatternDirect(
+				secretNames, commandArgs,
+				jsonOut, quiet, global, env, tags, noMask,
+			))
 		}
 	}
 
 	return rootCmd.Execute()
 }
 
+//nolint:gochecknoinits // cobra command registration
 func init() {
 	rootCmd.PersistentFlags().Bool("json", false, "JSON output")
 	rootCmd.PersistentFlags().BoolP("quiet", "q", false, "Quiet mode")
@@ -55,12 +59,12 @@ func init() {
 	rootCmd.PersistentFlags().StringArray("tag", nil, "Filter by tag (repeatable)")
 }
 
-func getGlobalFlags(cmd *cobra.Command) (jsonOut, quiet, global bool, env string, tags []string) {
-	jsonOut, _ = cmd.Flags().GetBool("json")
-	quiet, _ = cmd.Flags().GetBool("quiet")
-	global, _ = cmd.Flags().GetBool("global")
-	env, _ = cmd.Flags().GetString("env")
-	tags, _ = cmd.Flags().GetStringArray("tag")
+func getGlobalFlags(cmd *cobra.Command) (bool, bool, bool, string, []string) {
+	jsonOut, _ := cmd.Flags().GetBool("json")
+	quiet, _ := cmd.Flags().GetBool("quiet")
+	global, _ := cmd.Flags().GetBool("global")
+	env, _ := cmd.Flags().GetString("env")
+	tags, _ := cmd.Flags().GetStringArray("tag")
 
 	if os.Getenv("PSST_GLOBAL") == "1" {
 		global = true
@@ -68,7 +72,7 @@ func getGlobalFlags(cmd *cobra.Command) (jsonOut, quiet, global bool, env string
 	if env == "" {
 		env = os.Getenv("PSST_ENV")
 	}
-	return
+	return jsonOut, quiet, global, env, tags
 }
 
 func getFormatter(jsonOut, quiet bool) *output.Formatter {
@@ -91,8 +95,10 @@ func getUnlockedVault(jsonOut, quiet, global bool, env string) (*vault.Vault, er
 		return nil, err
 	}
 
-	if _, err := os.Stat(vaultPath); os.IsNotExist(err) {
+	//nolint:gosec // user-provided path is intentional for CLI tool
+	if _, statErr := os.Stat(vaultPath); os.IsNotExist(statErr) {
 		printNoVault(jsonOut, quiet)
+		//nolint:mnd // exit code for missing vault
 		os.Exit(3)
 	}
 
@@ -104,9 +110,10 @@ func getUnlockedVault(jsonOut, quiet, global bool, env string) (*vault.Vault, er
 	}
 
 	v := vault.New(enc, kp, s)
-	if err := v.Unlock(); err != nil {
-		s.Close()
+	if unlockErr := v.Unlock(); unlockErr != nil {
+		_ = s.Close()
 		printAuthFailed(jsonOut, quiet)
+		//nolint:mnd // exit code for auth failure
 		os.Exit(5)
 	}
 	return v, nil

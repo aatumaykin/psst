@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 )
@@ -28,7 +29,7 @@ var historyCmd = &cobra.Command{
 
 		if len(entries) == 0 {
 			if !quiet {
-				fmt.Printf("No history for %s\n", name)
+				fmt.Fprintf(os.Stdout, "No history for %s\n", name)
 			}
 			return
 		}
@@ -37,6 +38,7 @@ var historyCmd = &cobra.Command{
 	},
 }
 
+//nolint:gochecknoinits // cobra command registration
 func init() {
 	rootCmd.AddCommand(historyCmd)
 }

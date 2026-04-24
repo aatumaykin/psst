@@ -22,14 +22,15 @@ var rmCmd = &cobra.Command{
 		}
 		defer v.Close()
 
-		if err := v.DeleteSecret(name); err != nil {
-			exitWithError(err.Error())
+		if delErr := v.DeleteSecret(name); delErr != nil {
+			exitWithError(delErr.Error())
 		}
 
 		f.Success(fmt.Sprintf("Secret %s removed", name))
 	},
 }
 
+//nolint:gochecknoinits // cobra command registration
 func init() {
 	rootCmd.AddCommand(rmCmd)
 }

@@ -1,7 +1,7 @@
 package store
 
 import (
-	"fmt"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -15,8 +15,8 @@ func setupTestStore(t *testing.T) *SQLiteStore {
 	if err != nil {
 		t.Fatalf("NewSQLite: %v", err)
 	}
-	if err := s.InitSchema(); err != nil {
-		t.Fatalf("InitSchema: %v", err)
+	if initErr := s.InitSchema(); initErr != nil {
+		t.Fatalf("InitSchema: %v", initErr)
 	}
 	t.Cleanup(func() { s.Close() })
 	return s
@@ -186,7 +186,7 @@ func TestExecTx_Rollback(t *testing.T) {
 
 	err := s.ExecTx(func() error {
 		s.SetSecret("TX", []byte("enc"), []byte("iv"), nil)
-		return fmt.Errorf("intentional error")
+		return errors.New("intentional error")
 	})
 	if err == nil {
 		t.Fatal("ExecTx should return error")
@@ -224,8 +224,8 @@ func TestMeta(t *testing.T) {
 		t.Fatalf("expected empty, got %q", val)
 	}
 
-	if err := s.SetMeta("kdf_version", "2"); err != nil {
-		t.Fatalf("SetMeta failed: %v", err)
+	if setErr := s.SetMeta("kdf_version", "2"); setErr != nil {
+		t.Fatalf("SetMeta failed: %v", setErr)
 	}
 
 	val, _ = s.GetMeta("kdf_version")
@@ -243,7 +243,7 @@ func TestVaultFileCreated(t *testing.T) {
 	}
 	s.InitSchema()
 	s.Close()
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+	if _, statErr := os.Stat(dbPath); os.IsNotExist(statErr) {
 		t.Fatal("vault.db should be created")
 	}
 }

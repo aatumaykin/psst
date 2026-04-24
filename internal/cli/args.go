@@ -2,10 +2,14 @@ package cli
 
 import (
 	"os"
+	"slices"
 	"strings"
 )
 
-func parseGlobalFlagsFromArgs(args []string) (jsonOut, quiet, global bool, env string, tags []string) {
+func parseGlobalFlagsFromArgs(args []string) (bool, bool, bool, string, []string) {
+	var jsonOut, quiet, global bool
+	var env string
+	var tags []string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--json":
@@ -32,11 +36,19 @@ func parseGlobalFlagsFromArgs(args []string) (jsonOut, quiet, global bool, env s
 	if env == "" {
 		env = os.Getenv("PSST_ENV")
 	}
-	return
+	return jsonOut, quiet, global, env, tags
 }
 
-func filterSecretNames(args []string, jsonOut, quiet, global bool, env string, tags []string) []string {
-	skip := map[string]bool{"--json": true, "--quiet": true, "-q": true, "--global": true, "-g": true, "--no-mask": true}
+func filterSecretNames(
+	args []string,
+	_, _, _ bool,
+	_ string,
+	_ []string,
+) []string {
+	skip := map[string]bool{
+		"--json": true, "--quiet": true, "-q": true,
+		"--global": true, "-g": true, "--no-mask": true,
+	}
 	valueArgs := map[int]bool{}
 	for i := 0; i < len(args); i++ {
 		if (args[i] == "--env" || args[i] == "--tag") && i+1 < len(args) {
@@ -58,10 +70,5 @@ func filterSecretNames(args []string, jsonOut, quiet, global bool, env string, t
 }
 
 func containsFlag(args []string, flag string) bool {
-	for _, a := range args {
-		if a == flag {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(args, flag)
 }

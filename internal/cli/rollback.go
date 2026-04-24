@@ -26,14 +26,15 @@ var rollbackCmd = &cobra.Command{
 		}
 		defer v.Close()
 
-		if err := v.Rollback(name, toVersion); err != nil {
-			exitWithError(err.Error())
+		if rbErr := v.Rollback(name, toVersion); rbErr != nil {
+			exitWithError(rbErr.Error())
 		}
 
 		f.Success(fmt.Sprintf("Rolled back %s to v%d", name, toVersion))
 	},
 }
 
+//nolint:gochecknoinits // cobra command registration
 func init() {
 	rollbackCmd.Flags().Int("to", 0, "Version number to rollback to")
 	rootCmd.AddCommand(rollbackCmd)

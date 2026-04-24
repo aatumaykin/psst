@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
 	"github.com/aatumaykin/psst/internal/runner"
 )
 
@@ -36,6 +37,7 @@ var runCmd = &cobra.Command{
 	},
 }
 
+//nolint:gochecknoinits // cobra command registration
 func init() {
 	runCmd.Flags().Bool("no-mask", false, "Disable output masking")
 	rootCmd.AddCommand(runCmd)
