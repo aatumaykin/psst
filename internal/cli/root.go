@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/aatumaykin/psst/internal/crypto"
@@ -80,6 +79,12 @@ func getRunner() *runner.Runner {
 	return runner.New()
 }
 
+func createDependencies() (crypto.Encryptor, keyring.KeyProvider) {
+	enc := crypto.NewAESGCM()
+	kp := keyring.NewProvider(enc)
+	return enc, kp
+}
+
 func getUnlockedVault(jsonOut, quiet, global bool, env string) (*vault.Vault, error) {
 	vaultPath, err := vault.FindVaultPath(global, env)
 	if err != nil {
@@ -91,8 +96,7 @@ func getUnlockedVault(jsonOut, quiet, global bool, env string) (*vault.Vault, er
 		os.Exit(3)
 	}
 
-	enc := crypto.NewAESGCM()
-	kp := keyring.NewProvider(enc)
+	enc, kp := createDependencies()
 
 	s, err := store.NewSQLite(vaultPath)
 	if err != nil {
@@ -125,57 +129,4 @@ func printAuthFailed(jsonOut, quiet bool) {
 func exitWithError(msg string) {
 	fmt.Fprintf(os.Stderr, "✗ %s\n", msg)
 	os.Exit(1)
-}
-
-func parseGlobalFlagsFromArgs(args []string) (jsonOut, quiet, global bool, env string, tags []string) {
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--json":
-			jsonOut = true
-		case "--quiet", "-q":
-			quiet = true
-		case "--global", "-g":
-			global = true
-		case "--env":
-			i++
-			if i < len(args) {
-				env = args[i]
-			}
-		case "--tag":
-			i++
-			if i < len(args) {
-				tags = append(tags, args[i])
-			}
-		}
-	}
-	if os.Getenv("PSST_GLOBAL") == "1" {
-		global = true
-	}
-	if env == "" {
-		env = os.Getenv("PSST_ENV")
-	}
-	return
-}
-
-func filterSecretNames(args []string, jsonOut, quiet, global bool, env string, tags []string) []string {
-	skip := map[string]bool{"--json": true, "--quiet": true, "-q": true, "--global": true, "-g": true, "--no-mask": true}
-	var names []string
-	for _, a := range args {
-		if skip[a] || a == "--env" || a == "--tag" || a == env {
-			continue
-		}
-		if !strings.HasPrefix(a, "-") {
-			names = append(names, a)
-		}
-	}
-	return names
-}
-
-func containsFlag(args []string, flag string) bool {
-	for _, a := range args {
-		if a == flag {
-			return true
-		}
-	}
-	return false
 }

@@ -5,7 +5,6 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/aatumaykin/psst/internal/crypto"
 	"github.com/aatumaykin/psst/internal/keyring"
 	"github.com/aatumaykin/psst/internal/vault"
 )
@@ -29,8 +28,7 @@ var initCmd = &cobra.Command{
 			exitWithError("OS keychain unavailable. Set PSST_PASSWORD before running init:\n  export PSST_PASSWORD=\"your-password\"\n  psst init")
 		}
 
-		enc := crypto.NewAESGCM()
-		kp := keyring.NewProvider(enc)
+		enc, kp := createDependencies()
 
 		opts := vault.InitOptions{
 			Global: global,

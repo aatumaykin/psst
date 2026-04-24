@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"bufio"
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -91,18 +91,18 @@ func scanFile(path string, secrets map[string]string) []output.ScanMatch {
 		return nil
 	}
 
-	file, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
-	defer file.Close()
+
+	data = bytes.TrimPrefix(data, []byte("\xEF\xBB\xBF"))
 
 	var results []output.ScanMatch
-	scanner := bufio.NewScanner(file)
 	lineNum := 0
-	for scanner.Scan() {
+	for _, line := range splitLines(string(data)) {
 		lineNum++
-		line := scanner.Text()
+		line = strings.TrimRight(line, "\r")
 		if strings.ContainsRune(line, 0) {
 			return nil
 		}

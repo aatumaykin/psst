@@ -1,15 +1,22 @@
 package vault
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/aatumaykin/psst/internal/crypto"
 	"github.com/aatumaykin/psst/internal/keyring"
 	"github.com/aatumaykin/psst/internal/store"
 )
+
+type Vault struct {
+	enc   crypto.Encryptor
+	kp    keyring.KeyProvider
+	store store.SecretStore
+	key   []byte
+}
 
 const (
 	serviceName = "psst"
@@ -17,14 +24,7 @@ const (
 	maxHistory  = 10
 )
 
-type Vault struct {
-	enc   *crypto.AESGCM
-	kp    keyring.KeyProvider
-	store *store.SQLiteStore
-	key   []byte
-}
-
-func New(enc *crypto.AESGCM, kp keyring.KeyProvider, s *store.SQLiteStore) *Vault {
+func New(enc crypto.Encryptor, kp keyring.KeyProvider, s store.SecretStore) *Vault {
 	return &Vault{enc: enc, kp: kp, store: s}
 }
 
@@ -45,7 +45,7 @@ func FindVaultPath(global bool, env string) (string, error) {
 	return filepath.Join(baseDir, "vault.db"), nil
 }
 
-func InitVault(vaultPath string, enc *crypto.AESGCM, kp keyring.KeyProvider, opts InitOptions) error {
+func InitVault(vaultPath string, enc crypto.Encryptor, kp keyring.KeyProvider, opts InitOptions) error {
 	dir := filepath.Dir(vaultPath)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("create vault directory: %w", err)
@@ -88,20 +88,32 @@ func (v *Vault) SetSecret(name string, value string, tags []string) error {
 		return fmt.Errorf("vault is locked")
 	}
 
-	existing, _ := v.store.GetSecret(name)
-	if existing != nil {
-		history, _ := v.store.GetHistory(name)
-		version := len(history) + 1
-		v.store.AddHistory(name, version, existing.EncryptedValue, existing.IV, existing.Tags)
-		v.store.PruneHistory(name, maxHistory)
-	}
+	return v.store.ExecTx(func() error {
+		existing, err := v.store.GetSecret(name)
+		if err != nil {
+			return fmt.Errorf("get existing secret: %w", err)
+		}
+		if existing != nil {
+			history, err := v.store.GetHistory(name)
+			if err != nil {
+				return fmt.Errorf("get history: %w", err)
+			}
+			version := len(history) + 1
+			if err := v.store.AddHistory(name, version, existing.EncryptedValue, existing.IV, existing.Tags); err != nil {
+				return fmt.Errorf("archive history: %w", err)
+			}
+			if err := v.store.PruneHistory(name, maxHistory); err != nil {
+				return fmt.Errorf("prune history: %w", err)
+			}
+		}
 
-	ciphertext, iv, err := v.enc.Encrypt([]byte(value), v.key)
-	if err != nil {
-		return fmt.Errorf("encrypt: %w", err)
-	}
+		ciphertext, iv, err := v.enc.Encrypt([]byte(value), v.key)
+		if err != nil {
+			return fmt.Errorf("encrypt: %w", err)
+		}
 
-	return v.store.SetSecret(name, ciphertext, iv, tags)
+		return v.store.SetSecret(name, ciphertext, iv, tags)
+	})
 }
 
 func (v *Vault) GetSecret(name string) (*Secret, error) {
@@ -132,20 +144,7 @@ func (v *Vault) GetSecret(name string) (*Secret, error) {
 }
 
 func (v *Vault) ListSecrets() ([]SecretMeta, error) {
-	metas, err := v.store.ListSecrets()
-	if err != nil {
-		return nil, err
-	}
-	result := make([]SecretMeta, len(metas))
-	for i, m := range metas {
-		result[i] = SecretMeta{
-			Name:      m.Name,
-			Tags:      m.Tags,
-			CreatedAt: m.CreatedAt,
-			UpdatedAt: m.UpdatedAt,
-		}
-	}
-	return result, nil
+	return v.store.ListSecrets()
 }
 
 func (v *Vault) DeleteSecret(name string) error {
@@ -215,10 +214,8 @@ func (v *Vault) AddTag(name string, tag string) error {
 		return fmt.Errorf("secret %q not found", name)
 	}
 
-	for _, t := range sec.Tags {
-		if t == tag {
-			return nil
-		}
+	if slices.Contains(sec.Tags, tag) {
+		return nil
 	}
 	sec.Tags = append(sec.Tags, tag)
 	return v.store.SetSecret(name, sec.EncryptedValue, sec.IV, sec.Tags)
@@ -256,14 +253,11 @@ func (v *Vault) GetSecretsByTags(tags []string) ([]SecretMeta, error) {
 	var result []SecretMeta
 	for _, s := range all {
 		for _, wantTag := range tags {
-			for _, hasTag := range s.Tags {
-				if wantTag == hasTag {
-					result = append(result, s)
-					goto next
-				}
+			if slices.Contains(s.Tags, wantTag) {
+				result = append(result, s)
+				break
 			}
 		}
-	next:
 	}
 	return result, nil
 }
@@ -273,22 +267,18 @@ func (v *Vault) GetAllSecrets() (map[string]string, error) {
 		return nil, fmt.Errorf("vault is locked")
 	}
 
-	metas, err := v.store.ListSecrets()
+	all, err := v.store.GetAllSecrets()
 	if err != nil {
 		return nil, err
 	}
 
-	result := make(map[string]string, len(metas))
-	for _, m := range metas {
-		stored, err := v.store.GetSecret(m.Name)
+	result := make(map[string]string, len(all))
+	for _, s := range all {
+		plaintext, err := v.enc.Decrypt(s.EncryptedValue, s.IV, v.key)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("decrypt %s: %w", s.Name, err)
 		}
-		plaintext, err := v.enc.Decrypt(stored.EncryptedValue, stored.IV, v.key)
-		if err != nil {
-			return nil, fmt.Errorf("decrypt %s: %w", m.Name, err)
-		}
-		result[m.Name] = string(plaintext)
+		result[s.Name] = string(plaintext)
 	}
 	return result, nil
 }
@@ -307,10 +297,4 @@ func (v *Vault) GetSecretNamesByTags(tags []string) ([]string, error) {
 
 func (v *Vault) Close() error {
 	return v.store.Close()
-}
-
-func parseTagsJSON(jsonStr string) []string {
-	var tags []string
-	json.Unmarshal([]byte(jsonStr), &tags)
-	return tags
 }

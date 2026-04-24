@@ -60,11 +60,5 @@ func dedupe(s []string) []string {
 }
 
 func init() {
-	var envsSubCmd = &cobra.Command{
-		Use:   "envs",
-		Short: "List all environments",
-		Run:   listEnvsCmd.Run,
-	}
-	listCmd.AddCommand(envsSubCmd)
 	rootCmd.AddCommand(listEnvsCmd)
 }

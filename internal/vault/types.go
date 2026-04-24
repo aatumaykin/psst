@@ -2,6 +2,8 @@ package vault
 
 import (
 	"time"
+
+	"github.com/aatumaykin/psst/internal/store"
 )
 
 type Secret struct {
@@ -12,12 +14,7 @@ type Secret struct {
 	UpdatedAt time.Time
 }
 
-type SecretMeta struct {
-	Name      string
-	Tags      []string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-}
+type SecretMeta = store.SecretMeta
 
 type SecretHistoryEntry struct {
 	Version    int

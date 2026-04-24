@@ -31,6 +31,7 @@ type HistoryEntry struct {
 type SecretStore interface {
 	InitSchema() error
 	GetSecret(name string) (*StoredSecret, error)
+	GetAllSecrets() ([]StoredSecret, error)
 	SetSecret(name string, encValue, iv []byte, tags []string) error
 	DeleteSecret(name string) error
 	DeleteHistory(name string) error
@@ -38,5 +39,6 @@ type SecretStore interface {
 	GetHistory(name string) ([]HistoryEntry, error)
 	AddHistory(name string, version int, encValue, iv []byte, tags []string) error
 	PruneHistory(name string, keepVersions int) error
+	ExecTx(fn func() error) error
 	Close() error
 }
