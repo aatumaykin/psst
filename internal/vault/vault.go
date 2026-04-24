@@ -180,7 +180,20 @@ func (v *Vault) GetSecret(name string) (*Secret, error) {
 }
 
 func (v *Vault) ListSecrets() ([]SecretMeta, error) {
-	return v.store.ListSecrets()
+	storeMetas, err := v.store.ListSecrets()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]SecretMeta, len(storeMetas))
+	for i, m := range storeMetas {
+		result[i] = SecretMeta{
+			Name:      m.Name,
+			Tags:      m.Tags,
+			CreatedAt: m.CreatedAt,
+			UpdatedAt: m.UpdatedAt,
+		}
+	}
+	return result, nil
 }
 
 func (v *Vault) DeleteSecret(name string) error {
