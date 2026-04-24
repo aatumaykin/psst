@@ -27,7 +27,7 @@ func NewFormatter(jsonMode, quiet bool) *Formatter {
 
 func (f *Formatter) Success(msg string) {
 	if f.jsonMode {
-		f.printJSON(map[string]string{"status": "success", "message": msg})
+		f.PrintJSON(map[string]string{"status": "success", "message": msg})
 		return
 	}
 	if f.quiet {
@@ -56,7 +56,7 @@ func (f *Formatter) Bullet(msg string) {
 
 func (f *Formatter) SecretList(secrets []vault.SecretMeta) {
 	if f.jsonMode {
-		f.printJSON(secrets)
+		f.PrintJSON(secrets)
 		return
 	}
 	for _, s := range secrets {
@@ -70,7 +70,7 @@ func (f *Formatter) SecretList(secrets []vault.SecretMeta) {
 
 func (f *Formatter) SecretValue(name, value string) {
 	if f.jsonMode {
-		f.printJSON(map[string]string{name: value})
+		f.PrintJSON(map[string]string{name: value})
 		return
 	}
 	if f.quiet {
@@ -82,7 +82,7 @@ func (f *Formatter) SecretValue(name, value string) {
 
 func (f *Formatter) HistoryEntries(name string, entries []vault.SecretHistoryEntry) {
 	if f.jsonMode {
-		f.printJSON(entries)
+		f.PrintJSON(entries)
 		return
 	}
 	fmt.Fprintf(os.Stdout, "\nHistory for %s:\n\n", name)
@@ -100,7 +100,7 @@ func (f *Formatter) ScanResults(results []ScanMatch) {
 		return
 	}
 	if f.jsonMode {
-		f.printJSON(results)
+		f.PrintJSON(results)
 		return
 	}
 	fmt.Fprintf(os.Stderr, "✗ Secrets found in files:\n\n")
@@ -112,7 +112,7 @@ func (f *Formatter) ScanResults(results []ScanMatch) {
 
 func (f *Formatter) EnvList(secrets map[string]string) {
 	if f.jsonMode {
-		f.printJSON(secrets)
+		f.PrintJSON(secrets)
 		return
 	}
 	for name, value := range secrets {
@@ -128,7 +128,7 @@ func (f *Formatter) EnvListWriter(secrets map[string]string, w io.Writer) {
 
 func (f *Formatter) EnvironmentList(envs []string) {
 	if f.jsonMode {
-		f.printJSON(envs)
+		f.PrintJSON(envs)
 		return
 	}
 	if len(envs) == 0 {
@@ -154,7 +154,7 @@ func (f *Formatter) IsQuiet() bool {
 	return f.quiet
 }
 
-func (f *Formatter) printJSON(data any) {
+func (f *Formatter) PrintJSON(data any) {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(data); err != nil {
