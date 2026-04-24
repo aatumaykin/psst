@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/aatumaykin/psst/internal/vault"
+	"github.com/aatumaykin/psst/internal/version"
 )
 
 type ScanMatch struct {
@@ -152,6 +153,18 @@ func (f *Formatter) IsJSON() bool {
 
 func (f *Formatter) IsQuiet() bool {
 	return f.quiet
+}
+
+func (f *Formatter) VersionInfo() {
+	if f.jsonMode {
+		f.PrintJSON(version.JSON())
+		return
+	}
+	if f.quiet {
+		fmt.Fprintln(os.Stdout, version.Version)
+		return
+	}
+	fmt.Fprint(os.Stdout, version.String()+"\n")
 }
 
 func (f *Formatter) PrintJSON(data any) {
