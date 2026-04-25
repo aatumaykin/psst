@@ -192,10 +192,7 @@ func TestParseChecksums(t *testing.T) {
 def456  psst_1.2.3_linux_arm64.tar.gz
 789abc  checksums.txt
 `
-	got, err := parseChecksums([]byte(data))
-	if err != nil {
-		t.Fatalf("parseChecksums() error: %v", err)
-	}
+	got := parseChecksums([]byte(data))
 	if len(got) != 3 {
 		t.Fatalf("len(checksums) = %d, want 3", len(got))
 	}
@@ -228,10 +225,7 @@ func TestVerifyChecksum(t *testing.T) {
 }
 
 func TestParseChecksumsEmpty(t *testing.T) {
-	got, err := parseChecksums([]byte(""))
-	if err != nil {
-		t.Fatalf("parseChecksums() error: %v", err)
-	}
+	got := parseChecksums([]byte(""))
 	if len(got) != 0 {
 		t.Errorf("len(checksums) = %d, want 0", len(got))
 	}
@@ -279,15 +273,15 @@ func TestReplaceBinary(t *testing.T) {
 		t.Fatalf("replaceBinary() error: %v", err)
 	}
 
-	data, err := os.ReadFile(oldPath)
-	if err != nil {
-		t.Fatal(err)
+	data, readErr := os.ReadFile(oldPath)
+	if readErr != nil {
+		t.Fatal(readErr)
 	}
 	if string(data) != "new" {
 		t.Errorf("old binary content = %q, want %q", string(data), "new")
 	}
 
-	if _, err := os.Stat(newPath); !os.IsNotExist(err) {
+	if _, statErr := os.Stat(newPath); !os.IsNotExist(statErr) {
 		t.Error("new binary should be removed after replacement")
 	}
 }
@@ -309,11 +303,11 @@ func createTestTarGz(t *testing.T, dir, name string, content []byte) string {
 		Mode: 0o755,
 		Size: int64(len(content)),
 	}
-	if err := tw.WriteHeader(hdr); err != nil {
-		t.Fatal(err)
+	if writeErr := tw.WriteHeader(hdr); writeErr != nil {
+		t.Fatal(writeErr)
 	}
-	if _, err := tw.Write(content); err != nil {
-		t.Fatal(err)
+	if _, writeContentErr := tw.Write(content); writeContentErr != nil {
+		t.Fatal(writeContentErr)
 	}
 
 	tw.Close()

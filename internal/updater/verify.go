@@ -7,21 +7,20 @@ import (
 	"strings"
 )
 
-func parseChecksums(data []byte) (map[string]string, error) {
+func parseChecksums(data []byte) map[string]string {
 	checksums := make(map[string]string)
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "  ", 2)
-		if len(parts) != 2 {
+		parts := strings.SplitN(line, "  ", 2) //nolint:mnd // checksum format: hash  filename
+		if len(parts) != 2 {                   //nolint:mnd // exactly 2 parts expected
 			continue
 		}
 		checksums[parts[1]] = parts[0]
 	}
-	return checksums, nil
+	return checksums
 }
 
 func verifyChecksum(checksums map[string]string, filename string, data []byte) error {

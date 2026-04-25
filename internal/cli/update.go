@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/spf13/cobra"
 
@@ -31,7 +32,7 @@ var updateCheckCmd = &cobra.Command{
 			f.PrintJSON(map[string]string{
 				"current": version.Version,
 				"latest":  info.LatestVersion,
-				"update":  fmt.Sprintf("%v", info.IsNewer()),
+				"update":  strconv.FormatBool(info.IsNewer()),
 			})
 			return
 		}
@@ -78,8 +79,8 @@ var updateInstallCmd = &cobra.Command{
 			fmt.Fprintf(os.Stdout, "Updating from v%s to v%s...\n", info.CurrentVersion, info.LatestVersion)
 		}
 
-		if err := updater.PerformUpdate(info, force); err != nil {
-			exitWithError(fmt.Sprintf("Update failed: %v", err))
+		if updateErr := updater.PerformUpdate(info, force); updateErr != nil {
+			exitWithError(fmt.Sprintf("Update failed: %v", updateErr))
 		}
 
 		if !quiet {

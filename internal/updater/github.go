@@ -1,7 +1,9 @@
 package updater
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,21 +12,28 @@ import (
 
 const defaultGitHubAPIURL = "https://api.github.com/repos/aatumaykin/psst/releases/latest"
 
-var httpClient = &http.Client{Timeout: 15 * time.Second}
+const httpTimeoutSec = 15
+
+var httpClient = &http.Client{Timeout: httpTimeoutSec * time.Second}
 
 func fetchLatestRelease() (*ReleaseInfo, error) {
 	return fetchLatestReleaseWithURL(defaultGitHubAPIURL)
 }
 
 func fetchLatestReleaseWithURL(apiURL string) (*ReleaseInfo, error) {
-	resp, err := httpClient.Get(apiURL)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch release: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusForbidden {
-		return nil, fmt.Errorf("GitHub API rate limit exceeded. Try again later")
+		return nil, errors.New("GitHub API rate limit exceeded. Try again later")
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -32,19 +41,24 @@ func fetchLatestReleaseWithURL(apiURL string) (*ReleaseInfo, error) {
 	}
 
 	var release ReleaseInfo
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return nil, fmt.Errorf("decode release: %w", err)
+	if decodeErr := json.NewDecoder(resp.Body).Decode(&release); decodeErr != nil {
+		return nil, fmt.Errorf("decode release: %w", decodeErr)
 	}
 
 	if release.TagName == "" {
-		return nil, fmt.Errorf("release has no tag name")
+		return nil, errors.New("release has no tag name")
 	}
 
 	return &release, nil
 }
 
 func downloadFile(url string) ([]byte, error) {
-	resp, err := httpClient.Get(url)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create download request: %w", err)
+	}
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("download %s: %w", url, err)
 	}
@@ -54,9 +68,9 @@ func downloadFile(url string) ([]byte, error) {
 		return nil, fmt.Errorf("download %s: status %d", url, resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("download %s: read body: %w", url, err)
+	body, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return nil, fmt.Errorf("download %s: read body: %w", url, readErr)
 	}
 
 	return body, nil

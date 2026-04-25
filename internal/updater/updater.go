@@ -24,6 +24,7 @@ type ReleaseInfo struct {
 		URL  string `json:"browser_download_url"`
 	} `json:"assets"`
 }
+
 func CheckForUpdate() (*UpdateInfo, error) {
 	release, err := fetchLatestRelease()
 	if err != nil {
@@ -75,8 +76,8 @@ func compareVersions(a, b string) int {
 	a = strings.TrimPrefix(a, "v")
 	b = strings.TrimPrefix(b, "v")
 
-	aParts := strings.SplitN(a, "-", 2)
-	bParts := strings.SplitN(b, "-", 2)
+	aParts := strings.SplitN(a, "-", 2) //nolint:mnd // split into version and prerelease
+	bParts := strings.SplitN(b, "-", 2) //nolint:mnd // split into version and prerelease
 
 	cmp := compareVersionParts(aParts[0], bParts[0])
 	if cmp != 0 {
@@ -114,10 +115,7 @@ func compareVersionParts(a, b string) int {
 	aNums := strings.Split(a, ".")
 	bNums := strings.Split(b, ".")
 
-	maxLen := len(aNums)
-	if len(bNums) > maxLen {
-		maxLen = len(bNums)
-	}
+	maxLen := max(len(aNums), len(bNums))
 
 	for i := range maxLen {
 		aVal := 0

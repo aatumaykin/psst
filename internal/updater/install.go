@@ -3,6 +3,7 @@ package updater
 import (
 	"archive/tar"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -20,108 +21,107 @@ func PerformUpdate(info *UpdateInfo, force bool) error {
 		return fmt.Errorf("download checksums: %w", err)
 	}
 
-	archiveData, err := downloadFile(info.DownloadURL)
-	if err != nil {
-		return fmt.Errorf("download archive: %w", err)
+	archiveData, archiveErr := downloadFile(info.DownloadURL)
+	if archiveErr != nil {
+		return fmt.Errorf("download archive: %w", archiveErr)
 	}
 
-	checksums, err := parseChecksums(checksumData)
-	if err != nil {
-		return fmt.Errorf("parse checksums: %w", err)
+	checksums := parseChecksums(checksumData)
+
+	if verifyErr := verifyChecksum(checksums, info.AssetName, archiveData); verifyErr != nil {
+		return fmt.Errorf("verify checksum: %w", verifyErr)
 	}
 
-	if err := verifyChecksum(checksums, info.AssetName, archiveData); err != nil {
-		return fmt.Errorf("verify checksum: %w", err)
-	}
-
-	tmpDir, err := os.MkdirTemp("", "psst-update-*")
-	if err != nil {
-		return fmt.Errorf("create temp dir: %w", err)
+	tmpDir, tmpErr := os.MkdirTemp("", "psst-update-*")
+	if tmpErr != nil {
+		return fmt.Errorf("create temp dir: %w", tmpErr)
 	}
 	defer os.RemoveAll(tmpDir)
 
 	archivePath := filepath.Join(tmpDir, info.AssetName)
-	if err := os.WriteFile(archivePath, archiveData, 0o644); err != nil {
-		return fmt.Errorf("write archive: %w", err)
+	if writeErr := os.WriteFile(archivePath, archiveData, 0o600); writeErr != nil {
+		return fmt.Errorf("write archive: %w", writeErr)
 	}
 
-	binaryData, err := extractBinaryFromTarGz(archivePath)
-	if err != nil {
-		return fmt.Errorf("extract binary: %w", err)
+	binaryData, extractErr := extractBinaryFromTarGz(archivePath)
+	if extractErr != nil {
+		return fmt.Errorf("extract binary: %w", extractErr)
 	}
 
 	if runtime.GOOS == "windows" {
-		return fmt.Errorf("windows update not yet supported via tar.gz extraction")
+		return errors.New("windows update not yet supported via tar.gz extraction")
 	}
 
-	currentExe, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("find current binary: %w", err)
+	currentExe, exeErr := os.Executable()
+	if exeErr != nil {
+		return fmt.Errorf("find current binary: %w", exeErr)
 	}
 
 	newBinaryPath := filepath.Join(tmpDir, "psst-new")
-	if err := os.WriteFile(newBinaryPath, binaryData, 0o755); err != nil {
-		return fmt.Errorf("write new binary: %w", err)
+	//nolint:gosec // executable binary needs execute permission
+	if binErr := os.WriteFile(newBinaryPath, binaryData, 0o755); binErr != nil {
+		return fmt.Errorf("write new binary: %w", binErr)
 	}
 
-	if err := replaceBinary(currentExe, newBinaryPath); err != nil {
-		return fmt.Errorf("replace binary: %w", err)
+	if replaceErr := replaceBinary(currentExe, newBinaryPath); replaceErr != nil {
+		return fmt.Errorf("replace binary: %w", replaceErr)
 	}
 
 	return nil
 }
 
 func extractBinaryFromTarGz(archivePath string) ([]byte, error) {
-	f, err := os.Open(archivePath)
-	if err != nil {
-		return nil, fmt.Errorf("open archive: %w", err)
+	f, openErr := os.Open(archivePath)
+	if openErr != nil {
+		return nil, fmt.Errorf("open archive: %w", openErr)
 	}
 	defer f.Close()
 
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		return nil, fmt.Errorf("gzip reader: %w", err)
+	gz, gzErr := gzip.NewReader(f)
+	if gzErr != nil {
+		return nil, fmt.Errorf("gzip reader: %w", gzErr)
 	}
 	defer gz.Close()
 
 	tr := tar.NewReader(gz)
 	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
+		hdr, nextErr := tr.Next()
+		if nextErr == io.EOF {
 			break
 		}
-		if err != nil {
-			return nil, fmt.Errorf("read tar: %w", err)
+		if nextErr != nil {
+			return nil, fmt.Errorf("read tar: %w", nextErr)
 		}
 
 		if hdr.Name == "psst" || filepath.Base(hdr.Name) == "psst" {
-			data, err := io.ReadAll(tr)
-			if err != nil {
-				return nil, fmt.Errorf("read binary from tar: %w", err)
+			data, readErr := io.ReadAll(tr)
+			if readErr != nil {
+				return nil, fmt.Errorf("read binary from tar: %w", readErr)
 			}
 			return data, nil
 		}
 	}
 
-	return nil, fmt.Errorf("binary 'psst' not found in archive")
+	return nil, errors.New("binary 'psst' not found in archive")
 }
 
 func replaceBinary(currentPath, newPath string) error {
-	if err := os.Chmod(newPath, 0o755); err != nil {
-		return fmt.Errorf("chmod new binary: %w", err)
+	//nolint:gosec // executable binary needs execute permission
+	if chmodErr := os.Chmod(newPath, 0o755); chmodErr != nil {
+		return fmt.Errorf("chmod new binary: %w", chmodErr)
 	}
 
 	backupPath := currentPath + ".bak"
-	if err := os.Rename(currentPath, backupPath); err != nil {
-		if err := copyFile(newPath, currentPath); err != nil {
-			return fmt.Errorf("copy over current binary: %w", err)
+	if renameErr := os.Rename(currentPath, backupPath); renameErr != nil {
+		if copyErr := copyFile(newPath, currentPath); copyErr != nil {
+			return fmt.Errorf("copy over current binary: %w", copyErr)
 		}
 		return os.Remove(newPath)
 	}
 
-	if err := os.Rename(newPath, currentPath); err != nil {
+	if moveErr := os.Rename(newPath, currentPath); moveErr != nil {
 		_ = os.Rename(backupPath, currentPath)
-		return fmt.Errorf("rename new binary: %w", err)
+		return fmt.Errorf("rename new binary: %w", moveErr)
 	}
 
 	_ = os.Remove(backupPath)
@@ -129,20 +129,20 @@ func replaceBinary(currentPath, newPath string) error {
 }
 
 func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
+	in, openErr := os.Open(src)
+	if openErr != nil {
+		return openErr
 	}
 	defer in.Close()
 
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
+	out, createErr := os.Create(dst)
+	if createErr != nil {
+		return createErr
 	}
 	defer out.Close()
 
-	if _, err := io.Copy(out, in); err != nil {
-		return err
+	if _, copyErr := io.Copy(out, in); copyErr != nil {
+		return copyErr
 	}
 
 	return out.Sync()
