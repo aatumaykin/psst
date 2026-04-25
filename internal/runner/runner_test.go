@@ -180,6 +180,70 @@ func TestExpandEnvVars_LongerNameFirst(t *testing.T) {
 	}
 }
 
+func TestExec_NoMasking(t *testing.T) {
+	r := New()
+	secrets := map[string]string{"MY_KEY": "myvalue"}
+	code, execErr := r.Exec(secrets, "echo", []string{"hello"}, ExecOptions{MaskOutput: false})
+	if execErr != nil {
+		t.Fatalf("Exec() error: %v", execErr)
+	}
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+}
+
+func TestExec_WithMasking(t *testing.T) {
+	r := New()
+	secrets := map[string]string{"MY_SECRET": "secret123"}
+	code, execErr := r.Exec(secrets, "echo", []string{"secret123"}, ExecOptions{MaskOutput: true})
+	if execErr != nil {
+		t.Fatalf("Exec() error: %v", execErr)
+	}
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+}
+
+func TestExec_ManyLinesWithMasking(t *testing.T) {
+	r := New()
+	secrets := map[string]string{"KEY": "val"}
+	code, execErr := r.Exec(secrets, "seq", []string{"100"}, ExecOptions{MaskOutput: true})
+	if execErr != nil {
+		t.Fatalf("Exec() error: %v", execErr)
+	}
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+}
+
+func TestExec_EnvInjected(t *testing.T) {
+	r := New()
+	secrets := map[string]string{"TEST_INJECT": "injected_value"}
+	code, execErr := r.Exec(secrets, "printenv", []string{"TEST_INJECT"}, ExecOptions{MaskOutput: false})
+	if execErr != nil {
+		t.Fatalf("Exec() error: %v", execErr)
+	}
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+}
+
+func TestExec_ExitCode(t *testing.T) {
+	r := New()
+	code, _ := r.Exec(map[string]string{}, "false", []string{}, ExecOptions{MaskOutput: false})
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+}
+
+func TestExec_NonexistentCommand(t *testing.T) {
+	r := New()
+	_, execErr := r.Exec(map[string]string{}, "nonexistent_cmd_xyz", []string{}, ExecOptions{MaskOutput: false})
+	if execErr == nil {
+		t.Fatal("expected error for nonexistent command")
+	}
+}
+
 func TestExpandEnvVars_BothForms(t *testing.T) {
 	env := map[string]string{"KEY": "val"}
 	got := ExpandEnvVars("prefix-${KEY}-$KEY-suffix", env)

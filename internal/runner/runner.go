@@ -41,32 +41,44 @@ func (r *Runner) Exec(secrets map[string]string, command string, args []string, 
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	return exitCode(err), err
+	runErr := cmd.Run()
+	return exitCode(runErr), runErr
 }
 
 func (r *Runner) runWithMasking(cmd *exec.Cmd, secrets map[string]string) (int, error) {
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return 1, err
+	stdoutPipe, pipeErr := cmd.StdoutPipe()
+	if pipeErr != nil {
+		return 1, pipeErr
 	}
-	stderrPipe, err := cmd.StderrPipe()
-	if err != nil {
-		return 1, err
+	stderrPipe, pipeErr := cmd.StderrPipe()
+	if pipeErr != nil {
+		return 1, pipeErr
 	}
 	cmd.Stdin = os.Stdin
 
-	if err = cmd.Start(); err != nil {
-		return 1, err
+	if startErr := cmd.Start(); startErr != nil {
+		return 1, startErr
 	}
 
 	secretValues := filterEmpty(secrets)
 
-	go streamWithMasking(stdoutPipe, os.Stdout, secretValues)
-	go streamWithMasking(stderrPipe, os.Stderr, secretValues)
+	doneStdout := make(chan struct{})
+	doneStderr := make(chan struct{})
 
-	err = cmd.Wait()
-	return exitCode(err), err
+	go func() {
+		streamWithMasking(stdoutPipe, os.Stdout, secretValues)
+		close(doneStdout)
+	}()
+	go func() {
+		streamWithMasking(stderrPipe, os.Stderr, secretValues)
+		close(doneStderr)
+	}()
+
+	<-doneStdout
+	<-doneStderr
+
+	waitErr := cmd.Wait()
+	return exitCode(waitErr), waitErr
 }
 
 func streamWithMasking(src io.Reader, dst io.Writer, secrets []string) {
@@ -75,11 +87,16 @@ func streamWithMasking(src io.Reader, dst io.Writer, secrets []string) {
 		return
 	}
 
-	scanner := bufio.NewScanner(src)
-	scanner.Buffer(make([]byte, maxScanSize), maxScanSize)
-	for scanner.Scan() {
-		line := scanner.Text() + "\n"
-		_, _ = dst.Write([]byte(MaskSecrets(line, secrets)))
+	reader := bufio.NewReaderSize(src, maxScanSize)
+	for {
+		line, readErr := reader.ReadString('\n')
+		if line != "" {
+			masked := MaskSecrets(line, secrets)
+			_, _ = dst.Write([]byte(masked))
+		}
+		if readErr != nil {
+			break
+		}
 	}
 }
 
