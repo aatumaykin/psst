@@ -1,6 +1,8 @@
 package vault
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -67,6 +69,14 @@ func InitVault(vaultPath string, _ crypto.Encryptor, kp keyring.KeyProvider, opt
 		return fmt.Errorf("set vault metadata: %w", err)
 	}
 
+	salt := make([]byte, 16)
+	if _, err = rand.Read(salt); err != nil {
+		return fmt.Errorf("generate salt: %w", err)
+	}
+	if err = s.SetMeta("kdf_salt", base64.StdEncoding.EncodeToString(salt)); err != nil {
+		return fmt.Errorf("set kdf salt: %w", err)
+	}
+
 	if !opts.SkipKeychain {
 		var key []byte
 		key, err = kp.GenerateKey()
@@ -91,7 +101,16 @@ func (v *Vault) Unlock() error {
 	var key []byte
 	switch kdfVersion {
 	case crypto.KDFVersion2:
-		key, err = v.enc.KeyToBufferV2(rawKey)
+		saltB64, _ := v.store.GetMeta("kdf_salt")
+		if saltB64 != "" {
+			salt, decodeErr := base64.StdEncoding.DecodeString(saltB64)
+			if decodeErr != nil {
+				return fmt.Errorf("decode kdf_salt: %w", decodeErr)
+			}
+			key, err = v.enc.KeyToBufferV2WithSalt(rawKey, salt)
+		} else {
+			key, err = v.enc.KeyToBufferV2(rawKey)
+		}
 	default:
 		key, err = v.enc.KeyToBuffer(rawKey)
 	}
@@ -115,7 +134,7 @@ func (v *Vault) readKDFVersion() int {
 	return n
 }
 
-func (v *Vault) SetSecret(name string, value string, tags []string) error {
+func (v *Vault) SetSecret(name string, value []byte, tags []string) error {
 	if v.key == nil {
 		return errors.New("vault is locked")
 	}
@@ -143,7 +162,7 @@ func (v *Vault) SetSecret(name string, value string, tags []string) error {
 			}
 		}
 
-		ciphertext, iv, err := v.enc.Encrypt([]byte(value), v.key)
+		ciphertext, iv, err := v.enc.Encrypt(value, v.key)
 		if err != nil {
 			return fmt.Errorf("encrypt: %w", err)
 		}
@@ -172,15 +191,9 @@ func (v *Vault) GetSecret(name string) (*Secret, error) {
 		return nil, fmt.Errorf("decrypt: %w", err)
 	}
 
-	defer func() {
-		for i := range plaintext {
-			plaintext[i] = 0
-		}
-	}()
-
 	return &Secret{
 		Name:      stored.Name,
-		Value:     string(plaintext),
+		Value:     plaintext,
 		Tags:      stored.Tags,
 		CreatedAt: stored.CreatedAt,
 		UpdatedAt: stored.UpdatedAt,
@@ -322,7 +335,7 @@ func (v *Vault) GetSecretsByTags(tags []string) ([]SecretMeta, error) {
 	return result, nil
 }
 
-func (v *Vault) GetAllSecrets() (map[string]string, error) {
+func (v *Vault) GetAllSecrets() (map[string][]byte, error) {
 	if v.key == nil {
 		return nil, errors.New("vault is locked")
 	}
@@ -332,17 +345,14 @@ func (v *Vault) GetAllSecrets() (map[string]string, error) {
 		return nil, err
 	}
 
-	result := make(map[string]string, len(all))
+	result := make(map[string][]byte, len(all))
 	for _, s := range all {
 		var plaintext []byte
 		plaintext, err = v.enc.Decrypt(s.EncryptedValue, s.IV, v.key)
 		if err != nil {
 			return nil, fmt.Errorf("decrypt %s: %w", s.Name, err)
 		}
-		result[s.Name] = string(plaintext)
-		for i := range plaintext {
-			plaintext[i] = 0
-		}
+		result[s.Name] = plaintext
 	}
 	return result, nil
 }
@@ -385,6 +395,18 @@ func (v *Vault) MigrateKDF() error {
 	newKey, err := v.enc.KeyToBufferV2(rawKey)
 	if err != nil {
 		return fmt.Errorf("derive new key: %w", err)
+	}
+
+	saltB64, _ := v.store.GetMeta("kdf_salt")
+	if saltB64 != "" {
+		salt, decodeErr := base64.StdEncoding.DecodeString(saltB64)
+		if decodeErr != nil {
+			return fmt.Errorf("decode kdf_salt: %w", decodeErr)
+		}
+		newKey, err = v.enc.KeyToBufferV2WithSalt(rawKey, salt)
+		if err != nil {
+			return fmt.Errorf("derive key with salt: %w", err)
+		}
 	}
 
 	return v.store.ExecTx(func() error {

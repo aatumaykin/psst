@@ -38,6 +38,11 @@ var scanCmd = &cobra.Command{
 			return
 		}
 
+		strSecrets := make(map[string]string, len(secrets))
+		for k, v := range secrets {
+			strSecrets[k] = string(v)
+		}
+
 		files, err := getScanFiles(staged, scanPath)
 		if err != nil {
 			exitWithError(err.Error())
@@ -45,7 +50,7 @@ var scanCmd = &cobra.Command{
 
 		var results []output.ScanMatch
 		for _, file := range files {
-			matches := scanFile(file, secrets)
+			matches := scanFile(file, strSecrets)
 			results = append(results, matches...)
 		}
 

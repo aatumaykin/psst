@@ -33,7 +33,7 @@ var getCmd = &cobra.Command{
 			exitWithError(fmt.Sprintf("Secret %q not found", name))
 		}
 
-		f.SecretValue(name, sec.Value)
+		f.SecretValue(name, string(sec.Value))
 	},
 }
 

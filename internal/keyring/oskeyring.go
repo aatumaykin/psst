@@ -12,21 +12,6 @@ type OSKeyring struct {
 	deriver KeyDeriver
 }
 
-func (o *OSKeyring) GetKey(service, account string) ([]byte, error) {
-	encoded, err := keyring.Get(service, account)
-	if err != nil {
-		return nil, fmt.Errorf("get from keychain: %w", err)
-	}
-	if o.deriver != nil {
-		return o.deriver.KeyToBuffer(encoded)
-	}
-	decoded, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		return nil, fmt.Errorf("decode key: %w", err)
-	}
-	return decoded, nil
-}
-
 func (o *OSKeyring) GetRawKey(service, account string) (string, error) {
 	encoded, err := keyring.Get(service, account)
 	if err != nil {

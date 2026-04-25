@@ -456,3 +456,73 @@ func TestVersionJSON(t *testing.T) {
 		t.Fatalf("expected JSON with version field, got: %s", stdout)
 	}
 }
+
+func TestRmInvalidName(t *testing.T) {
+	e := newTestEnv(t)
+	e.initVault()
+
+	_, stderr, code := e.run("rm", "bad-name")
+	if code == 0 {
+		t.Fatal("expected non-zero exit for invalid name")
+	}
+	if !strings.Contains(stderr, "Invalid secret name") {
+		t.Fatalf("expected 'Invalid secret name' error, got: %s", stderr)
+	}
+}
+
+func TestRollbackInvalidName(t *testing.T) {
+	e := newTestEnv(t)
+	e.initVault()
+
+	_, stderr, code := e.run("rollback", "bad-name", "--to", "1")
+	if code == 0 {
+		t.Fatal("expected non-zero exit for invalid name")
+	}
+	if !strings.Contains(stderr, "Invalid secret name") {
+		t.Fatalf("expected 'Invalid secret name' error, got: %s", stderr)
+	}
+}
+
+func TestTagInvalidName(t *testing.T) {
+	e := newTestEnv(t)
+	e.initVault()
+
+	_, stderr, code := e.run("tag", "bad-name", "aws")
+	if code == 0 {
+		t.Fatal("expected non-zero exit for invalid name")
+	}
+	if !strings.Contains(stderr, "Invalid secret name") {
+		t.Fatalf("expected 'Invalid secret name' error, got: %s", stderr)
+	}
+}
+
+func TestImportFromEnvWithPrefix(t *testing.T) {
+	e := newTestEnv(t)
+	e.initVault()
+
+	cmd := exec.Command(e.binary, "import", "--from-env", "--prefix", "MYAPP_")
+	cmd.Dir = e.dir
+	cmd.Env = append(os.Environ(),
+		"PSST_PASSWORD=test-password",
+		"HOME="+e.dir,
+		"MYAPP_KEY=val1",
+		"OTHER_KEY=val2",
+	)
+	out, _ := cmd.CombinedOutput()
+	output := string(out)
+
+	if !strings.Contains(output, "Imported") {
+		t.Fatalf("import --from-env --prefix failed: %s", output)
+	}
+
+	stdout, _, code := e.run("list")
+	if code != 0 {
+		t.Fatalf("list failed: %s", stdout)
+	}
+	if !strings.Contains(stdout, "MYAPP_KEY") {
+		t.Fatalf("MYAPP_KEY should be in list, got: %s", stdout)
+	}
+	if strings.Contains(stdout, "OTHER_KEY") {
+		t.Fatalf("OTHER_KEY should NOT be in list (prefix filter), got: %s", stdout)
+	}
+}

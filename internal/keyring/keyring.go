@@ -11,7 +11,6 @@ type KeyDeriver interface {
 }
 
 type KeyProvider interface {
-	GetKey(service, account string) ([]byte, error)
 	GetRawKey(service, account string) (string, error)
 	SetKey(service, account string, key []byte) error
 	IsAvailable() bool

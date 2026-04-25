@@ -25,18 +25,23 @@ var exportCmd = &cobra.Command{
 			exitWithError(err.Error())
 		}
 
+		strSecrets := make(map[string]string, len(secrets))
+		for k, v := range secrets {
+			strSecrets[k] = string(v)
+		}
+
 		if envFile != "" {
 			file, fileErr := os.OpenFile(envFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 			if fileErr != nil {
 				exitWithError("Cannot create file: " + fileErr.Error())
 			}
 			defer file.Close()
-			f.EnvListWriter(secrets, file)
+			f.EnvListWriter(strSecrets, file)
 		} else {
 			if jsonOut {
-				f.EnvList(secrets)
+				f.EnvList(strSecrets)
 			} else {
-				f.EnvListWriter(secrets, os.Stdout)
+				f.EnvListWriter(strSecrets, os.Stdout)
 			}
 		}
 

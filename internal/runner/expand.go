@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-func ExpandEnvVars(arg string, env map[string]string) string {
+func ExpandEnvVars(arg string, env map[string][]byte) string {
 	names := make([]string, 0, len(env))
 	for name := range env {
 		names = append(names, name)
@@ -14,7 +14,7 @@ func ExpandEnvVars(arg string, env map[string]string) string {
 
 	result := arg
 	for _, name := range names {
-		value := env[name]
+		value := string(env[name])
 		result = strings.ReplaceAll(result, "${"+name+"}", value)
 		result = replaceBareVar(result, name, value)
 	}

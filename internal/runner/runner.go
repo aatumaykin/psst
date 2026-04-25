@@ -8,7 +8,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
+	"syscall"
 )
 
 const maxScanSize = 1024 * 1024
@@ -23,7 +25,18 @@ func New() *Runner {
 	return &Runner{}
 }
 
-func (r *Runner) Exec(secrets map[string]string, command string, args []string, opts ExecOptions) (int, error) {
+func (r *Runner) Exec(secrets map[string][]byte, command string, args []string, opts ExecOptions) (int, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		cancel()
+	}()
+	defer signal.Stop(sigCh)
+
 	env := buildEnv(secrets)
 
 	expandedArgs := make([]string, len(args))
@@ -31,7 +44,7 @@ func (r *Runner) Exec(secrets map[string]string, command string, args []string, 
 		expandedArgs[i] = ExpandEnvVars(a, secrets)
 	}
 
-	cmd := exec.CommandContext(context.Background(), command, expandedArgs...)
+	cmd := exec.CommandContext(ctx, command, expandedArgs...)
 	cmd.Env = env
 
 	if opts.MaskOutput {
@@ -45,7 +58,7 @@ func (r *Runner) Exec(secrets map[string]string, command string, args []string, 
 	return exitCode(runErr), runErr
 }
 
-func (r *Runner) runWithMasking(cmd *exec.Cmd, secrets map[string]string) (int, error) {
+func (r *Runner) runWithMasking(cmd *exec.Cmd, secrets map[string][]byte) (int, error) {
 	stdoutPipe, pipeErr := cmd.StdoutPipe()
 	if pipeErr != nil {
 		return 1, pipeErr
@@ -100,10 +113,10 @@ func streamWithMasking(src io.Reader, dst io.Writer, secrets []string) {
 	}
 }
 
-func buildEnv(secrets map[string]string) []string {
+func buildEnv(secrets map[string][]byte) []string {
 	env := os.Environ()
 	for k, v := range secrets {
-		env = append(env, fmt.Sprintf("%s=%s", k, v))
+		env = append(env, fmt.Sprintf("%s=%s", k, string(v)))
 	}
 	var filtered []string
 	for _, e := range env {
@@ -114,11 +127,11 @@ func buildEnv(secrets map[string]string) []string {
 	return filtered
 }
 
-func filterEmpty(secrets map[string]string) []string {
+func filterEmpty(secrets map[string][]byte) []string {
 	var result []string
 	for _, v := range secrets {
 		if len(v) > 0 {
-			result = append(result, v)
+			result = append(result, string(v))
 		}
 	}
 	return result

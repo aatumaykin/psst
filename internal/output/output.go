@@ -6,8 +6,8 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
-	"github.com/aatumaykin/psst/internal/vault"
 	"github.com/aatumaykin/psst/internal/version"
 )
 
@@ -17,13 +17,33 @@ type ScanMatch struct {
 	SecretName string `json:"secret_name"`
 }
 
+type SecretItem struct {
+	Name      string    `json:"name"`
+	Tags      []string  `json:"tags"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type HistoryItem struct {
+	Version    int       `json:"version"`
+	Tags       []string  `json:"tags"`
+	ArchivedAt time.Time `json:"archived_at"`
+}
+
 type Formatter struct {
 	jsonMode bool
 	quiet    bool
+	stdout   io.Writer
+	stderr   io.Writer
 }
 
 func NewFormatter(jsonMode, quiet bool) *Formatter {
-	return &Formatter{jsonMode: jsonMode, quiet: quiet}
+	return &Formatter{
+		jsonMode: jsonMode,
+		quiet:    quiet,
+		stdout:   os.Stdout,
+		stderr:   os.Stderr,
+	}
 }
 
 func (f *Formatter) Success(msg string) {
@@ -34,37 +54,37 @@ func (f *Formatter) Success(msg string) {
 	if f.quiet {
 		return
 	}
-	fmt.Fprintf(os.Stdout, "✓ %s\n", msg)
+	fmt.Fprintf(f.stdout, "✓ %s\n", msg)
 }
 
 func (f *Formatter) Error(msg string) {
-	fmt.Fprintf(os.Stderr, "✗ %s\n", msg)
+	fmt.Fprintf(f.stderr, "✗ %s\n", msg)
 }
 
 func (f *Formatter) Warning(msg string) {
 	if f.quiet {
 		return
 	}
-	fmt.Fprintf(os.Stdout, "⚠ %s\n", msg)
+	fmt.Fprintf(f.stdout, "⚠ %s\n", msg)
 }
 
 func (f *Formatter) Bullet(msg string) {
 	if f.quiet {
 		return
 	}
-	fmt.Fprintf(os.Stdout, "  • %s\n", msg)
+	fmt.Fprintf(f.stdout, "  • %s\n", msg)
 }
 
-func (f *Formatter) SecretList(secrets []vault.SecretMeta) {
+func (f *Formatter) SecretList(secrets []SecretItem) {
 	if f.jsonMode {
 		f.PrintJSON(secrets)
 		return
 	}
 	for _, s := range secrets {
 		if len(s.Tags) > 0 {
-			fmt.Fprintf(os.Stdout, "  %s [%s]\n", s.Name, strings.Join(s.Tags, ", "))
+			fmt.Fprintf(f.stdout, "  %s [%s]\n", s.Name, strings.Join(s.Tags, ", "))
 		} else {
-			fmt.Fprintf(os.Stdout, "  %s\n", s.Name)
+			fmt.Fprintf(f.stdout, "  %s\n", s.Name)
 		}
 	}
 }
@@ -75,24 +95,24 @@ func (f *Formatter) SecretValue(name, value string) {
 		return
 	}
 	if f.quiet {
-		fmt.Fprintln(os.Stdout, value)
+		fmt.Fprintln(f.stdout, value)
 		return
 	}
-	fmt.Fprintf(os.Stdout, "%s=%s\n", name, value)
+	fmt.Fprintf(f.stdout, "%s=%s\n", name, value)
 }
 
-func (f *Formatter) HistoryEntries(name string, entries []vault.SecretHistoryEntry) {
+func (f *Formatter) HistoryEntries(name string, entries []HistoryItem) {
 	if f.jsonMode {
 		f.PrintJSON(entries)
 		return
 	}
-	fmt.Fprintf(os.Stdout, "\nHistory for %s:\n\n", name)
-	fmt.Fprintf(os.Stdout, "  ● current (active)\n")
+	fmt.Fprintf(f.stdout, "\nHistory for %s:\n\n", name)
+	fmt.Fprintf(f.stdout, "  ● current (active)\n")
 	for _, e := range entries {
-		fmt.Fprintf(os.Stdout, "  ● v%d  %s\n", e.Version, e.ArchivedAt.Format("01/02/2006 15:04"))
+		fmt.Fprintf(f.stdout, "  ● v%d  %s\n", e.Version, e.ArchivedAt.Format("01/02/2006 15:04"))
 	}
-	fmt.Fprintf(os.Stdout, "\n  %d previous version(s)\n", len(entries))
-	fmt.Fprintf(os.Stdout, "  Rollback: psst rollback %s --to <version>\n", name)
+	fmt.Fprintf(f.stdout, "\n  %d previous version(s)\n", len(entries))
+	fmt.Fprintf(f.stdout, "  Rollback: psst rollback %s --to <version>\n", name)
 }
 
 func (f *Formatter) ScanResults(results []ScanMatch) {
@@ -104,11 +124,11 @@ func (f *Formatter) ScanResults(results []ScanMatch) {
 		f.PrintJSON(results)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "✗ Secrets found in files:\n\n")
+	fmt.Fprintf(f.stderr, "✗ Secrets found in files:\n\n")
 	for _, r := range results {
-		fmt.Fprintf(os.Stderr, "  %s:%d\n    Contains: %s\n\n", r.File, r.Line, r.SecretName)
+		fmt.Fprintf(f.stderr, "  %s:%d\n    Contains: %s\n\n", r.File, r.Line, r.SecretName)
 	}
-	fmt.Fprintf(os.Stderr, "Found %d secret(s) in %d file(s)\n", len(results), countUniqueFiles(results))
+	fmt.Fprintf(f.stderr, "Found %d secret(s) in %d file(s)\n", len(results), countUniqueFiles(results))
 }
 
 func (f *Formatter) EnvList(secrets map[string]string) {
@@ -117,7 +137,7 @@ func (f *Formatter) EnvList(secrets map[string]string) {
 		return
 	}
 	for name, value := range secrets {
-		fmt.Fprintf(os.Stdout, "%s=%s\n", name, quoteValue(value))
+		fmt.Fprintf(f.stdout, "%s=%s\n", name, quoteValue(value))
 	}
 }
 
@@ -133,17 +153,17 @@ func (f *Formatter) EnvironmentList(envs []string) {
 		return
 	}
 	if len(envs) == 0 {
-		fmt.Fprintln(os.Stdout, "No environments found.")
+		fmt.Fprintln(f.stdout, "No environments found.")
 		return
 	}
 	for _, e := range envs {
-		fmt.Fprintf(os.Stdout, "  %s\n", e)
+		fmt.Fprintf(f.stdout, "  %s\n", e)
 	}
 }
 
 func (f *Formatter) Print(msg string) {
 	if !f.quiet {
-		fmt.Fprintln(os.Stdout, msg)
+		fmt.Fprintln(f.stdout, msg)
 	}
 }
 
@@ -161,17 +181,17 @@ func (f *Formatter) VersionInfo() {
 		return
 	}
 	if f.quiet {
-		fmt.Fprintln(os.Stdout, version.Version)
+		fmt.Fprintln(f.stdout, version.Version)
 		return
 	}
-	fmt.Fprint(os.Stdout, version.String()+"\n")
+	fmt.Fprint(f.stdout, version.String()+"\n")
 }
 
 func (f *Formatter) PrintJSON(data any) {
-	enc := json.NewEncoder(os.Stdout)
+	enc := json.NewEncoder(f.stdout)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(data); err != nil {
-		fmt.Fprintf(os.Stderr, "JSON encoding error: %v\n", err)
+		fmt.Fprintf(f.stderr, "JSON encoding error: %v\n", err)
 	}
 }
 

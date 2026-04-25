@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"path/filepath"
@@ -14,13 +15,6 @@ import (
 type testKeyProvider struct {
 	enc *crypto.AESGCM
 	key []byte
-}
-
-func (t *testKeyProvider) GetKey(_, _ string) ([]byte, error) {
-	if t.key == nil {
-		return nil, errors.New("no key")
-	}
-	return t.key, nil
 }
 
 func (t *testKeyProvider) GetRawKey(_, _ string) (string, error) {
@@ -70,7 +64,7 @@ func TestSetGetSecret(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
 
-	if err := v.SetSecret("API_KEY", "secret123", []string{"prod"}); err != nil {
+	if err := v.SetSecret("API_KEY", []byte("secret123"), []string{"prod"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -78,8 +72,8 @@ func TestSetGetSecret(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sec.Value != "secret123" {
-		t.Fatalf("value = %q, want %q", sec.Value, "secret123")
+	if string(sec.Value) != "secret123" {
+		t.Fatalf("value = %q, want %q", string(sec.Value), "secret123")
 	}
 	if len(sec.Tags) != 1 || sec.Tags[0] != "prod" {
 		t.Fatalf("tags = %v", sec.Tags)
@@ -90,8 +84,8 @@ func TestListSecrets(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
 
-	v.SetSecret("A", "val_a", nil)
-	v.SetSecret("B", "val_b", nil)
+	v.SetSecret("A", []byte("val_a"), nil)
+	v.SetSecret("B", []byte("val_b"), nil)
 
 	list, err := v.ListSecrets()
 	if err != nil {
@@ -106,7 +100,7 @@ func TestDeleteSecret(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
 
-	v.SetSecret("KEY", "val", nil)
+	v.SetSecret("KEY", []byte("val"), nil)
 	v.DeleteSecret("KEY")
 
 	sec, _ := v.GetSecret("KEY")
@@ -119,9 +113,9 @@ func TestHistoryAndRollback(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
 
-	v.SetSecret("KEY", "v1", nil)
-	v.SetSecret("KEY", "v2", nil)
-	v.SetSecret("KEY", "v3", nil)
+	v.SetSecret("KEY", []byte("v1"), nil)
+	v.SetSecret("KEY", []byte("v2"), nil)
+	v.SetSecret("KEY", []byte("v3"), nil)
 
 	history, err := v.GetHistory("KEY")
 	if err != nil {
@@ -137,8 +131,8 @@ func TestHistoryAndRollback(t *testing.T) {
 	}
 
 	sec, _ := v.GetSecret("KEY")
-	if sec.Value != "v1" {
-		t.Fatalf("after rollback value = %q, want %q", sec.Value, "v1")
+	if string(sec.Value) != "v1" {
+		t.Fatalf("after rollback value = %q, want %q", string(sec.Value), "v1")
 	}
 }
 
@@ -146,7 +140,7 @@ func TestTags(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
 
-	v.SetSecret("KEY", "val", nil)
+	v.SetSecret("KEY", []byte("val"), nil)
 	v.AddTag("KEY", "aws")
 	v.AddTag("KEY", "prod")
 
@@ -166,9 +160,9 @@ func TestGetSecretsByTags(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
 
-	v.SetSecret("A", "val_a", []string{"aws", "prod"})
-	v.SetSecret("B", "val_b", []string{"stripe"})
-	v.SetSecret("C", "val_c", []string{"prod"})
+	v.SetSecret("A", []byte("val_a"), []string{"aws", "prod"})
+	v.SetSecret("B", []byte("val_b"), []string{"stripe"})
+	v.SetSecret("C", []byte("val_c"), []string{"prod"})
 
 	result, err := v.GetSecretsByTags([]string{"aws"})
 	if err != nil {
@@ -188,14 +182,14 @@ func TestGetAllSecrets(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
 
-	v.SetSecret("A", "val_a", nil)
-	v.SetSecret("B", "val_b", nil)
+	v.SetSecret("A", []byte("val_a"), nil)
+	v.SetSecret("B", []byte("val_b"), nil)
 
 	all, err := v.GetAllSecrets()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if all["A"] != "val_a" || all["B"] != "val_b" {
+	if string(all["A"]) != "val_a" || string(all["B"]) != "val_b" {
 		t.Fatalf("all = %v", all)
 	}
 }
@@ -212,7 +206,7 @@ func TestVault_LockedOperations(t *testing.T) {
 
 	v := New(enc, kp, s)
 
-	if err = v.SetSecret("A", "val", nil); err == nil {
+	if err = v.SetSecret("A", []byte("val"), nil); err == nil {
 		t.Fatal("SetSecret on locked vault should fail")
 	}
 	if _, err = v.GetSecret("A"); err == nil {
@@ -258,9 +252,147 @@ func TestRollback_SecretNotFound(t *testing.T) {
 func TestRollback_VersionNotFound(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
-	v.SetSecret("TEST", "val", nil)
+	v.SetSecret("TEST", []byte("val"), nil)
 	err := v.Rollback("TEST", 999)
 	if err == nil {
 		t.Fatal("rollback nonexistent version should fail")
+	}
+}
+
+func setupTestVaultV1(t *testing.T) *Vault {
+	t.Helper()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "vault.db")
+	s, err := store.NewSQLite(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.InitSchema(); err != nil {
+		t.Fatal(err)
+	}
+
+	enc := crypto.NewAESGCM()
+	kp := &testKeyProvider{enc: enc, key: nil}
+
+	v := New(enc, kp, s)
+
+	rawKey, err := enc.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	kp.key = rawKey
+
+	v1Key, err := enc.KeyToBuffer(hex.EncodeToString(rawKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.key = v1Key
+
+	if err = s.SetMeta("kdf_version", "1"); err != nil {
+		t.Fatal(err)
+	}
+
+	return v
+}
+
+func TestMigrateKDF(t *testing.T) {
+	v := setupTestVaultV1(t)
+	defer v.Close()
+
+	secrets := map[string]string{
+		"API_KEY": "secret123",
+		"DB_HOST": "localhost",
+		"DB_PORT": "5432",
+	}
+	for name, val := range secrets {
+		if err := v.SetSecret(name, []byte(val), nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	oldKey := make([]byte, len(v.key))
+	copy(oldKey, v.key)
+
+	if err := v.MigrateKDF(); err != nil {
+		t.Fatalf("MigrateKDF: %v", err)
+	}
+
+	kdfVer, _ := v.store.GetMeta("kdf_version")
+	if kdfVer != "2" {
+		t.Fatalf("kdf_version = %q, want %q", kdfVer, "2")
+	}
+
+	rawKeyHex, _ := v.kp.GetRawKey(serviceName, accountName)
+	saltB64, _ := v.store.GetMeta("kdf_salt")
+	var v2Key []byte
+	var deriveErr error
+	if saltB64 != "" {
+		salt, decodeErr := base64.StdEncoding.DecodeString(saltB64)
+		if decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		v2Key, deriveErr = v.enc.KeyToBufferV2WithSalt(rawKeyHex, salt)
+	} else {
+		v2Key, deriveErr = v.enc.KeyToBufferV2(rawKeyHex)
+	}
+	if deriveErr != nil {
+		t.Fatal(deriveErr)
+	}
+	v.key = v2Key
+
+	for name, want := range secrets {
+		sec, err := v.GetSecret(name)
+		if err != nil {
+			t.Fatalf("GetSecret(%q) after migrate: %v", name, err)
+		}
+		if string(sec.Value) != want {
+			t.Fatalf("secret %q = %q, want %q", name, string(sec.Value), want)
+		}
+	}
+
+	if hex.EncodeToString(oldKey) == hex.EncodeToString(v2Key) {
+		t.Fatal("key should have changed after KDF migration")
+	}
+}
+
+func TestPerVaultSalt(t *testing.T) {
+	dir := t.TempDir()
+	enc := crypto.NewAESGCM()
+
+	path1 := filepath.Join(dir, "vault1.db")
+	kp1 := &testKeyProvider{enc: enc, key: nil}
+	if err := InitVault(path1, enc, kp1, InitOptions{SkipKeychain: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	s1, err := store.NewSQLite(path1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s1.Close()
+	salt1, _ := s1.GetMeta("kdf_salt")
+	if salt1 == "" {
+		t.Fatal("kdf_salt should be set")
+	}
+
+	path2 := filepath.Join(dir, "vault2.db")
+	kp2 := &testKeyProvider{enc: enc, key: nil}
+	if err := InitVault(path2, enc, kp2, InitOptions{SkipKeychain: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	s2, err := store.NewSQLite(path2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	salt2, _ := s2.GetMeta("kdf_salt")
+	if salt2 == "" {
+		t.Fatal("kdf_salt should be set")
+	}
+
+	if salt1 == salt2 {
+		t.Fatal("two different vaults should have different salts")
 	}
 }

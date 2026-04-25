@@ -7,19 +7,21 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3" //nolint:revive,nolintlint
+	_ "modernc.org/sqlite"
 )
 
 type SQLiteStore struct {
+	mu        sync.Mutex
 	db        *sql.DB
 	currentTx *sql.Tx
 	dbPath    string
 }
 
 func NewSQLite(dbPath string) (*SQLiteStore, error) {
-	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL")
+	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
@@ -260,6 +262,9 @@ func (s *SQLiteStore) Close() error {
 }
 
 func (s *SQLiteStore) ExecTx(fn func() error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	tx, err := s.db.BeginTx(context.Background(), nil)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
