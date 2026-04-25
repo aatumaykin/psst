@@ -29,7 +29,13 @@ var importCmd = &cobra.Command{
 
 		switch {
 		case fromEnv:
-			entries = readFromEnv()
+			prefix, _ := cmd.Flags().GetString("prefix")
+			if prefix == "" {
+				if !quiet {
+					fmt.Fprintf(os.Stderr, "Warning: importing all matching env vars. Use --prefix to filter (e.g. --prefix MYAPP_)\n")
+				}
+			}
+			entries = readFromEnv(prefix)
 		case useStdin:
 			entries, err = parseEnvFromReader(os.Stdin)
 			if err != nil {
@@ -101,11 +107,14 @@ func parseEnvLine(line string) (string, string, bool) {
 	return name, value, true
 }
 
-func readFromEnv() map[string]string {
+func readFromEnv(prefix string) map[string]string {
 	entries := make(map[string]string)
 	for _, e := range os.Environ() {
 		name, value, ok := strings.Cut(e, "=")
 		if !ok {
+			continue
+		}
+		if prefix != "" && !strings.HasPrefix(name, prefix) {
 			continue
 		}
 		if validName.MatchString(name) {
@@ -119,5 +128,6 @@ func readFromEnv() map[string]string {
 func init() {
 	importCmd.Flags().Bool("stdin", false, "Read from stdin")
 	importCmd.Flags().Bool("from-env", false, "Import from environment variables")
+	importCmd.Flags().String("prefix", "", "Only import variables with this prefix (e.g. MYAPP_)")
 	rootCmd.AddCommand(importCmd)
 }

@@ -16,6 +16,10 @@ var tagCmd = &cobra.Command{
 		f := getFormatter(jsonOut, quiet)
 		name, tag := args[0], args[1]
 
+		if !validName.MatchString(name) {
+			exitWithError(fmt.Sprintf("Invalid secret name %q. Must match [A-Z][A-Z0-9_]*", name))
+		}
+
 		v, err := getUnlockedVault(jsonOut, quiet, global, env)
 		if err != nil {
 			exitWithError(err.Error())
@@ -39,6 +43,10 @@ var untagCmd = &cobra.Command{
 		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
 		f := getFormatter(jsonOut, quiet)
 		name, tag := args[0], args[1]
+
+		if !validName.MatchString(name) {
+			exitWithError(fmt.Sprintf("Invalid secret name %q. Must match [A-Z][A-Z0-9_]*", name))
+		}
 
 		v, err := getUnlockedVault(jsonOut, quiet, global, env)
 		if err != nil {

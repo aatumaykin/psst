@@ -135,7 +135,7 @@ func printAuthFailed(jsonOut, quiet bool) {
 	if keyring.IsKeychainAvailable() {
 		f.Error("Failed to unlock vault. Check keychain access.")
 	} else {
-		f.Error("Failed to unlock vault. Set PSST_PASSWORD:\n  export PSST_PASSWORD=\"your-password\"")
+		f.Error("Failed to unlock vault. Set PSST_PASSWORD:\n  export PSST_PASSWORD=\"your-password\"\n  Note: PSST_PASSWORD is visible to other users via /proc on shared systems")
 	}
 }
 

@@ -46,6 +46,7 @@ var initCmd = &cobra.Command{
 			f.Warning("Using PSST_PASSWORD (OS keychain unavailable)")
 			f.Bullet("Set PSST_PASSWORD before each use:")
 			f.Bullet(`export PSST_PASSWORD="your-password"`)
+			f.Bullet("Note: PSST_PASSWORD is visible to other users via /proc on shared systems")
 		}
 	},
 }

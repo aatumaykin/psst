@@ -16,6 +16,10 @@ var rollbackCmd = &cobra.Command{
 		name := args[0]
 		toVersion, _ := cmd.Flags().GetInt("to")
 
+		if !validName.MatchString(name) {
+			exitWithError(fmt.Sprintf("Invalid secret name %q. Must match [A-Z][A-Z0-9_]*", name))
+		}
+
 		if toVersion <= 0 {
 			exitWithError("Specify version with --to <number>")
 		}

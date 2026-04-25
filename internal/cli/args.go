@@ -6,6 +6,9 @@ import (
 	"strings"
 )
 
+// parseGlobalFlagsFromArgs mirrors the global flags defined in root.go init().
+// When adding/removing/changing global flags (PersistentFlags on rootCmd),
+// update this function and filterSecretNames to stay in sync.
 func parseGlobalFlagsFromArgs(args []string) (bool, bool, bool, string, []string) {
 	var jsonOut, quiet, global bool
 	var env string
