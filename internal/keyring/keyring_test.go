@@ -7,21 +7,6 @@ import (
 	"github.com/aatumaykin/psst/internal/crypto"
 )
 
-func TestEnvVarProviderGetKey(t *testing.T) {
-	enc := crypto.NewAESGCM()
-	p := &EnvVarProvider{deriver: enc}
-
-	t.Setenv("PSST_PASSWORD", "test-password")
-
-	key, err := p.GetKey("psst", "vault-key")
-	if err != nil {
-		t.Fatalf("GetKey: %v", err)
-	}
-	if len(key) != 32 {
-		t.Fatalf("key length = %d, want 32", len(key))
-	}
-}
-
 func TestEnvVarProviderNotAvailable(t *testing.T) {
 	enc := crypto.NewAESGCM()
 	p := &EnvVarProvider{deriver: enc}

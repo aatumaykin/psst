@@ -84,6 +84,15 @@ func (a *AESGCM) KeyToBufferV2(key string) ([]byte, error) {
 	return argon2.IDKey([]byte(key), salt[:], argon2Iterations, argon2Memory, argon2Threads, aesKeySize), nil
 }
 
+func (a *AESGCM) KeyToBufferV2WithSalt(key string, salt []byte) ([]byte, error) {
+	decoded, err := base64.StdEncoding.DecodeString(key)
+	if err == nil && len(decoded) == aesKeySize {
+		return decoded, nil
+	}
+
+	return argon2.IDKey([]byte(key), salt, argon2Iterations, argon2Memory, argon2Threads, aesKeySize), nil
+}
+
 func (a *AESGCM) GenerateKey() ([]byte, error) {
 	key := make([]byte, aesKeySize)
 	if _, err := io.ReadFull(rand.Reader, key); err != nil {

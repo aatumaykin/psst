@@ -144,3 +144,53 @@ func TestKeyToBufferV1_V2_ProduceDifferentKeys(t *testing.T) {
 		t.Fatal("v1 and v2 KDF should produce different keys from same password")
 	}
 }
+
+func TestKeyToBufferV2WithSalt_Deterministic(t *testing.T) {
+	enc := NewAESGCM()
+	salt := []byte("unique-vault-salt")
+	key1, err := enc.KeyToBufferV2WithSalt("mypassword", salt)
+	if err != nil {
+		t.Fatalf("KeyToBufferV2WithSalt failed: %v", err)
+	}
+	if len(key1) != 32 {
+		t.Fatalf("key length = %d, want 32", len(key1))
+	}
+
+	key2, _ := enc.KeyToBufferV2WithSalt("mypassword", salt)
+	if string(key1) != string(key2) {
+		t.Fatal("same password and salt should produce same key")
+	}
+}
+
+func TestKeyToBufferV2WithSalt_DifferentSalts(t *testing.T) {
+	enc := NewAESGCM()
+	key1, _ := enc.KeyToBufferV2WithSalt("mypassword", []byte("salt-a"))
+	key2, _ := enc.KeyToBufferV2WithSalt("mypassword", []byte("salt-b"))
+	if string(key1) == string(key2) {
+		t.Fatal("different salts should produce different keys")
+	}
+}
+
+func TestKeyToBufferV2WithSalt_DifferentFromHardcoded(t *testing.T) {
+	enc := NewAESGCM()
+	v2, _ := enc.KeyToBufferV2("mypassword")
+	withSalt, _ := enc.KeyToBufferV2WithSalt("mypassword", []byte("custom-salt"))
+	if string(v2) == string(withSalt) {
+		t.Fatal("custom salt should produce different key from hardcoded salt")
+	}
+}
+
+func TestKeyToBufferV2WithSalt_Base64Passthrough(t *testing.T) {
+	enc := NewAESGCM()
+	raw := make([]byte, 32)
+	raw[0] = 99
+	b64 := base64.StdEncoding.EncodeToString(raw)
+
+	result, err := enc.KeyToBufferV2WithSalt(b64, []byte("any-salt"))
+	if err != nil {
+		t.Fatalf("KeyToBufferV2WithSalt failed: %v", err)
+	}
+	if result[0] != 99 {
+		t.Fatalf("first byte = %d, want 99", result[0])
+	}
+}

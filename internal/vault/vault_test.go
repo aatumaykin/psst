@@ -16,13 +16,6 @@ type testKeyProvider struct {
 	key []byte
 }
 
-func (t *testKeyProvider) GetKey(_, _ string) ([]byte, error) {
-	if t.key == nil {
-		return nil, errors.New("no key")
-	}
-	return t.key, nil
-}
-
 func (t *testKeyProvider) GetRawKey(_, _ string) (string, error) {
 	if t.key == nil {
 		return "", errors.New("no key")

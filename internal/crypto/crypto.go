@@ -5,5 +5,6 @@ type Encryptor interface {
 	Decrypt(ciphertext, iv []byte, key []byte) ([]byte, error)
 	KeyToBuffer(key string) ([]byte, error)
 	KeyToBufferV2(key string) ([]byte, error)
+	KeyToBufferV2WithSalt(key string, salt []byte) ([]byte, error)
 	GenerateKey() ([]byte, error)
 }
