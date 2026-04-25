@@ -1,11 +1,15 @@
 package updater
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -231,4 +235,90 @@ func TestParseChecksumsEmpty(t *testing.T) {
 	if len(got) != 0 {
 		t.Errorf("len(checksums) = %d, want 0", len(got))
 	}
+}
+
+func TestExtractBinaryFromTarGz(t *testing.T) {
+	dir := t.TempDir()
+
+	binaryContent := []byte("#!/bin/bash\necho psst")
+	archivePath := createTestTarGz(t, dir, "psst", binaryContent)
+
+	got, err := extractBinaryFromTarGz(archivePath)
+	if err != nil {
+		t.Fatalf("extractBinaryFromTarGz() error: %v", err)
+	}
+	if string(got) != string(binaryContent) {
+		t.Errorf("extracted content = %q, want %q", string(got), string(binaryContent))
+	}
+}
+
+func TestExtractBinaryFromTarGzNotFound(t *testing.T) {
+	dir := t.TempDir()
+	archivePath := createTestTarGz(t, dir, "other-binary", []byte("data"))
+
+	_, err := extractBinaryFromTarGz(archivePath)
+	if err == nil {
+		t.Fatal("expected error when binary not found in archive")
+	}
+}
+
+func TestReplaceBinary(t *testing.T) {
+	dir := t.TempDir()
+
+	oldPath := filepath.Join(dir, "psst-old")
+	newPath := filepath.Join(dir, "psst-new")
+
+	if err := os.WriteFile(oldPath, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newPath, []byte("new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := replaceBinary(oldPath, newPath); err != nil {
+		t.Fatalf("replaceBinary() error: %v", err)
+	}
+
+	data, err := os.ReadFile(oldPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "new" {
+		t.Errorf("old binary content = %q, want %q", string(data), "new")
+	}
+
+	if _, err := os.Stat(newPath); !os.IsNotExist(err) {
+		t.Error("new binary should be removed after replacement")
+	}
+}
+
+func createTestTarGz(t *testing.T, dir, name string, content []byte) string {
+	t.Helper()
+
+	archivePath := filepath.Join(dir, "archive.tar.gz")
+	f, err := os.Create(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gw := gzip.NewWriter(f)
+	tw := tar.NewWriter(gw)
+
+	hdr := &tar.Header{
+		Name: name,
+		Mode: 0o755,
+		Size: int64(len(content)),
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(content); err != nil {
+		t.Fatal(err)
+	}
+
+	tw.Close()
+	gw.Close()
+	f.Close()
+
+	return archivePath
 }
