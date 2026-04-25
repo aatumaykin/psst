@@ -36,6 +36,7 @@ func Execute() error {
 	if dashDashIdx >= 0 {
 		jsonOut, quiet, global, env, tags := parseGlobalFlagsFromArgs(args[:dashDashIdx])
 		secretNames := filterSecretNames(args[:dashDashIdx], jsonOut, quiet, global, env, tags)
+		secretNames = filterSubcommandNames(secretNames)
 		commandArgs := args[dashDashIdx+1:]
 
 		if len(commandArgs) > 0 && (len(secretNames) > 0 || len(tags) > 0) {

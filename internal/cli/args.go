@@ -69,6 +69,23 @@ func filterSecretNames(
 	return names
 }
 
+func filterSubcommandNames(names []string) []string {
+	subcommands := make(map[string]bool)
+	for _, cmd := range rootCmd.Commands() {
+		subcommands[cmd.Name()] = true
+		for _, alias := range cmd.Aliases {
+			subcommands[alias] = true
+		}
+	}
+	filtered := make([]string, 0, len(names))
+	for _, name := range names {
+		if !subcommands[name] {
+			filtered = append(filtered, name)
+		}
+	}
+	return filtered
+}
+
 func containsFlag(args []string, flag string) bool {
 	return slices.Contains(args, flag)
 }
