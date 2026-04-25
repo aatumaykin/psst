@@ -6,7 +6,7 @@ import (
 
 type Secret struct {
 	Name      string
-	Value     string
+	Value     []byte
 	Tags      []string
 	CreatedAt time.Time
 	UpdatedAt time.Time

@@ -60,7 +60,7 @@ var importCmd = &cobra.Command{
 				}
 				continue
 			}
-			if setErr := v.SetSecret(name, value, nil); setErr != nil {
+			if setErr := v.SetSecret(name, []byte(value), nil); setErr != nil {
 				exitWithError(fmt.Sprintf("Failed to set %s: %v", name, setErr))
 			}
 			count++

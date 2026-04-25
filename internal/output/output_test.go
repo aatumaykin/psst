@@ -2,49 +2,34 @@ package output
 
 import (
 	"bytes"
-	"os"
 	"strings"
 	"testing"
 )
 
-func captureOutput(fn func()) string {
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	//nolint:reassign // intentional stdout capture for testing
-	os.Stdout = w
-	fn()
-	w.Close()
-	//nolint:reassign // intentional stdout capture for testing
-	os.Stdout = old
-	var buf bytes.Buffer
-	buf.ReadFrom(r)
-	return buf.String()
-}
-
 func TestSuccessHuman(t *testing.T) {
-	out := captureOutput(func() {
-		NewFormatter(false, false).Success("done")
-	})
-	if !strings.Contains(out, "✓ done") {
-		t.Fatalf("output = %q", out)
+	var buf bytes.Buffer
+	f := &Formatter{stdout: &buf, stderr: &buf}
+	f.Success("done")
+	if !strings.Contains(buf.String(), "✓ done") {
+		t.Fatalf("output = %q", buf.String())
 	}
 }
 
 func TestSuccessQuiet(t *testing.T) {
-	out := captureOutput(func() {
-		NewFormatter(false, true).Success("done")
-	})
-	if len(out) > 0 {
-		t.Fatalf("quiet should produce no output, got %q", out)
+	var buf bytes.Buffer
+	f := &Formatter{quiet: true, stdout: &buf, stderr: &buf}
+	f.Success("done")
+	if len(buf.String()) > 0 {
+		t.Fatalf("quiet should produce no output, got %q", buf.String())
 	}
 }
 
 func TestSecretValueQuiet(t *testing.T) {
-	out := captureOutput(func() {
-		NewFormatter(false, true).SecretValue("KEY", "secret123")
-	})
-	if !strings.Contains(out, "secret123") {
-		t.Fatalf("quiet mode should output value, got %q", out)
+	var buf bytes.Buffer
+	f := &Formatter{quiet: true, stdout: &buf, stderr: &buf}
+	f.SecretValue("KEY", "secret123")
+	if !strings.Contains(buf.String(), "secret123") {
+		t.Fatalf("quiet mode should output value, got %q", buf.String())
 	}
 }
 

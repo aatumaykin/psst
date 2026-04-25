@@ -2,6 +2,9 @@ package cli
 
 import (
 	"github.com/spf13/cobra"
+
+	"github.com/aatumaykin/psst/internal/output"
+	"github.com/aatumaykin/psst/internal/vault"
 )
 
 var listCmd = &cobra.Command{
@@ -22,7 +25,7 @@ var listCmd = &cobra.Command{
 			if tagErr != nil {
 				exitWithError(tagErr.Error())
 			}
-			f.SecretList(filtered)
+			f.SecretList(toSecretItems(filtered))
 			return
 		}
 
@@ -30,8 +33,21 @@ var listCmd = &cobra.Command{
 		if err != nil {
 			exitWithError(err.Error())
 		}
-		f.SecretList(secrets)
+		f.SecretList(toSecretItems(secrets))
 	},
+}
+
+func toSecretItems(metas []vault.SecretMeta) []output.SecretItem {
+	items := make([]output.SecretItem, len(metas))
+	for i, m := range metas {
+		items[i] = output.SecretItem{
+			Name:      m.Name,
+			Tags:      m.Tags,
+			CreatedAt: m.CreatedAt,
+			UpdatedAt: m.UpdatedAt,
+		}
+	}
+	return items
 }
 
 //nolint:gochecknoinits // cobra command registration

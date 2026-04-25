@@ -5,6 +5,9 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/aatumaykin/psst/internal/output"
+	"github.com/aatumaykin/psst/internal/vault"
 )
 
 var historyCmd = &cobra.Command{
@@ -34,8 +37,20 @@ var historyCmd = &cobra.Command{
 			return
 		}
 
-		f.HistoryEntries(name, entries)
+		f.HistoryEntries(name, toHistoryItems(entries))
 	},
+}
+
+func toHistoryItems(entries []vault.SecretHistoryEntry) []output.HistoryItem {
+	items := make([]output.HistoryItem, len(entries))
+	for i, e := range entries {
+		items[i] = output.HistoryItem{
+			Version:    e.Version,
+			Tags:       e.Tags,
+			ArchivedAt: e.ArchivedAt,
+		}
+	}
+	return items
 }
 
 //nolint:gochecknoinits // cobra command registration

@@ -134,7 +134,7 @@ func (v *Vault) readKDFVersion() int {
 	return n
 }
 
-func (v *Vault) SetSecret(name string, value string, tags []string) error {
+func (v *Vault) SetSecret(name string, value []byte, tags []string) error {
 	if v.key == nil {
 		return errors.New("vault is locked")
 	}
@@ -162,7 +162,7 @@ func (v *Vault) SetSecret(name string, value string, tags []string) error {
 			}
 		}
 
-		ciphertext, iv, err := v.enc.Encrypt([]byte(value), v.key)
+		ciphertext, iv, err := v.enc.Encrypt(value, v.key)
 		if err != nil {
 			return fmt.Errorf("encrypt: %w", err)
 		}
@@ -191,15 +191,9 @@ func (v *Vault) GetSecret(name string) (*Secret, error) {
 		return nil, fmt.Errorf("decrypt: %w", err)
 	}
 
-	defer func() {
-		for i := range plaintext {
-			plaintext[i] = 0
-		}
-	}()
-
 	return &Secret{
 		Name:      stored.Name,
-		Value:     string(plaintext),
+		Value:     plaintext,
 		Tags:      stored.Tags,
 		CreatedAt: stored.CreatedAt,
 		UpdatedAt: stored.UpdatedAt,
@@ -341,7 +335,7 @@ func (v *Vault) GetSecretsByTags(tags []string) ([]SecretMeta, error) {
 	return result, nil
 }
 
-func (v *Vault) GetAllSecrets() (map[string]string, error) {
+func (v *Vault) GetAllSecrets() (map[string][]byte, error) {
 	if v.key == nil {
 		return nil, errors.New("vault is locked")
 	}
@@ -351,17 +345,14 @@ func (v *Vault) GetAllSecrets() (map[string]string, error) {
 		return nil, err
 	}
 
-	result := make(map[string]string, len(all))
+	result := make(map[string][]byte, len(all))
 	for _, s := range all {
 		var plaintext []byte
 		plaintext, err = v.enc.Decrypt(s.EncryptedValue, s.IV, v.key)
 		if err != nil {
 			return nil, fmt.Errorf("decrypt %s: %w", s.Name, err)
 		}
-		result[s.Name] = string(plaintext)
-		for i := range plaintext {
-			plaintext[i] = 0
-		}
+		result[s.Name] = plaintext
 	}
 	return result, nil
 }

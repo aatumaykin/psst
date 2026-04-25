@@ -63,7 +63,7 @@ func TestSetGetSecret(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
 
-	if err := v.SetSecret("API_KEY", "secret123", []string{"prod"}); err != nil {
+	if err := v.SetSecret("API_KEY", []byte("secret123"), []string{"prod"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -71,8 +71,8 @@ func TestSetGetSecret(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sec.Value != "secret123" {
-		t.Fatalf("value = %q, want %q", sec.Value, "secret123")
+	if string(sec.Value) != "secret123" {
+		t.Fatalf("value = %q, want %q", string(sec.Value), "secret123")
 	}
 	if len(sec.Tags) != 1 || sec.Tags[0] != "prod" {
 		t.Fatalf("tags = %v", sec.Tags)
@@ -83,8 +83,8 @@ func TestListSecrets(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
 
-	v.SetSecret("A", "val_a", nil)
-	v.SetSecret("B", "val_b", nil)
+	v.SetSecret("A", []byte("val_a"), nil)
+	v.SetSecret("B", []byte("val_b"), nil)
 
 	list, err := v.ListSecrets()
 	if err != nil {
@@ -99,7 +99,7 @@ func TestDeleteSecret(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
 
-	v.SetSecret("KEY", "val", nil)
+	v.SetSecret("KEY", []byte("val"), nil)
 	v.DeleteSecret("KEY")
 
 	sec, _ := v.GetSecret("KEY")
@@ -112,9 +112,9 @@ func TestHistoryAndRollback(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
 
-	v.SetSecret("KEY", "v1", nil)
-	v.SetSecret("KEY", "v2", nil)
-	v.SetSecret("KEY", "v3", nil)
+	v.SetSecret("KEY", []byte("v1"), nil)
+	v.SetSecret("KEY", []byte("v2"), nil)
+	v.SetSecret("KEY", []byte("v3"), nil)
 
 	history, err := v.GetHistory("KEY")
 	if err != nil {
@@ -130,8 +130,8 @@ func TestHistoryAndRollback(t *testing.T) {
 	}
 
 	sec, _ := v.GetSecret("KEY")
-	if sec.Value != "v1" {
-		t.Fatalf("after rollback value = %q, want %q", sec.Value, "v1")
+	if string(sec.Value) != "v1" {
+		t.Fatalf("after rollback value = %q, want %q", string(sec.Value), "v1")
 	}
 }
 
@@ -139,7 +139,7 @@ func TestTags(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
 
-	v.SetSecret("KEY", "val", nil)
+	v.SetSecret("KEY", []byte("val"), nil)
 	v.AddTag("KEY", "aws")
 	v.AddTag("KEY", "prod")
 
@@ -159,9 +159,9 @@ func TestGetSecretsByTags(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
 
-	v.SetSecret("A", "val_a", []string{"aws", "prod"})
-	v.SetSecret("B", "val_b", []string{"stripe"})
-	v.SetSecret("C", "val_c", []string{"prod"})
+	v.SetSecret("A", []byte("val_a"), []string{"aws", "prod"})
+	v.SetSecret("B", []byte("val_b"), []string{"stripe"})
+	v.SetSecret("C", []byte("val_c"), []string{"prod"})
 
 	result, err := v.GetSecretsByTags([]string{"aws"})
 	if err != nil {
@@ -181,14 +181,14 @@ func TestGetAllSecrets(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
 
-	v.SetSecret("A", "val_a", nil)
-	v.SetSecret("B", "val_b", nil)
+	v.SetSecret("A", []byte("val_a"), nil)
+	v.SetSecret("B", []byte("val_b"), nil)
 
 	all, err := v.GetAllSecrets()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if all["A"] != "val_a" || all["B"] != "val_b" {
+	if string(all["A"]) != "val_a" || string(all["B"]) != "val_b" {
 		t.Fatalf("all = %v", all)
 	}
 }
@@ -205,7 +205,7 @@ func TestVault_LockedOperations(t *testing.T) {
 
 	v := New(enc, kp, s)
 
-	if err = v.SetSecret("A", "val", nil); err == nil {
+	if err = v.SetSecret("A", []byte("val"), nil); err == nil {
 		t.Fatal("SetSecret on locked vault should fail")
 	}
 	if _, err = v.GetSecret("A"); err == nil {
@@ -251,7 +251,7 @@ func TestRollback_SecretNotFound(t *testing.T) {
 func TestRollback_VersionNotFound(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
-	v.SetSecret("TEST", "val", nil)
+	v.SetSecret("TEST", []byte("val"), nil)
 	err := v.Rollback("TEST", 999)
 	if err == nil {
 		t.Fatal("rollback nonexistent version should fail")

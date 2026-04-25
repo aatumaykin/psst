@@ -61,7 +61,7 @@ var setCmd = &cobra.Command{
 		}
 		defer v.Close()
 
-		if setErr := v.SetSecret(name, value, tags); setErr != nil {
+		if setErr := v.SetSecret(name, []byte(value), tags); setErr != nil {
 			exitWithError(setErr.Error())
 		}
 

@@ -21,7 +21,7 @@ func handleExecPatternDirect(
 	}
 	defer v.Close()
 
-	secrets := make(map[string]string)
+	secrets := make(map[string][]byte)
 
 	if len(tags) > 0 {
 		names, tagErr := v.GetSecretNamesByTags(tags)

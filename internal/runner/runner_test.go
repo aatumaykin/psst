@@ -46,9 +46,9 @@ func TestMaskSecretsEmpty(t *testing.T) {
 }
 
 func TestExpandEnvVars(t *testing.T) {
-	env := map[string]string{
-		"API_KEY": "secret123",
-		"HOST":    "example.com",
+	env := map[string][]byte{
+		"API_KEY": []byte("secret123"),
+		"HOST":    []byte("example.com"),
 	}
 
 	tests := []struct {
@@ -70,8 +70,8 @@ func TestExpandEnvVars(t *testing.T) {
 }
 
 func TestExpandEnvVars_WordBoundary(t *testing.T) {
-	env := map[string]string{
-		"API": "api-value",
+	env := map[string][]byte{
+		"API": []byte("api-value"),
 	}
 	got := ExpandEnvVars("$API_KEY", env)
 	if got == "api-value_Key" || got == "api-value_KEY" {
@@ -83,10 +83,10 @@ func TestExpandEnvVars_WordBoundary(t *testing.T) {
 }
 
 func TestFilterEmpty(t *testing.T) {
-	secrets := map[string]string{
-		"A": "value",
-		"B": "",
-		"C": "another",
+	secrets := map[string][]byte{
+		"A": []byte("value"),
+		"B": {},
+		"C": []byte("another"),
 	}
 	result := filterEmpty(secrets)
 	if len(result) != 2 {
@@ -95,8 +95,8 @@ func TestFilterEmpty(t *testing.T) {
 }
 
 func TestBuildEnv(t *testing.T) {
-	secrets := map[string]string{
-		"API_KEY": "test",
+	secrets := map[string][]byte{
+		"API_KEY": []byte("test"),
 	}
 	env := buildEnv(secrets)
 
@@ -163,16 +163,16 @@ func TestMaskSecrets_MultipleSecrets(t *testing.T) {
 }
 
 func TestExpandEnvVars_EmptyEnv(t *testing.T) {
-	got := ExpandEnvVars("$FOO", map[string]string{})
+	got := ExpandEnvVars("$FOO", map[string][]byte{})
 	if got != "$FOO" {
 		t.Fatalf("expected $FOO unchanged, got %q", got)
 	}
 }
 
 func TestExpandEnvVars_LongerNameFirst(t *testing.T) {
-	env := map[string]string{
-		"A":   "short",
-		"ABC": "long",
+	env := map[string][]byte{
+		"A":   []byte("short"),
+		"ABC": []byte("long"),
 	}
 	got := ExpandEnvVars("$ABC", env)
 	if got != "long" {
@@ -182,7 +182,7 @@ func TestExpandEnvVars_LongerNameFirst(t *testing.T) {
 
 func TestExec_NoMasking(t *testing.T) {
 	r := New()
-	secrets := map[string]string{"MY_KEY": "myvalue"}
+	secrets := map[string][]byte{"MY_KEY": []byte("myvalue")}
 	code, execErr := r.Exec(secrets, "echo", []string{"hello"}, ExecOptions{MaskOutput: false})
 	if execErr != nil {
 		t.Fatalf("Exec() error: %v", execErr)
@@ -194,7 +194,7 @@ func TestExec_NoMasking(t *testing.T) {
 
 func TestExec_WithMasking(t *testing.T) {
 	r := New()
-	secrets := map[string]string{"MY_SECRET": "secret123"}
+	secrets := map[string][]byte{"MY_SECRET": []byte("secret123")}
 	code, execErr := r.Exec(secrets, "echo", []string{"secret123"}, ExecOptions{MaskOutput: true})
 	if execErr != nil {
 		t.Fatalf("Exec() error: %v", execErr)
@@ -206,7 +206,7 @@ func TestExec_WithMasking(t *testing.T) {
 
 func TestExec_ManyLinesWithMasking(t *testing.T) {
 	r := New()
-	secrets := map[string]string{"KEY": "val"}
+	secrets := map[string][]byte{"KEY": []byte("val")}
 	code, execErr := r.Exec(secrets, "seq", []string{"100"}, ExecOptions{MaskOutput: true})
 	if execErr != nil {
 		t.Fatalf("Exec() error: %v", execErr)
@@ -218,7 +218,7 @@ func TestExec_ManyLinesWithMasking(t *testing.T) {
 
 func TestExec_EnvInjected(t *testing.T) {
 	r := New()
-	secrets := map[string]string{"TEST_INJECT": "injected_value"}
+	secrets := map[string][]byte{"TEST_INJECT": []byte("injected_value")}
 	code, execErr := r.Exec(secrets, "printenv", []string{"TEST_INJECT"}, ExecOptions{MaskOutput: false})
 	if execErr != nil {
 		t.Fatalf("Exec() error: %v", execErr)
@@ -230,7 +230,7 @@ func TestExec_EnvInjected(t *testing.T) {
 
 func TestExec_ExitCode(t *testing.T) {
 	r := New()
-	code, _ := r.Exec(map[string]string{}, "false", []string{}, ExecOptions{MaskOutput: false})
+	code, _ := r.Exec(map[string][]byte{}, "false", []string{}, ExecOptions{MaskOutput: false})
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
 	}
@@ -238,14 +238,14 @@ func TestExec_ExitCode(t *testing.T) {
 
 func TestExec_NonexistentCommand(t *testing.T) {
 	r := New()
-	_, execErr := r.Exec(map[string]string{}, "nonexistent_cmd_xyz", []string{}, ExecOptions{MaskOutput: false})
+	_, execErr := r.Exec(map[string][]byte{}, "nonexistent_cmd_xyz", []string{}, ExecOptions{MaskOutput: false})
 	if execErr == nil {
 		t.Fatal("expected error for nonexistent command")
 	}
 }
 
 func TestExpandEnvVars_BothForms(t *testing.T) {
-	env := map[string]string{"KEY": "val"}
+	env := map[string][]byte{"KEY": []byte("val")}
 	got := ExpandEnvVars("prefix-${KEY}-$KEY-suffix", env)
 	if got != "prefix-val-val-suffix" {
 		t.Fatalf("got %q", got)
