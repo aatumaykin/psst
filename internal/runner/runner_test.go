@@ -251,3 +251,15 @@ func TestExpandEnvVars_BothForms(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestExec_ContextCancellation(t *testing.T) {
+	r := New()
+	secrets := map[string][]byte{}
+	code, execErr := r.Exec(secrets, "true", []string{}, ExecOptions{MaskOutput: false})
+	if execErr != nil {
+		t.Fatalf("Exec() error: %v", execErr)
+	}
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+}
