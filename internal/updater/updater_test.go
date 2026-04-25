@@ -1,6 +1,10 @@
 package updater
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -118,5 +122,61 @@ func TestUpdateInfoIsNewer(t *testing.T) {
 	info3 := &UpdateInfo{LatestVersion: "0.9.0", CurrentVersion: "1.0.0"}
 	if info3.IsNewer() {
 		t.Error("expected IsNewer() = false when latest < current")
+	}
+}
+
+func TestFetchLatestRelease(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/aatumaykin/psst/releases/latest" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `{
+			"tag_name": "v1.2.3",
+			"assets": [
+				{"name": "psst_1.2.3_linux_amd64.tar.gz", "browser_download_url": "https://example.com/psst_1.2.3_linux_amd64.tar.gz"},
+				{"name": "checksums.txt", "browser_download_url": "https://example.com/checksums.txt"}
+			]
+		}`)
+	}))
+	defer server.Close()
+
+	release, err := fetchLatestReleaseWithURL(server.URL + "/repos/aatumaykin/psst/releases/latest")
+	if err != nil {
+		t.Fatalf("fetchLatestReleaseWithURL() error: %v", err)
+	}
+	if release.TagName != "v1.2.3" {
+		t.Errorf("TagName = %q, want %q", release.TagName, "v1.2.3")
+	}
+	if len(release.Assets) != 2 {
+		t.Fatalf("len(Assets) = %d, want 2", len(release.Assets))
+	}
+	if release.Assets[0].Name != "psst_1.2.3_linux_amd64.tar.gz" {
+		t.Errorf("Asset[0].Name = %q, want %q", release.Assets[0].Name, "psst_1.2.3_linux_amd64.tar.gz")
+	}
+}
+
+func TestFetchLatestReleaseRateLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprintln(w, `{"message": "API rate limit exceeded"}`)
+	}))
+	defer server.Close()
+
+	_, err := fetchLatestReleaseWithURL(server.URL + "/repos/aatumaykin/psst/releases/latest")
+	if err == nil {
+		t.Fatal("expected error for rate limit")
+	}
+	if !strings.Contains(err.Error(), "rate limit") {
+		t.Errorf("error = %q, want rate limit message", err.Error())
+	}
+}
+
+func TestFetchLatestReleaseNetworkError(t *testing.T) {
+	_, err := fetchLatestReleaseWithURL("http://127.0.0.1:1/bad")
+	if err == nil {
+		t.Fatal("expected error for network failure")
 	}
 }

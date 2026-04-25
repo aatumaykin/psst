@@ -24,11 +24,6 @@ type ReleaseInfo struct {
 		URL  string `json:"browser_download_url"`
 	} `json:"assets"`
 }
-
-func fetchLatestRelease() (*ReleaseInfo, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
 func CheckForUpdate() (*UpdateInfo, error) {
 	release, err := fetchLatestRelease()
 	if err != nil {
