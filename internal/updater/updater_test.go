@@ -1,6 +1,8 @@
 package updater
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -178,5 +180,55 @@ func TestFetchLatestReleaseNetworkError(t *testing.T) {
 	_, err := fetchLatestReleaseWithURL("http://127.0.0.1:1/bad")
 	if err == nil {
 		t.Fatal("expected error for network failure")
+	}
+}
+
+func TestParseChecksums(t *testing.T) {
+	data := `abc123  psst_1.2.3_linux_amd64.tar.gz
+def456  psst_1.2.3_linux_arm64.tar.gz
+789abc  checksums.txt
+`
+	got, err := parseChecksums([]byte(data))
+	if err != nil {
+		t.Fatalf("parseChecksums() error: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("len(checksums) = %d, want 3", len(got))
+	}
+	if got["psst_1.2.3_linux_amd64.tar.gz"] != "abc123" {
+		t.Errorf("checksum for linux_amd64 = %q, want %q", got["psst_1.2.3_linux_amd64.tar.gz"], "abc123")
+	}
+	if got["psst_1.2.3_linux_arm64.tar.gz"] != "def456" {
+		t.Errorf("checksum for linux_arm64 = %q, want %q", got["psst_1.2.3_linux_arm64.tar.gz"], "def456")
+	}
+}
+
+func TestVerifyChecksum(t *testing.T) {
+	content := []byte("hello world")
+	h := sha256.Sum256(content)
+	expectedHash := hex.EncodeToString(h[:])
+
+	checksums := map[string]string{"test.txt": expectedHash}
+
+	if err := verifyChecksum(checksums, "test.txt", content); err != nil {
+		t.Errorf("verifyChecksum() error: %v", err)
+	}
+
+	if err := verifyChecksum(checksums, "test.txt", []byte("wrong")); err == nil {
+		t.Error("expected error for mismatched checksum")
+	}
+
+	if err := verifyChecksum(checksums, "missing.txt", content); err == nil {
+		t.Error("expected error for missing filename")
+	}
+}
+
+func TestParseChecksumsEmpty(t *testing.T) {
+	got, err := parseChecksums([]byte(""))
+	if err != nil {
+		t.Fatalf("parseChecksums() error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("len(checksums) = %d, want 0", len(got))
 	}
 }
