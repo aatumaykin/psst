@@ -78,7 +78,7 @@ func InitVault(vaultPath string, _ crypto.Encryptor, kp keyring.KeyProvider, opt
 		return fmt.Errorf("set kdf salt: %w", err)
 	}
 
-	if !opts.SkipKeychain {
+	if !opts.SkipKeychain && !keyring.IsEnvProvider(kp) {
 		var key []byte
 		key, err = kp.GenerateKey()
 		if err != nil {
@@ -98,11 +98,17 @@ func (v *Vault) Unlock() error {
 		return fmt.Errorf("unlock vault: %w", err)
 	}
 
-	kdfVersion := v.readKDFVersion()
+	kdfVersion, err := v.readKDFVersion()
+	if err != nil {
+		return err
+	}
 	var key []byte
 	switch kdfVersion {
 	case crypto.KDFVersion2:
-		saltB64, _ := v.store.GetMeta("kdf_salt")
+		saltB64, metaErr := v.store.GetMeta("kdf_salt")
+		if metaErr != nil {
+			return fmt.Errorf("get kdf_salt: %w", metaErr)
+		}
 		if saltB64 != "" {
 			salt, decodeErr := base64.StdEncoding.DecodeString(saltB64)
 			if decodeErr != nil {
@@ -123,16 +129,19 @@ func (v *Vault) Unlock() error {
 	return nil
 }
 
-func (v *Vault) readKDFVersion() int {
-	val, _ := v.store.GetMeta("kdf_version")
+func (v *Vault) readKDFVersion() (int, error) {
+	val, err := v.store.GetMeta("kdf_version")
+	if err != nil {
+		return 0, fmt.Errorf("get kdf_version: %w", err)
+	}
 	if val == "" {
-		return 1
+		return 1, nil
 	}
 	n, err := strconv.Atoi(val)
 	if err != nil {
-		return 1
+		return 1, nil //nolint:nilerr // unrecognized version defaults to V1
 	}
-	return n
+	return n, nil
 }
 
 func (v *Vault) SetSecret(name string, value []byte, tags []string) error {
@@ -225,10 +234,12 @@ func (v *Vault) ListSecrets() ([]SecretMeta, error) {
 }
 
 func (v *Vault) DeleteSecret(name string) error {
-	if err := v.store.DeleteSecret(name); err != nil {
-		return err
-	}
-	return v.store.DeleteHistory(name)
+	return v.store.ExecTx(func() error {
+		if err := v.store.DeleteSecret(name); err != nil {
+			return err
+		}
+		return v.store.DeleteHistory(name)
+	})
 }
 
 func (v *Vault) GetHistory(name string) ([]SecretHistoryEntry, error) {
@@ -399,7 +410,10 @@ func (v *Vault) MigrateKDF() error {
 		return fmt.Errorf("get raw key: %w", err)
 	}
 
-	saltB64, _ := v.store.GetMeta("kdf_salt")
+	saltB64, err := v.store.GetMeta("kdf_salt")
+	if err != nil {
+		return fmt.Errorf("get kdf_salt: %w", err)
+	}
 	if saltB64 == "" {
 		salt := make([]byte, saltSize)
 		if _, err = rand.Read(salt); err != nil {

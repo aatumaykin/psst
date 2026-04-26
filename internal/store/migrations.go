@@ -8,7 +8,13 @@ import (
 
 func initSchema(db *sql.DB) error {
 	ctx := context.Background()
-	_, err := db.ExecContext(ctx, `
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin schema transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	_, err = tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS secrets (
 			name TEXT PRIMARY KEY,
 			encrypted_value BLOB NOT NULL,
@@ -22,7 +28,7 @@ func initSchema(db *sql.DB) error {
 		return err
 	}
 
-	_, err = db.ExecContext(ctx, `
+	_, err = tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS secrets_history (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name TEXT NOT NULL,
@@ -38,12 +44,12 @@ func initSchema(db *sql.DB) error {
 		return err
 	}
 
-	_, err = db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_secrets_history_name ON secrets_history(name)`)
+	_, err = tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_secrets_history_name ON secrets_history(name)`)
 	if err != nil {
 		return err
 	}
 
-	_, err = db.ExecContext(ctx, `
+	_, err = tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS vault_meta (
 			key TEXT PRIMARY KEY,
 			value TEXT NOT NULL
@@ -53,6 +59,9 @@ func initSchema(db *sql.DB) error {
 		return err
 	}
 
+	if err = tx.Commit(); err != nil {
+		return err
+	}
 	return migrateAddTagsColumn(db, "secrets")
 }
 

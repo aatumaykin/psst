@@ -32,3 +32,8 @@ func IsKeychainAvailable() bool {
 func IsEnvPasswordSet() bool {
 	return os.Getenv("PSST_PASSWORD") != ""
 }
+
+func IsEnvProvider(kp KeyProvider) bool {
+	_, ok := kp.(*EnvVarProvider)
+	return ok
+}
