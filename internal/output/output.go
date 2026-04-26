@@ -7,8 +7,6 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	"github.com/aatumaykin/psst/internal/version"
 )
 
 type ScanMatch struct {
@@ -175,16 +173,25 @@ func (f *Formatter) IsQuiet() bool {
 	return f.quiet
 }
 
-func (f *Formatter) VersionInfo() {
+type VersionData struct {
+	Version   string `json:"version"`
+	Commit    string `json:"commit"`
+	Date      string `json:"date"`
+	GoVersion string `json:"go"`
+	OSArch    string `json:"os_arch"`
+}
+
+func (f *Formatter) VersionInfo(v VersionData) {
 	if f.jsonMode {
-		f.PrintJSON(version.JSON())
+		f.PrintJSON(v)
 		return
 	}
 	if f.quiet {
-		fmt.Fprintln(f.stdout, version.Version)
+		fmt.Fprintln(f.stdout, v.Version)
 		return
 	}
-	fmt.Fprint(f.stdout, version.String()+"\n")
+	fmt.Fprintf(f.stdout, "psst %s\ncommit: %s\nbuilt:  %s\ngo:     %s\nos/arch: %s\n",
+		v.Version, v.Commit, v.Date, v.GoVersion, v.OSArch)
 }
 
 func (f *Formatter) PrintJSON(data any) {
