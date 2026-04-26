@@ -19,13 +19,13 @@ var updateCmd = &cobra.Command{
 var updateCheckCmd = &cobra.Command{
 	Use:   "check",
 	Short: "Check if a newer version is available",
-	Run: func(cmd *cobra.Command, _ []string) {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		jsonOut, quiet, _, _, _ := getGlobalFlags(cmd)
 		f := getFormatter(jsonOut, quiet)
 
 		info, err := updater.CheckForUpdate()
 		if err != nil {
-			exitWithError(fmt.Sprintf("Update check failed: %v", err))
+			return exitWithError(fmt.Sprintf("Update check failed: %v", err))
 		}
 
 		if jsonOut {
@@ -34,14 +34,14 @@ var updateCheckCmd = &cobra.Command{
 				"latest":  info.LatestVersion,
 				"update":  strconv.FormatBool(info.IsNewer()),
 			})
-			return
+			return nil
 		}
 
 		if quiet {
 			if info.IsNewer() {
 				fmt.Fprintln(os.Stdout, info.LatestVersion)
 			}
-			return
+			return nil
 		}
 
 		fmt.Fprintf(os.Stdout, "Current: v%s\n", info.CurrentVersion)
@@ -52,27 +52,28 @@ var updateCheckCmd = &cobra.Command{
 		} else {
 			fmt.Fprintf(os.Stdout, "\nAlready up to date.\n")
 		}
+		return nil
 	},
 }
 
 var updateInstallCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Download and install the latest version",
-	Run: func(cmd *cobra.Command, _ []string) {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		jsonOut, quiet, _, _, _ := getGlobalFlags(cmd)
 		_ = getFormatter(jsonOut, quiet)
 		force, _ := cmd.Flags().GetBool("force")
 
 		info, err := updater.CheckForUpdate()
 		if err != nil {
-			exitWithError(fmt.Sprintf("Update check failed: %v", err))
+			return exitWithError(fmt.Sprintf("Update check failed: %v", err))
 		}
 
 		if !force && !info.IsNewer() {
 			if !quiet {
 				fmt.Fprintf(os.Stdout, "Already up to date (v%s). Use --force to reinstall.\n", info.CurrentVersion)
 			}
-			return
+			return nil
 		}
 
 		if !quiet {
@@ -80,12 +81,13 @@ var updateInstallCmd = &cobra.Command{
 		}
 
 		if updateErr := updater.PerformUpdate(info, force); updateErr != nil {
-			exitWithError(fmt.Sprintf("Update failed: %v", updateErr))
+			return exitWithError(fmt.Sprintf("Update failed: %v", updateErr))
 		}
 
 		if !quiet {
 			fmt.Fprintf(os.Stdout, "Successfully updated to v%s!\n", info.LatestVersion)
 		}
+		return nil
 	},
 }
 

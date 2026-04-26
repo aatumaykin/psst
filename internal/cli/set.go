@@ -17,13 +17,13 @@ var setCmd = &cobra.Command{
 	Use:   "set <name>",
 	Short: "Set a secret",
 	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
 		f := getFormatter(jsonOut, quiet)
 		name := args[0]
 
 		if !validName.MatchString(name) {
-			exitWithError(fmt.Sprintf("Invalid secret name %q. Must match [A-Z][A-Z0-9_]*", name))
+			return exitWithError(fmt.Sprintf("Invalid secret name %q. Must match [A-Z][A-Z0-9_]*", name))
 		}
 
 		tags, _ := cmd.Flags().GetStringArray("tag")
@@ -41,7 +41,7 @@ var setCmd = &cobra.Command{
 				passwordBytes, readErr := term.ReadPassword(int(os.Stdin.Fd()))
 				fmt.Fprintln(os.Stdout)
 				if readErr != nil {
-					exitWithError(fmt.Sprintf("Failed to read password: %v", readErr))
+					return exitWithError(fmt.Sprintf("Failed to read password: %v", readErr))
 				}
 				value = strings.TrimSpace(string(passwordBytes))
 			} else {
@@ -52,20 +52,21 @@ var setCmd = &cobra.Command{
 		}
 
 		if value == "" {
-			exitWithError("Value cannot be empty")
+			return exitWithError("Value cannot be empty")
 		}
 
 		v, err := getUnlockedVault(jsonOut, quiet, global, env)
 		if err != nil {
-			exitWithError(err.Error())
+			return err
 		}
 		defer v.Close()
 
 		if setErr := v.SetSecret(name, []byte(value), tags); setErr != nil {
-			exitWithError(setErr.Error())
+			return exitWithError(setErr.Error())
 		}
 
 		f.Success(fmt.Sprintf("Secret %s set", name))
+		return nil
 	},
 }
 

@@ -387,6 +387,22 @@ func (v *Vault) GetSecretNamesByTags(tags []string) ([]string, error) {
 	return names, nil
 }
 
+func (v *Vault) GetSecretsByTagValues(tags []string) (map[string][]byte, error) {
+	names, err := v.GetSecretNamesByTags(tags)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string][]byte, len(names))
+	for _, name := range names {
+		sec, secErr := v.GetSecret(name)
+		if secErr != nil {
+			return nil, fmt.Errorf("get %s: %w", name, secErr)
+		}
+		result[name] = sec.Value
+	}
+	return result, nil
+}
+
 func (v *Vault) Close() error {
 	for i := range v.key {
 		v.key[i] = 0

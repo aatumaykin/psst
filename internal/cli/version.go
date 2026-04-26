@@ -7,10 +7,11 @@ import (
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Show psst version",
-	Run: func(cmd *cobra.Command, _ []string) {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		jsonOut, quiet, _, _, _ := getGlobalFlags(cmd)
 		f := getFormatter(jsonOut, quiet)
 		f.VersionInfo()
+		return nil
 	},
 }
 

@@ -9,20 +9,20 @@ import (
 var exportCmd = &cobra.Command{
 	Use:   "export",
 	Short: "Export secrets in .env format",
-	Run: func(cmd *cobra.Command, _ []string) {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
 		f := getFormatter(jsonOut, quiet)
 		envFile, _ := cmd.Flags().GetString("env-file")
 
 		v, err := getUnlockedVault(jsonOut, quiet, global, env)
 		if err != nil {
-			exitWithError(err.Error())
+			return err
 		}
 		defer v.Close()
 
 		secrets, err := v.GetAllSecrets()
 		if err != nil {
-			exitWithError(err.Error())
+			return exitWithError(err.Error())
 		}
 
 		strSecrets := make(map[string]string, len(secrets))
@@ -31,9 +31,12 @@ var exportCmd = &cobra.Command{
 		}
 
 		if envFile != "" {
+			if info, statErr := os.Lstat(envFile); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+				return exitWithError("Refusing to write to symlink: " + envFile)
+			}
 			file, fileErr := os.OpenFile(envFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 			if fileErr != nil {
-				exitWithError("Cannot create file: " + fileErr.Error())
+				return exitWithError("Cannot create file: " + fileErr.Error())
 			}
 			defer file.Close()
 			f.EnvListWriter(strSecrets, file)
@@ -48,6 +51,7 @@ var exportCmd = &cobra.Command{
 		if !quiet && !jsonOut {
 			f.Success("Secrets exported")
 		}
+		return nil
 	},
 }
 

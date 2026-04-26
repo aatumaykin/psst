@@ -10,20 +10,20 @@ import (
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Create a new vault",
-	Run: func(cmd *cobra.Command, _ []string) {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
 		f := getFormatter(jsonOut, quiet)
 
 		vaultPath, err := vault.FindVaultPath(global, env)
 		if err != nil {
-			exitWithError(err.Error())
+			return exitWithError(err.Error())
 		}
 
 		keychainAvailable := keyring.IsKeychainAvailable()
 		envPasswordSet := keyring.IsEnvPasswordSet()
 
 		if !keychainAvailable && !envPasswordSet {
-			exitWithError(
+			return exitWithError(
 				"OS keychain unavailable. Set PSST_PASSWORD before running init:\n" +
 					"  export PSST_PASSWORD=\"your-password\"\n" +
 					"  psst init")
@@ -37,7 +37,7 @@ var initCmd = &cobra.Command{
 		}
 
 		if initErr := vault.InitVault(vaultPath, enc, kp, opts); initErr != nil {
-			exitWithError(initErr.Error())
+			return exitWithError(initErr.Error())
 		}
 
 		f.Success("Vault created at " + vaultPath)
@@ -48,6 +48,7 @@ var initCmd = &cobra.Command{
 			f.Bullet(`export PSST_PASSWORD="your-password"`)
 			f.Bullet("Note: PSST_PASSWORD is visible to other users via /proc on shared systems")
 		}
+		return nil
 	},
 }
 

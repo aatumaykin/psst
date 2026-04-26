@@ -14,34 +14,35 @@ var historyCmd = &cobra.Command{
 	Use:   "history <name>",
 	Short: "View secret version history",
 	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
 		f := getFormatter(jsonOut, quiet)
 		name := args[0]
 
 		if !validName.MatchString(name) {
-			exitWithError(fmt.Sprintf("Invalid secret name %q. Must match [A-Z][A-Z0-9_]*", name))
+			return exitWithError(fmt.Sprintf("Invalid secret name %q. Must match [A-Z][A-Z0-9_]*", name))
 		}
 
 		v, err := getUnlockedVault(jsonOut, quiet, global, env)
 		if err != nil {
-			exitWithError(err.Error())
+			return err
 		}
 		defer v.Close()
 
 		entries, err := v.GetHistory(name)
 		if err != nil {
-			exitWithError(err.Error())
+			return exitWithError(err.Error())
 		}
 
 		if len(entries) == 0 {
 			if !quiet {
 				fmt.Fprintf(os.Stdout, "No history for %s\n", name)
 			}
-			return
+			return nil
 		}
 
 		f.HistoryEntries(name, toHistoryItems(entries))
+		return nil
 	},
 }
 

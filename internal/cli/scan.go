@@ -16,7 +16,7 @@ import (
 var scanCmd = &cobra.Command{
 	Use:   "scan",
 	Short: "Scan files for leaked secrets",
-	Run: func(cmd *cobra.Command, _ []string) {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
 		f := getFormatter(jsonOut, quiet)
 		staged, _ := cmd.Flags().GetBool("staged")
@@ -24,18 +24,18 @@ var scanCmd = &cobra.Command{
 
 		v, err := getUnlockedVault(jsonOut, quiet, global, env)
 		if err != nil {
-			exitWithError(err.Error())
+			return err
 		}
 		defer v.Close()
 
 		secrets, err := v.GetAllSecrets()
 		if err != nil {
-			exitWithError(err.Error())
+			return exitWithError(err.Error())
 		}
 
 		if len(secrets) == 0 {
 			f.Success("No secrets in vault to scan for.")
-			return
+			return nil
 		}
 
 		strSecrets := make(map[string]string, len(secrets))
@@ -45,7 +45,7 @@ var scanCmd = &cobra.Command{
 
 		files, err := getScanFiles(staged, scanPath)
 		if err != nil {
-			exitWithError(err.Error())
+			return exitWithError(err.Error())
 		}
 
 		var results []output.ScanMatch
@@ -56,8 +56,9 @@ var scanCmd = &cobra.Command{
 
 		f.ScanResults(results)
 		if len(results) > 0 {
-			os.Exit(1)
+			return &exitError{code: 1}
 		}
+		return nil
 	},
 }
 

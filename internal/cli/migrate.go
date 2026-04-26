@@ -11,21 +11,22 @@ import (
 var migrateCmd = &cobra.Command{
 	Use:   "migrate",
 	Short: "Migrate vault to latest KDF version",
-	Run: func(cmd *cobra.Command, _ []string) {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
 		f := getFormatter(jsonOut, quiet)
 
 		v, err := getUnlockedVault(jsonOut, quiet, global, env)
 		if err != nil {
-			exitWithError(err.Error())
+			return err
 		}
 		defer v.Close()
 
 		if migrateErr := v.MigrateKDF(); migrateErr != nil {
-			exitWithError(fmt.Sprintf("Migration failed: %v", migrateErr))
+			return exitWithError(fmt.Sprintf("Migration failed: %v", migrateErr))
 		}
 
 		f.Success(fmt.Sprintf("Vault migrated to KDF version %d", crypto.CurrentKDFVersion))
+		return nil
 	},
 }
 

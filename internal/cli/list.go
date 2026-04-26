@@ -10,30 +10,31 @@ import (
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all secrets",
-	Run: func(cmd *cobra.Command, _ []string) {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		jsonOut, quiet, global, env, tags := getGlobalFlags(cmd)
 		f := getFormatter(jsonOut, quiet)
 
 		v, err := getUnlockedVault(jsonOut, quiet, global, env)
 		if err != nil {
-			exitWithError(err.Error())
+			return err
 		}
 		defer v.Close()
 
 		if len(tags) > 0 {
 			filtered, tagErr := v.GetSecretsByTags(tags)
 			if tagErr != nil {
-				exitWithError(tagErr.Error())
+				return exitWithError(tagErr.Error())
 			}
 			f.SecretList(toSecretItems(filtered))
-			return
+			return nil
 		}
 
 		secrets, err := v.ListSecrets()
 		if err != nil {
-			exitWithError(err.Error())
+			return exitWithError(err.Error())
 		}
 		f.SecretList(toSecretItems(secrets))
+		return nil
 	},
 }
 

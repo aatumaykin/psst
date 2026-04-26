@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -13,6 +14,14 @@ import (
 	"github.com/aatumaykin/psst/internal/store"
 	"github.com/aatumaykin/psst/internal/vault"
 )
+
+type exitError struct {
+	code int
+}
+
+func (e *exitError) Error() string {
+	return fmt.Sprintf("exit code %d", e.code)
+}
 
 var rootCmd = &cobra.Command{
 	Use:           "psst",
@@ -41,14 +50,28 @@ func Execute() error {
 
 		if len(commandArgs) > 0 && (len(secretNames) > 0 || len(tags) > 0) {
 			noMask := containsFlag(args, "--no-mask")
-			os.Exit(handleExecPatternDirect(
+			err := handleExecPatternDirect(
 				secretNames, commandArgs,
 				jsonOut, quiet, global, env, tags, noMask,
-			))
+			)
+			var exitErr *exitError
+			if err != nil && errors.As(err, &exitErr) {
+				os.Exit(exitErr.code)
+			}
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%v\n", err)
+				os.Exit(1)
+			}
+			return nil
 		}
 	}
 
-	return rootCmd.Execute()
+	err := rootCmd.Execute()
+	var exitErr *exitError
+	if err != nil && errors.As(err, &exitErr) {
+		os.Exit(exitErr.code)
+	}
+	return err
 }
 
 //nolint:gochecknoinits // cobra command registration
@@ -100,7 +123,7 @@ func getUnlockedVault(jsonOut, quiet, global bool, env string) (*vault.Vault, er
 	if _, statErr := os.Stat(vaultPath); os.IsNotExist(statErr) {
 		printNoVault(jsonOut, quiet)
 		//nolint:mnd // exit code for missing vault
-		os.Exit(3)
+		return nil, &exitError{code: 3}
 	}
 
 	enc, kp := createDependencies()
@@ -120,7 +143,7 @@ func getUnlockedVault(jsonOut, quiet, global bool, env string) (*vault.Vault, er
 		_ = s.Close()
 		printAuthFailed(jsonOut, quiet)
 		//nolint:mnd // exit code for auth failure
-		os.Exit(5)
+		return nil, &exitError{code: 5}
 	}
 	return v, nil
 }
@@ -135,11 +158,15 @@ func printAuthFailed(jsonOut, quiet bool) {
 	if keyring.IsKeychainAvailable() {
 		f.Error("Failed to unlock vault. Check keychain access.")
 	} else {
-		f.Error("Failed to unlock vault. Set PSST_PASSWORD:\n  export PSST_PASSWORD=\"your-password\"\n  Note: PSST_PASSWORD is visible to other users via /proc on shared systems")
+		f.Error(
+			"Failed to unlock vault. Set PSST_PASSWORD:\n" +
+				"  export PSST_PASSWORD=\"your-password\"\n" +
+				"  Note: PSST_PASSWORD is visible to other users via /proc on shared systems",
+		)
 	}
 }
 
-func exitWithError(msg string) {
+func exitWithError(msg string) error {
 	fmt.Fprintf(os.Stderr, "✗ %s\n", msg)
-	os.Exit(1)
+	return &exitError{code: 1}
 }

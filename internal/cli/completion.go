@@ -13,21 +13,32 @@ var completionCmd = &cobra.Command{
 	Long: `Generate shell completion script for psst.
 
 Supported shells:
-  zsh    Zsh (oh-my-zsh, prezto, standalone)
+  bash       Bash
+  fish       Fish
+  powershell PowerShell
+  zsh        Zsh (oh-my-zsh, prezto, standalone)
 
 Examples:
+  psst completion bash > /etc/bash_completion.d/psst
+  psst completion fish > ~/.config/fish/completions/psst.fish
+  psst completion powershell > psst-completion.ps1
   psst completion zsh > ~/.zfunc/_psst
   psst completion zsh > "${fpath[1]}/_psst"
   psst completion zsh > ~/.oh-my-zsh/custom/plugins/psst/psst.plugin.zsh`,
-	Args:               cobra.ExactArgs(1),
-	ValidArgs:          []string{"zsh"},
-	DisableFlagParsing: true,
+	Args:      cobra.ExactArgs(1),
+	ValidArgs: []string{"bash", "fish", "powershell", "zsh"},
 	RunE: func(_ *cobra.Command, args []string) error {
 		switch args[0] {
+		case "bash":
+			return rootCmd.GenBashCompletion(os.Stdout)
+		case "fish":
+			return rootCmd.GenFishCompletion(os.Stdout, true)
+		case "powershell":
+			return rootCmd.GenPowerShellCompletion(os.Stdout)
 		case "zsh":
 			return rootCmd.GenZshCompletion(os.Stdout)
 		default:
-			return fmt.Errorf("unsupported shell: %s (supported: zsh)", args[0])
+			return fmt.Errorf("unsupported shell: %s (supported: bash, fish, powershell, zsh)", args[0])
 		}
 	},
 }

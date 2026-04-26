@@ -13,19 +13,24 @@ var runCmd = &cobra.Command{
 	Use:   "run <command> [args...]",
 	Short: "Run a command with all secrets injected",
 	Args:  cobra.MinimumNArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
+	RunE: func(cmd *cobra.Command, args []string) error {
+		jsonOut, quiet, global, env, tags := getGlobalFlags(cmd)
 		noMask, _ := cmd.Flags().GetBool("no-mask")
 
 		v, err := getUnlockedVault(jsonOut, quiet, global, env)
 		if err != nil {
-			exitWithError(err.Error())
+			return err
 		}
 		defer v.Close()
 
-		secrets, err := v.GetAllSecrets()
+		var secrets map[string][]byte
+		if len(tags) > 0 {
+			secrets, err = v.GetSecretsByTagValues(tags)
+		} else {
+			secrets, err = v.GetAllSecrets()
+		}
 		if err != nil {
-			exitWithError(err.Error())
+			return exitWithError(err.Error())
 		}
 
 		r := getRunner()
@@ -33,7 +38,10 @@ var runCmd = &cobra.Command{
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Command failed: %v\n", err)
 		}
-		os.Exit(exitCode)
+		if exitCode != 0 {
+			return &exitError{code: exitCode}
+		}
+		return nil
 	},
 }
 

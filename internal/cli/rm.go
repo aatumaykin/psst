@@ -11,26 +11,27 @@ var rmCmd = &cobra.Command{
 	Short:   "Delete a secret",
 	Args:    cobra.ExactArgs(1),
 	Aliases: []string{"remove", "delete"},
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
 		f := getFormatter(jsonOut, quiet)
 		name := args[0]
 
 		if !validName.MatchString(name) {
-			exitWithError(fmt.Sprintf("Invalid secret name %q. Must match [A-Z][A-Z0-9_]*", name))
+			return exitWithError(fmt.Sprintf("Invalid secret name %q. Must match [A-Z][A-Z0-9_]*", name))
 		}
 
 		v, err := getUnlockedVault(jsonOut, quiet, global, env)
 		if err != nil {
-			exitWithError(err.Error())
+			return err
 		}
 		defer v.Close()
 
 		if delErr := v.DeleteSecret(name); delErr != nil {
-			exitWithError(delErr.Error())
+			return exitWithError(delErr.Error())
 		}
 
 		f.Success(fmt.Sprintf("Secret %s removed", name))
+		return nil
 	},
 }
 

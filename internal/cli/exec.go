@@ -14,10 +14,10 @@ func handleExecPatternDirect(
 	env string,
 	tags []string,
 	noMask bool,
-) int {
+) error {
 	v, err := getUnlockedVault(jsonOut, quiet, global, env)
 	if err != nil {
-		exitWithError(err.Error())
+		return err
 	}
 	defer v.Close()
 
@@ -26,7 +26,7 @@ func handleExecPatternDirect(
 	if len(tags) > 0 {
 		names, tagErr := v.GetSecretNamesByTags(tags)
 		if tagErr != nil {
-			exitWithError(tagErr.Error())
+			return exitWithError(tagErr.Error())
 		}
 		secretNames = append(secretNames, names...)
 	}
@@ -34,10 +34,12 @@ func handleExecPatternDirect(
 	for _, name := range secretNames {
 		sec, getErr := v.GetSecret(name)
 		if getErr != nil {
-			exitWithError(getErr.Error())
+			return exitWithError(getErr.Error())
 		}
 		if sec != nil {
 			secrets[name] = sec.Value
+		} else if !quiet {
+			fmt.Fprintf(os.Stderr, "Warning: secret %q not found\n", name)
 		}
 	}
 
@@ -47,5 +49,8 @@ func handleExecPatternDirect(
 	if execErr != nil {
 		fmt.Fprintf(os.Stderr, "Command failed: %v\n", execErr)
 	}
-	return code
+	if code != 0 {
+		return &exitError{code: code}
+	}
+	return nil
 }

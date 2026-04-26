@@ -11,26 +11,27 @@ var tagCmd = &cobra.Command{
 	Short: "Add a tag to a secret",
 	//nolint:mnd // exact args count for command
 	Args: cobra.ExactArgs(2),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
 		f := getFormatter(jsonOut, quiet)
 		name, tag := args[0], args[1]
 
 		if !validName.MatchString(name) {
-			exitWithError(fmt.Sprintf("Invalid secret name %q. Must match [A-Z][A-Z0-9_]*", name))
+			return exitWithError(fmt.Sprintf("Invalid secret name %q. Must match [A-Z][A-Z0-9_]*", name))
 		}
 
 		v, err := getUnlockedVault(jsonOut, quiet, global, env)
 		if err != nil {
-			exitWithError(err.Error())
+			return err
 		}
 		defer v.Close()
 
 		if tagErr := v.AddTag(name, tag); tagErr != nil {
-			exitWithError(tagErr.Error())
+			return exitWithError(tagErr.Error())
 		}
 
 		f.Success(fmt.Sprintf("Tagged %s with %s", name, tag))
+		return nil
 	},
 }
 
@@ -39,26 +40,27 @@ var untagCmd = &cobra.Command{
 	Short: "Remove a tag from a secret",
 	//nolint:mnd // exact args count for command
 	Args: cobra.ExactArgs(2),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
 		f := getFormatter(jsonOut, quiet)
 		name, tag := args[0], args[1]
 
 		if !validName.MatchString(name) {
-			exitWithError(fmt.Sprintf("Invalid secret name %q. Must match [A-Z][A-Z0-9_]*", name))
+			return exitWithError(fmt.Sprintf("Invalid secret name %q. Must match [A-Z][A-Z0-9_]*", name))
 		}
 
 		v, err := getUnlockedVault(jsonOut, quiet, global, env)
 		if err != nil {
-			exitWithError(err.Error())
+			return err
 		}
 		defer v.Close()
 
 		if tagErr := v.RemoveTag(name, tag); tagErr != nil {
-			exitWithError(tagErr.Error())
+			return exitWithError(tagErr.Error())
 		}
 
 		f.Success(fmt.Sprintf("Removed tag %s from %s", tag, name))
+		return nil
 	},
 }
 
