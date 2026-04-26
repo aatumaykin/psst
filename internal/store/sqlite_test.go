@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -232,6 +233,27 @@ func TestMeta(t *testing.T) {
 	if val != "2" {
 		t.Fatalf("expected '2', got %q", val)
 	}
+}
+
+func TestExecTx_DataRace(t *testing.T) {
+	s := setupTestStore(t)
+
+	s.SetSecret("KEY", []byte("v"), []byte("iv"), nil)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 100 {
+			s.GetSecret("KEY")
+		}
+	}()
+
+	for i := range 100 {
+		s.ExecTx(func() error {
+			return s.SetSecret("KEY", fmt.Appendf(nil, "v%d", i), []byte("iv"), nil)
+		})
+	}
+	<-done
 }
 
 func TestVaultFileCreated(t *testing.T) {

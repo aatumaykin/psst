@@ -25,29 +25,46 @@ func NewSQLite(dbPath string) (*SQLiteStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
+	ctx, cancel := context.WithTimeout(
+		context.Background(), 5*time.Second, //nolint:mnd // reasonable connection timeout
+	)
+	defer cancel()
+	if err = db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("verify database connection: %w", err)
+	}
 	return &SQLiteStore{db: db, dbPath: dbPath}, nil
 }
 
 func (s *SQLiteStore) exec(query string, args ...any) (sql.Result, error) {
 	ctx := context.Background()
-	if s.currentTx != nil {
-		return s.currentTx.ExecContext(ctx, query, args...)
+	s.mu.Lock()
+	tx := s.currentTx
+	s.mu.Unlock()
+	if tx != nil {
+		return tx.ExecContext(ctx, query, args...)
 	}
 	return s.db.ExecContext(ctx, query, args...)
 }
 
 func (s *SQLiteStore) query(query string, args ...any) (*sql.Rows, error) {
 	ctx := context.Background()
-	if s.currentTx != nil {
-		return s.currentTx.QueryContext(ctx, query, args...)
+	s.mu.Lock()
+	tx := s.currentTx
+	s.mu.Unlock()
+	if tx != nil {
+		return tx.QueryContext(ctx, query, args...)
 	}
 	return s.db.QueryContext(ctx, query, args...)
 }
 
 func (s *SQLiteStore) queryRow(query string, args ...any) *sql.Row {
 	ctx := context.Background()
-	if s.currentTx != nil {
-		return s.currentTx.QueryRowContext(ctx, query, args...)
+	s.mu.Lock()
+	tx := s.currentTx
+	s.mu.Unlock()
+	if tx != nil {
+		return tx.QueryRowContext(ctx, query, args...)
 	}
 	return s.db.QueryRowContext(ctx, query, args...)
 }
@@ -83,13 +100,15 @@ func scanHistoryTagsAndTime(tagsJSON, archivedAtStr string) ([]string, time.Time
 }
 
 func (s *SQLiteStore) InitSchema() error {
-	err := initSchema(s.db)
+	if err := initSchema(s.db); err != nil {
+		return err
+	}
 	if s.dbPath != "" {
 		if chmodErr := os.Chmod(s.dbPath, 0600); chmodErr != nil {
 			return chmodErr
 		}
 	}
-	return err
+	return nil
 }
 
 func (s *SQLiteStore) GetSecret(name string) (*StoredSecret, error) {
@@ -143,6 +162,9 @@ func (s *SQLiteStore) GetAllSecrets() ([]StoredSecret, error) {
 		sec.CreatedAt = created
 		sec.UpdatedAt = updated
 		result = append(result, sec)
+	}
+	if err2 := rows.Err(); err2 != nil {
+		return nil, err2
 	}
 	return result, nil
 }
@@ -199,6 +221,9 @@ func (s *SQLiteStore) ListSecrets() ([]SecretMeta, error) {
 		m.UpdatedAt = updated
 		result = append(result, m)
 	}
+	if err2 := rows.Err(); err2 != nil {
+		return nil, err2
+	}
 	return result, nil
 }
 
@@ -232,6 +257,9 @@ func (s *SQLiteStore) GetHistory(name string) ([]HistoryEntry, error) {
 		e.ArchivedAt = archived
 		result = append(result, e)
 	}
+	if err2 := rows.Err(); err2 != nil {
+		return nil, err2
+	}
 	return result, nil
 }
 
@@ -263,18 +291,24 @@ func (s *SQLiteStore) Close() error {
 
 func (s *SQLiteStore) ExecTx(fn func() error) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	tx, err := s.db.BeginTx(context.Background(), nil)
 	if err != nil {
+		s.mu.Unlock()
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 
 	s.currentTx = tx
-	defer func() { s.currentTx = nil }()
+	s.mu.Unlock()
+
+	defer func() {
+		s.mu.Lock()
+		s.currentTx = nil
+		s.mu.Unlock()
+		_ = tx.Rollback()
+	}()
 
 	if fnErr := fn(); fnErr != nil {
-		_ = tx.Rollback()
 		return fnErr
 	}
 	return tx.Commit()
