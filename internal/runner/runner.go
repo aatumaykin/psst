@@ -99,11 +99,15 @@ func (r *Runner) runWithMasking(cmd *exec.Cmd, secrets map[string][]byte) (int, 
 	<-doneStdout
 	<-doneStderr
 
+	for i := range secretValues {
+		zeroBytes(secretValues[i])
+	}
+
 	waitErr := cmd.Wait()
 	return exitCode(waitErr), waitErr
 }
 
-func streamWithMasking(src io.Reader, dst io.Writer, secrets []string) {
+func streamWithMasking(src io.Reader, dst io.Writer, secrets [][]byte) {
 	if len(secrets) == 0 {
 		_, _ = io.Copy(dst, src)
 		return
@@ -118,26 +122,35 @@ func streamWithMasking(src io.Reader, dst io.Writer, secrets []string) {
 
 	const chunkSize = 32 * 1024
 	buf := make([]byte, chunkSize)
-	var tail string
+	var tail []byte
 
 	for {
 		n, readErr := src.Read(buf)
-		data := tail + string(buf[:n])
+		data := make([]byte, 0, len(tail)+n)
+		data = append(data, tail...)
+		data = append(data, buf[:n]...)
+		zeroBytes(tail)
+		tail = nil
 
 		if len(data) == 0 {
 			break
 		}
 
-		masked := MaskSecrets(data, secrets)
+		masked := MaskSecretsBytes(data, secrets)
+		zeroBytes(data)
 
 		if readErr != nil {
-			_, _ = dst.Write([]byte(masked))
+			_, _ = dst.Write(masked)
+			zeroBytes(masked)
 			break
 		}
 
 		if len(masked) > maxSecretLen {
-			_, _ = dst.Write([]byte(masked[:len(masked)-maxSecretLen]))
-			tail = masked[len(masked)-maxSecretLen:]
+			writeEnd := len(masked) - maxSecretLen
+			_, _ = dst.Write(masked[:writeEnd])
+			tail = make([]byte, maxSecretLen)
+			copy(tail, masked[writeEnd:])
+			zeroBytes(masked)
 		} else {
 			tail = masked
 		}
@@ -158,14 +171,22 @@ func buildEnv(secrets map[string][]byte) []string {
 	return filtered
 }
 
-func filterEmpty(secrets map[string][]byte) []string {
-	var result []string
+func filterEmpty(secrets map[string][]byte) [][]byte {
+	var result [][]byte
 	for _, v := range secrets {
 		if len(v) > 0 {
-			result = append(result, string(v))
+			cp := make([]byte, len(v))
+			copy(cp, v)
+			result = append(result, cp)
 		}
 	}
 	return result
+}
+
+func zeroBytes(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
 }
 
 func exitCode(err error) int {

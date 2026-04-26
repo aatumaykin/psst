@@ -94,6 +94,11 @@ func TestFilterEmpty(t *testing.T) {
 	if len(result) != 2 {
 		t.Fatalf("len = %d, want 2", len(result))
 	}
+	for _, v := range result {
+		if len(v) == 0 {
+			t.Fatal("empty value in result")
+		}
+	}
 }
 
 func TestBuildEnv(t *testing.T) {
@@ -135,7 +140,7 @@ func TestStreamWithMasking_BoundarySplit(t *testing.T) {
 		w.Close()
 	}()
 
-	streamWithMasking(r, &buf, []string{secret})
+	streamWithMasking(r, &buf, [][]byte{[]byte(secret)})
 
 	result := buf.String()
 	if strings.Contains(result, secret) {
@@ -299,7 +304,7 @@ func TestStreamWithMasking_NewlineInSecret(t *testing.T) {
 	input := "prefix" + secret + "suffix\n"
 
 	var buf bytes.Buffer
-	streamWithMasking(strings.NewReader(input), &buf, []string{secret})
+	streamWithMasking(strings.NewReader(input), &buf, [][]byte{[]byte(secret)})
 
 	result := buf.String()
 	if strings.Contains(result, "SECRET") {
@@ -327,7 +332,7 @@ func TestStreamWithMasking_ChunkBoundarySplit(t *testing.T) {
 		w.Close()
 	}()
 
-	streamWithMasking(r, &buf, []string{secret})
+	streamWithMasking(r, &buf, [][]byte{[]byte(secret)})
 
 	result := buf.String()
 	if strings.Contains(result, secret) {
@@ -345,7 +350,7 @@ func TestStreamWithMasking_OneByteReads(t *testing.T) {
 	var buf bytes.Buffer
 	reader := &oneByteReader{data: []byte(input)}
 
-	streamWithMasking(reader, &buf, []string{secret})
+	streamWithMasking(reader, &buf, [][]byte{[]byte(secret)})
 
 	result := buf.String()
 	if strings.Contains(result, secret) {
@@ -375,5 +380,39 @@ func TestExec_NoGoroutineLeak(t *testing.T) {
 
 	if final > initial+5 {
 		t.Fatalf("possible goroutine leak: initial=%d, final=%d", initial, final)
+	}
+}
+
+func TestMaskSecretsBytes(t *testing.T) {
+	secrets := [][]byte{[]byte("sk-live-abc123"), []byte("password123")}
+	data := []byte("Using key sk-live-abc123 for auth")
+
+	result := MaskSecretsBytes(data, secrets)
+	if bytes.Contains(result, []byte("sk-live-abc123")) {
+		t.Fatal("secret should be masked")
+	}
+	if !bytes.Contains(result, []byte("[REDACTED]")) {
+		t.Fatal("should contain [REDACTED]")
+	}
+}
+
+func TestMaskSecretsBytes_SubstringOrder(t *testing.T) {
+	secrets := [][]byte{[]byte("sk-abc"), []byte("sk-abc123def")}
+	data := []byte("key=sk-abc123def and short=sk-abc")
+
+	result := MaskSecretsBytes(data, secrets)
+	if bytes.Contains(result, []byte("sk-abc123def")) {
+		t.Fatal("longer secret should be masked")
+	}
+	if bytes.Contains(result, []byte("sk-abc")) {
+		t.Fatal("shorter secret should be masked")
+	}
+}
+
+func TestMaskSecretsBytes_Empty(t *testing.T) {
+	data := []byte("hello world")
+	result := MaskSecretsBytes(data, [][]byte{[]byte("")})
+	if string(result) != string(data) {
+		t.Fatal("empty secrets should not change data")
 	}
 }
