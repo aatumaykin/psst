@@ -448,13 +448,13 @@ func TestPerVaultSalt(t *testing.T) {
 
 	path2 := filepath.Join(dir, "vault2.db")
 	kp2 := &testKeyProvider{enc: enc, key: nil}
-	if err := InitVault(path2, enc, kp2, InitOptions{SkipKeychain: true}); err != nil {
-		t.Fatal(err)
+	if initErr := InitVault(path2, enc, kp2, InitOptions{SkipKeychain: true}); initErr != nil {
+		t.Fatal(initErr)
 	}
 
-	s2, err := store.NewSQLite(path2)
-	if err != nil {
-		t.Fatal(err)
+	s2, storeErr := store.NewSQLite(path2)
+	if storeErr != nil {
+		t.Fatal(storeErr)
 	}
 	defer s2.Close()
 	salt2, _ := s2.GetMeta("kdf_salt")
