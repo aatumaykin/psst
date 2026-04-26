@@ -52,6 +52,8 @@ func fetchLatestReleaseWithURL(apiURL string) (*ReleaseInfo, error) {
 	return &release, nil
 }
 
+const maxDownloadSize = 200 * 1024 * 1024
+
 func downloadFile(url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
 	if err != nil {
@@ -68,7 +70,7 @@ func downloadFile(url string) ([]byte, error) {
 		return nil, fmt.Errorf("download %s: status %d", url, resp.StatusCode)
 	}
 
-	body, readErr := io.ReadAll(resp.Body)
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxDownloadSize))
 	if readErr != nil {
 		return nil, fmt.Errorf("download %s: read body: %w", url, readErr)
 	}

@@ -11,6 +11,8 @@ import (
 	"runtime"
 )
 
+const maxBinarySize = 100 * 1024 * 1024
+
 func PerformUpdate(info *UpdateInfo, force bool) error {
 	if !force && !info.IsNewer() {
 		return fmt.Errorf("already up to date (v%s)", info.CurrentVersion)
@@ -94,7 +96,10 @@ func extractBinaryFromTarGz(archivePath string) ([]byte, error) {
 		}
 
 		if hdr.Name == "psst" || filepath.Base(hdr.Name) == "psst" {
-			data, readErr := io.ReadAll(tr)
+			if hdr.Size > maxBinarySize {
+				return nil, fmt.Errorf("binary in archive too large: %d bytes", hdr.Size)
+			}
+			data, readErr := io.ReadAll(io.LimitReader(tr, maxBinarySize))
 			if readErr != nil {
 				return nil, fmt.Errorf("read binary from tar: %w", readErr)
 			}
