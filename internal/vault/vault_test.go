@@ -461,6 +461,28 @@ func TestRollback_AfterPrunedHistory(t *testing.T) {
 	}
 }
 
+func TestMigrateKDF_ZeroesOldKey(t *testing.T) {
+	v := setupTestVaultV1(t)
+	defer v.Close()
+
+	v.SetSecret("K", []byte("val"), nil)
+
+	oldKey := v.key
+
+	v.MigrateKDF()
+
+	allZero := true
+	for _, b := range oldKey {
+		if b != 0 {
+			allZero = false
+			break
+		}
+	}
+	if !allZero {
+		t.Fatal("old key should be zeroed after MigrateKDF")
+	}
+}
+
 func TestPerVaultSalt(t *testing.T) {
 	dir := t.TempDir()
 	enc := crypto.NewAESGCM()
