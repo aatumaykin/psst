@@ -252,6 +252,20 @@ func TestExpandEnvVars_BothForms(t *testing.T) {
 	}
 }
 
+func TestExpandEnvVars_NoTransitiveExpansion(t *testing.T) {
+	env := map[string][]byte{
+		"A": []byte("${B}"),
+		"B": []byte("secret"),
+	}
+	got := ExpandEnvVars("$A", env)
+	if got == "secret" {
+		t.Fatal("transitive expansion should not occur")
+	}
+	if got != "${B}" {
+		t.Fatalf("expected literal ${B}, got %q", got)
+	}
+}
+
 func TestExec_ContextCancellation(t *testing.T) {
 	r := New()
 	secrets := map[string][]byte{}

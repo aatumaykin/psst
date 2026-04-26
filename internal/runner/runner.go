@@ -11,9 +11,12 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 )
 
 const maxScanSize = 1024 * 1024
+
+const gracefulShutdownDelay = 5 * time.Second
 
 type ExecOptions struct {
 	MaskOutput bool
@@ -39,6 +42,8 @@ func (r *Runner) Exec(secrets map[string][]byte, command string, args []string, 
 
 	env := buildEnv(secrets)
 
+	command = ExpandEnvVars(command, secrets)
+
 	expandedArgs := make([]string, len(args))
 	for i, a := range args {
 		expandedArgs[i] = ExpandEnvVars(a, secrets)
@@ -46,6 +51,10 @@ func (r *Runner) Exec(secrets map[string][]byte, command string, args []string, 
 
 	cmd := exec.CommandContext(ctx, command, expandedArgs...)
 	cmd.Env = env
+	cmd.Cancel = func() error {
+		return cmd.Process.Signal(syscall.SIGTERM)
+	}
+	cmd.WaitDelay = gracefulShutdownDelay
 
 	if opts.MaskOutput {
 		return r.runWithMasking(cmd, secrets)
@@ -108,6 +117,9 @@ func streamWithMasking(src io.Reader, dst io.Writer, secrets []string) {
 			_, _ = dst.Write([]byte(masked))
 		}
 		if readErr != nil {
+			if errors.Is(readErr, bufio.ErrBufferFull) {
+				continue
+			}
 			break
 		}
 	}

@@ -6,42 +6,56 @@ import (
 )
 
 func ExpandEnvVars(arg string, env map[string][]byte) string {
+	if len(env) == 0 {
+		return arg
+	}
+
+	type pattern struct {
+		brace string
+		bare  string
+		value string
+	}
+
 	names := make([]string, 0, len(env))
 	for name := range env {
 		names = append(names, name)
 	}
 	slices.SortFunc(names, func(a, b string) int { return len(b) - len(a) })
 
-	result := arg
-	for _, name := range names {
-		value := string(env[name])
-		result = strings.ReplaceAll(result, "${"+name+"}", value)
-		result = replaceBareVar(result, name, value)
+	patterns := make([]pattern, len(names))
+	for i, name := range names {
+		patterns[i] = pattern{
+			brace: "${" + name + "}",
+			bare:  "$" + name,
+			value: string(env[name]),
+		}
 	}
 
-	return result
-}
-
-func replaceBareVar(s, name, value string) string {
-	needle := "$" + name
 	var b strings.Builder
 	i := 0
-	for {
-		idx := strings.Index(s[i:], needle)
-		if idx == -1 {
-			b.WriteString(s[i:])
-			break
+	for i < len(arg) {
+		matched := false
+		for _, p := range patterns {
+			if strings.HasPrefix(arg[i:], p.brace) {
+				b.WriteString(p.value)
+				i += len(p.brace)
+				matched = true
+				break
+			}
+			if strings.HasPrefix(arg[i:], p.bare) {
+				after := i + len(p.bare)
+				if after >= len(arg) || !isWordChar(arg[after]) {
+					b.WriteString(p.value)
+					i = after
+					matched = true
+					break
+				}
+			}
 		}
-		idx += i
-		after := idx + len(needle)
-		if after < len(s) && isWordChar(s[after]) {
-			b.WriteString(s[i : idx+1])
-			i = idx + 1
-			continue
+		if !matched {
+			b.WriteByte(arg[i])
+			i++
 		}
-		b.WriteString(s[i:idx])
-		b.WriteString(value)
-		i = after
 	}
 	return b.String()
 }
