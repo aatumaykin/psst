@@ -44,6 +44,9 @@ var setCmd = &cobra.Command{
 					return exitWithError(fmt.Sprintf("Failed to read password: %v", readErr))
 				}
 				value = strings.TrimSpace(string(passwordBytes))
+				for i := range passwordBytes {
+					passwordBytes[i] = 0
+				}
 			} else {
 				reader := bufio.NewReader(os.Stdin)
 				line, _ := reader.ReadString('\n')
@@ -61,7 +64,13 @@ var setCmd = &cobra.Command{
 		}
 		defer v.Close()
 
-		if setErr := v.SetSecret(name, []byte(value), tags); setErr != nil {
+		valueBytes := []byte(value)
+		defer func() {
+			for i := range valueBytes {
+				valueBytes[i] = 0
+			}
+		}()
+		if setErr := v.SetSecret(name, valueBytes, tags); setErr != nil {
 			return exitWithError(setErr.Error())
 		}
 
