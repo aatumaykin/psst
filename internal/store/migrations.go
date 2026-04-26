@@ -59,19 +59,26 @@ func initSchema(db *sql.DB) error {
 		return err
 	}
 
+	if err = migrateAddTagsColumnTx(tx, "secrets"); err != nil {
+		return err
+	}
+	if err = migrateAddTagsColumnTx(tx, "secrets_history"); err != nil {
+		return err
+	}
+
 	if err = tx.Commit(); err != nil {
 		return err
 	}
-	return migrateAddTagsColumn(db, "secrets")
+	return nil
 }
 
-func migrateAddTagsColumn(db *sql.DB, table string) error {
+func migrateAddTagsColumnTx(tx *sql.Tx, table string) error {
 	ctx := context.Background()
 	allowed := map[string]bool{"secrets": true, "secrets_history": true}
 	if !allowed[table] {
 		return fmt.Errorf("unknown table: %s", table)
 	}
-	rows, err := db.QueryContext(ctx, "PRAGMA table_info("+table+")")
+	rows, err := tx.QueryContext(ctx, "PRAGMA table_info("+table+")")
 	if err != nil {
 		return err
 	}
@@ -94,7 +101,7 @@ func migrateAddTagsColumn(db *sql.DB, table string) error {
 
 	if !hasTags {
 		q := "ALTER TABLE " + table + " ADD COLUMN tags TEXT DEFAULT '[]'" //nolint:gosec // table validated against allowlist
-		if _, alterErr := db.ExecContext(ctx, q); alterErr != nil {
+		if _, alterErr := tx.ExecContext(ctx, q); alterErr != nil {
 			return alterErr
 		}
 	}

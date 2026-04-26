@@ -26,5 +26,8 @@ func (e *EnvVarProvider) IsAvailable() bool {
 }
 
 func (e *EnvVarProvider) GenerateKey() ([]byte, error) {
+	if e.deriver == nil {
+		return nil, errors.New("no key deriver available")
+	}
 	return e.deriver.GenerateKey()
 }

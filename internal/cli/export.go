@@ -2,6 +2,7 @@ package cli
 
 import (
 	"os"
+	"syscall"
 
 	"github.com/spf13/cobra"
 )
@@ -31,10 +32,7 @@ var exportCmd = &cobra.Command{
 		}
 
 		if envFile != "" {
-			if info, statErr := os.Lstat(envFile); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
-				return exitWithError("Refusing to write to symlink: " + envFile)
-			}
-			file, fileErr := os.OpenFile(envFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+			file, fileErr := os.OpenFile(envFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0600)
 			if fileErr != nil {
 				return exitWithError("Cannot create file: " + fileErr.Error())
 			}

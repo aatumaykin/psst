@@ -150,6 +150,32 @@ func TestKeyToBufferV2_NeverBypassesArgon2id(t *testing.T) {
 	}
 }
 
+func TestZeroBytes(t *testing.T) {
+	buf := []byte{1, 2, 3, 4, 5}
+	ZeroBytes(buf)
+	for i, b := range buf {
+		if b != 0 {
+			t.Fatalf("byte at index %d = %d, want 0", i, b)
+		}
+	}
+}
+
+func TestZeroBytes_Empty(t *testing.T) {
+	buf := []byte{}
+	ZeroBytes(buf)
+	if len(buf) != 0 {
+		t.Fatal("empty slice should remain empty")
+	}
+}
+
+func TestKeyToBuffer_EmptyPassword(t *testing.T) {
+	enc := NewAESGCM()
+	_, err := enc.KeyToBuffer("")
+	if err == nil {
+		t.Fatal("KeyToBuffer should reject empty password")
+	}
+}
+
 func TestKeyToBufferV1_V2_ProduceDifferentKeys(t *testing.T) {
 	enc := NewAESGCM()
 	v1, _ := enc.KeyToBuffer("mypassword")

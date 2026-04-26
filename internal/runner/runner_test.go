@@ -3,8 +3,10 @@ package runner
 import (
 	"bytes"
 	"io"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMaskSecrets(t *testing.T) {
@@ -275,5 +277,103 @@ func TestExec_ContextCancellation(t *testing.T) {
 	}
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
+	}
+}
+
+type oneByteReader struct {
+	data []byte
+	pos  int
+}
+
+func (r *oneByteReader) Read(p []byte) (int, error) {
+	if r.pos >= len(r.data) {
+		return 0, io.EOF
+	}
+	p[0] = r.data[r.pos]
+	r.pos++
+	return 1, nil
+}
+
+func TestStreamWithMasking_NewlineInSecret(t *testing.T) {
+	secret := "SECRET\nVALUE"
+	input := "prefix" + secret + "suffix\n"
+
+	var buf bytes.Buffer
+	streamWithMasking(strings.NewReader(input), &buf, []string{secret})
+
+	result := buf.String()
+	if strings.Contains(result, "SECRET") {
+		t.Fatalf("secret fragment leaked: %q", result)
+	}
+	if strings.Contains(result, "VALUE") {
+		t.Fatalf("secret fragment leaked: %q", result)
+	}
+	if !strings.Contains(result, "[REDACTED]") {
+		t.Fatalf("expected [REDACTED] in output, got: %q", result)
+	}
+}
+
+func TestStreamWithMasking_ChunkBoundarySplit(t *testing.T) {
+	secret := "BOUNDARYSECRET"
+	chunk1 := "aa" + secret[:7]
+	chunk2 := secret[7:] + "bb"
+
+	var buf bytes.Buffer
+	r, w := io.Pipe()
+
+	go func() {
+		w.Write([]byte(chunk1))
+		w.Write([]byte(chunk2))
+		w.Close()
+	}()
+
+	streamWithMasking(r, &buf, []string{secret})
+
+	result := buf.String()
+	if strings.Contains(result, secret) {
+		t.Fatalf("secret leaked: %q", result)
+	}
+	if !strings.Contains(result, "[REDACTED]") {
+		t.Fatalf("expected [REDACTED], got: %q", result)
+	}
+}
+
+func TestStreamWithMasking_OneByteReads(t *testing.T) {
+	secret := "LONGSECRET123"
+	input := "prefix" + secret + "suffix"
+
+	var buf bytes.Buffer
+	reader := &oneByteReader{data: []byte(input)}
+
+	streamWithMasking(reader, &buf, []string{secret})
+
+	result := buf.String()
+	if strings.Contains(result, secret) {
+		t.Fatalf("secret leaked: %q", result)
+	}
+	if !strings.Contains(result, "[REDACTED]") {
+		t.Fatalf("expected [REDACTED], got: %q", result)
+	}
+}
+
+func TestExec_NoGoroutineLeak(t *testing.T) {
+	runtime.GC()
+	time.Sleep(10 * time.Millisecond)
+	initial := runtime.NumGoroutine()
+
+	runner := New()
+	for i := 0; i < 10; i++ {
+		_, err := runner.Exec(map[string][]byte{}, "true", []string{}, ExecOptions{})
+		if err != nil {
+			t.Fatalf("Exec() error: %v", err)
+		}
+	}
+
+	runtime.GC()
+	time.Sleep(50 * time.Millisecond)
+	final := runtime.NumGoroutine()
+
+	if final > initial+5 {
+		t.Fatalf("possible goroutine leak: initial=%d, final=%d", initial, final)
 	}
 }

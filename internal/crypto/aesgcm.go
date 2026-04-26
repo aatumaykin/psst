@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 
@@ -65,6 +66,10 @@ func (a *AESGCM) Decrypt(ciphertext []byte, iv []byte, key []byte) ([]byte, erro
 }
 
 func (a *AESGCM) KeyToBuffer(key string) ([]byte, error) {
+	if key == "" {
+		return nil, errors.New("empty key/password not allowed")
+	}
+
 	decoded, err := base64.StdEncoding.DecodeString(key)
 	if err == nil && len(decoded) == aesKeySize {
 		return decoded, nil
@@ -81,6 +86,12 @@ func (a *AESGCM) KeyToBufferV2(key string) ([]byte, error) {
 
 func (a *AESGCM) KeyToBufferV2WithSalt(key string, salt []byte) ([]byte, error) {
 	return argon2.IDKey([]byte(key), salt, argon2Iterations, argon2Memory, argon2Threads, aesKeySize), nil
+}
+
+func ZeroBytes(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
 }
 
 func (a *AESGCM) GenerateKey() ([]byte, error) {

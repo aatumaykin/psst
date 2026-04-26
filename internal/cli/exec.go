@@ -32,15 +32,17 @@ func handleExecPatternDirect(
 	}
 
 	for _, name := range secretNames {
+		if !validName.MatchString(name) {
+			return exitWithError(fmt.Sprintf("Invalid secret name %q. Must match [A-Z][A-Z0-9_]*", name))
+		}
+	}
+
+	for _, name := range secretNames {
 		sec, getErr := v.GetSecret(name)
 		if getErr != nil {
 			return exitWithError(getErr.Error())
 		}
-		if sec != nil {
-			secrets[name] = sec.Value
-		} else if !quiet {
-			fmt.Fprintf(os.Stderr, "Warning: secret %q not found\n", name)
-		}
+		secrets[name] = sec.Value
 	}
 
 	r := getRunner()

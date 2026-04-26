@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "modernc.org/sqlite" // sqlite driver registration
@@ -16,7 +17,7 @@ import (
 type SQLiteStore struct {
 	mu        sync.Mutex
 	db        *sql.DB
-	currentTx *sql.Tx
+	currentTx atomic.Pointer[sql.Tx]
 	dbPath    string
 }
 
@@ -38,10 +39,7 @@ func NewSQLite(dbPath string) (*SQLiteStore, error) {
 
 func (s *SQLiteStore) exec(query string, args ...any) (sql.Result, error) {
 	ctx := context.Background()
-	s.mu.Lock()
-	tx := s.currentTx
-	s.mu.Unlock()
-	if tx != nil {
+	if tx := s.currentTx.Load(); tx != nil {
 		return tx.ExecContext(ctx, query, args...)
 	}
 	return s.db.ExecContext(ctx, query, args...)
@@ -49,10 +47,7 @@ func (s *SQLiteStore) exec(query string, args ...any) (sql.Result, error) {
 
 func (s *SQLiteStore) query(query string, args ...any) (*sql.Rows, error) {
 	ctx := context.Background()
-	s.mu.Lock()
-	tx := s.currentTx
-	s.mu.Unlock()
-	if tx != nil {
+	if tx := s.currentTx.Load(); tx != nil {
 		return tx.QueryContext(ctx, query, args...)
 	}
 	return s.db.QueryContext(ctx, query, args...)
@@ -60,10 +55,7 @@ func (s *SQLiteStore) query(query string, args ...any) (*sql.Rows, error) {
 
 func (s *SQLiteStore) queryRow(query string, args ...any) *sql.Row {
 	ctx := context.Background()
-	s.mu.Lock()
-	tx := s.currentTx
-	s.mu.Unlock()
-	if tx != nil {
+	if tx := s.currentTx.Load(); tx != nil {
 		return tx.QueryRowContext(ctx, query, args...)
 	}
 	return s.db.QueryRowContext(ctx, query, args...)
@@ -107,6 +99,8 @@ func (s *SQLiteStore) InitSchema() error {
 		if chmodErr := os.Chmod(s.dbPath, 0600); chmodErr != nil {
 			return chmodErr
 		}
+		_ = os.Chmod(s.dbPath+"-wal", 0600)
+		_ = os.Chmod(s.dbPath+"-shm", 0600)
 	}
 	return nil
 }
@@ -291,20 +285,16 @@ func (s *SQLiteStore) Close() error {
 
 func (s *SQLiteStore) ExecTx(fn func() error) error {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	tx, err := s.db.BeginTx(context.Background(), nil)
 	if err != nil {
-		s.mu.Unlock()
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 
-	s.currentTx = tx
-	s.mu.Unlock()
-
+	s.currentTx.Store(tx)
 	defer func() {
-		s.mu.Lock()
-		s.currentTx = nil
-		s.mu.Unlock()
+		s.currentTx.Store(nil)
 		_ = tx.Rollback()
 	}()
 

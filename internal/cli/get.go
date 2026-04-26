@@ -29,9 +29,6 @@ var getCmd = &cobra.Command{
 		if err != nil {
 			return exitWithError(err.Error())
 		}
-		if sec == nil {
-			return exitWithError(fmt.Sprintf("Secret %q not found", name))
-		}
 
 		f.SecretValue(name, string(sec.Value))
 		return nil

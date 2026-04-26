@@ -1,7 +1,6 @@
 package runner
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -13,8 +12,6 @@ import (
 	"syscall"
 	"time"
 )
-
-const maxScanSize = 1024 * 1024
 
 const gracefulShutdownDelay = 5 * time.Second
 
@@ -35,8 +32,11 @@ func (r *Runner) Exec(secrets map[string][]byte, command string, args []string, 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
-		<-sigCh
-		cancel()
+		select {
+		case <-sigCh:
+			cancel()
+		case <-ctx.Done():
+		}
 	}()
 	defer signal.Stop(sigCh)
 
@@ -109,18 +109,37 @@ func streamWithMasking(src io.Reader, dst io.Writer, secrets []string) {
 		return
 	}
 
-	reader := bufio.NewReaderSize(src, maxScanSize)
-	for {
-		line, readErr := reader.ReadString('\n')
-		if line != "" {
-			masked := MaskSecrets(line, secrets)
-			_, _ = dst.Write([]byte(masked))
+	maxSecretLen := 0
+	for _, s := range secrets {
+		if len(s) > maxSecretLen {
+			maxSecretLen = len(s)
 		}
-		if readErr != nil {
-			if errors.Is(readErr, bufio.ErrBufferFull) {
-				continue
-			}
+	}
+
+	const chunkSize = 32 * 1024
+	buf := make([]byte, chunkSize)
+	var tail string
+
+	for {
+		n, readErr := src.Read(buf)
+		data := tail + string(buf[:n])
+
+		if len(data) == 0 {
 			break
+		}
+
+		masked := MaskSecrets(data, secrets)
+
+		if readErr != nil {
+			_, _ = dst.Write([]byte(masked))
+			break
+		}
+
+		if len(masked) > maxSecretLen {
+			_, _ = dst.Write([]byte(masked[:len(masked)-maxSecretLen]))
+			tail = masked[len(masked)-maxSecretLen:]
+		} else {
+			tail = masked
 		}
 	}
 }

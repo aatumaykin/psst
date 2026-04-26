@@ -426,6 +426,41 @@ func TestMigrateKDF_GeneratesSalt(t *testing.T) {
 	}
 }
 
+func TestRollback_AfterPrunedHistory(t *testing.T) {
+	v := setupTestVault(t)
+	defer v.Close()
+
+	for i := range 15 {
+		if err := v.SetSecret("KEY", fmt.Appendf(nil, "v%d", i), nil); err != nil {
+			t.Fatalf("SetSecret iteration %d: %v", i, err)
+		}
+	}
+
+	history, err := v.GetHistory("KEY")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) == 0 {
+		t.Fatal("expected history entries")
+	}
+
+	oldestVersion := history[0].Version
+
+	err = v.Rollback("KEY", oldestVersion)
+	if err != nil {
+		t.Fatalf("Rollback to version %d after pruning: %v", oldestVersion, err)
+	}
+
+	sec, err := v.GetSecret("KEY")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf("v%d", oldestVersion-1)
+	if string(sec.Value) != want {
+		t.Fatalf("after rollback value = %q, want %q", string(sec.Value), want)
+	}
+}
+
 func TestPerVaultSalt(t *testing.T) {
 	dir := t.TempDir()
 	enc := crypto.NewAESGCM()

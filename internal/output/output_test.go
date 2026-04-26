@@ -41,6 +41,9 @@ func TestQuoteValue(t *testing.T) {
 		{"simple", "simple"},
 		{"has space", `"has space"`},
 		{`has "quote"`, `"has \"quote\""`},
+		{`path\to\file`, `path\to\file`},
+		{`path\to\file with spaces`, `"path\\to\\file with spaces"`},
+		{`mixed\path "quoted"`, `"mixed\\path \"quoted\""`},
 	}
 
 	for _, tt := range tests {

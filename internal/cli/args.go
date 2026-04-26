@@ -31,6 +31,12 @@ func parseGlobalFlagsFromArgs(args []string) (bool, bool, bool, string, []string
 			if i < len(args) {
 				tags = append(tags, args[i])
 			}
+		default:
+			if val, ok := strings.CutPrefix(args[i], "--env="); ok {
+				env = val
+			} else if val, ok := strings.CutPrefix(args[i], "--tag="); ok {
+				tags = append(tags, val)
+			}
 		}
 	}
 	if os.Getenv("PSST_GLOBAL") == "1" {
@@ -58,6 +64,9 @@ func filterSecretNames(
 			valueArgs[i] = true
 			valueArgs[i+1] = true
 			i++
+		}
+		if strings.HasPrefix(args[i], "--env=") || strings.HasPrefix(args[i], "--tag=") {
+			valueArgs[i] = true
 		}
 	}
 	var names []string

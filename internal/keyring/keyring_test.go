@@ -39,6 +39,15 @@ func TestEnvVarProviderAvailable(t *testing.T) {
 	}
 }
 
+func TestEnvVarProviderGenerateKey_NilDeriver(t *testing.T) {
+	p := &EnvVarProvider{}
+
+	_, err := p.GenerateKey()
+	if err == nil {
+		t.Fatal("GenerateKey should fail with nil deriver")
+	}
+}
+
 func TestEnvVarProviderGenerateKey(t *testing.T) {
 	enc := crypto.NewAESGCM()
 	p := &EnvVarProvider{deriver: enc}

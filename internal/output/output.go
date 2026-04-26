@@ -197,7 +197,9 @@ func (f *Formatter) PrintJSON(data any) {
 
 func quoteValue(v string) string {
 	if strings.ContainsAny(v, " \t\n\r\"'") {
-		return `"` + strings.ReplaceAll(v, `"`, `\"`) + `"`
+		v = strings.ReplaceAll(v, `\`, `\\`)
+		v = strings.ReplaceAll(v, `"`, `\"`)
+		return `"` + v + `"`
 	}
 	return v
 }

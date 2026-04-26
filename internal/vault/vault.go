@@ -288,9 +288,18 @@ func (v *Vault) Rollback(name string, version int) error {
 	}
 
 	return v.store.ExecTx(func() error {
-		newVersion := len(history) + 1
+		maxVersion := 0
+		for _, h := range history {
+			if h.Version > maxVersion {
+				maxVersion = h.Version
+			}
+		}
+		newVersion := maxVersion + 1
 		if err = v.store.AddHistory(name, newVersion, current.EncryptedValue, current.IV, current.Tags); err != nil {
 			return fmt.Errorf("archive history: %w", err)
+		}
+		if err = v.store.PruneHistory(name, maxHistory); err != nil {
+			return fmt.Errorf("prune history: %w", err)
 		}
 		return v.store.SetSecret(name, target.EncryptedValue, target.IV, target.Tags)
 	})
@@ -368,7 +377,7 @@ func (v *Vault) GetAllSecrets() (map[string][]byte, error) {
 		var plaintext []byte
 		plaintext, err = v.enc.Decrypt(s.EncryptedValue, s.IV, v.key)
 		if err != nil {
-			return nil, fmt.Errorf("decrypt %s: %w", s.Name, err)
+			return nil, fmt.Errorf("decrypt secret: %w", err)
 		}
 		result[s.Name] = plaintext
 	}
@@ -396,7 +405,7 @@ func (v *Vault) GetSecretsByTagValues(tags []string) (map[string][]byte, error) 
 	for _, name := range names {
 		sec, secErr := v.GetSecret(name)
 		if secErr != nil {
-			return nil, fmt.Errorf("get %s: %w", name, secErr)
+			return nil, fmt.Errorf("get secret: %w", secErr)
 		}
 		result[name] = sec.Value
 	}
@@ -451,7 +460,7 @@ func (v *Vault) MigrateKDF() error {
 			var plaintext []byte
 			plaintext, err = v.enc.Decrypt(s.EncryptedValue, s.IV, v.key)
 			if err != nil {
-				return fmt.Errorf("decrypt %s: %w", s.Name, err)
+				return fmt.Errorf("decrypt secret: %w", err)
 			}
 			var ciphertext, iv []byte
 			ciphertext, iv, err = v.enc.Encrypt(plaintext, newKey)
@@ -459,11 +468,11 @@ func (v *Vault) MigrateKDF() error {
 				plaintext[i] = 0
 			}
 			if err != nil {
-				return fmt.Errorf("encrypt %s: %w", s.Name, err)
+				return fmt.Errorf("encrypt secret: %w", err)
 			}
 			err = v.store.SetSecret(s.Name, ciphertext, iv, s.Tags)
 			if err != nil {
-				return fmt.Errorf("update %s: %w", s.Name, err)
+				return fmt.Errorf("update secret: %w", err)
 			}
 		}
 		if metaErr := v.store.SetMeta("kdf_salt", saltB64); metaErr != nil {
