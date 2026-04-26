@@ -14,14 +14,14 @@ var listCmd = &cobra.Command{
 		jsonOut, quiet, global, env, tags := getGlobalFlags(cmd)
 		f := getFormatter(jsonOut, quiet)
 
-		v, err := getUnlockedVault(jsonOut, quiet, global, env)
+		v, err := getUnlockedVault(cmd.Context(), jsonOut, quiet, global, env)
 		if err != nil {
 			return err
 		}
 		defer v.Close()
 
 		if len(tags) > 0 {
-			filtered, tagErr := v.GetSecretsByTags(tags)
+			filtered, tagErr := v.GetSecretsByTags(cmd.Context(), tags)
 			if tagErr != nil {
 				return exitWithError(tagErr.Error())
 			}
@@ -29,7 +29,7 @@ var listCmd = &cobra.Command{
 			return nil
 		}
 
-		secrets, err := v.ListSecrets()
+		secrets, err := v.ListSecrets(cmd.Context())
 		if err != nil {
 			return exitWithError(err.Error())
 		}

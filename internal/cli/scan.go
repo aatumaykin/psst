@@ -22,13 +22,13 @@ var scanCmd = &cobra.Command{
 		staged, _ := cmd.Flags().GetBool("staged")
 		scanPath, _ := cmd.Flags().GetString("path")
 
-		v, err := getUnlockedVault(jsonOut, quiet, global, env)
+		v, err := getUnlockedVault(cmd.Context(), jsonOut, quiet, global, env)
 		if err != nil {
 			return err
 		}
 		defer v.Close()
 
-		secrets, err := v.GetAllSecrets()
+		secrets, err := v.GetAllSecrets(cmd.Context())
 		if err != nil {
 			return exitWithError(err.Error())
 		}

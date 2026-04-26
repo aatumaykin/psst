@@ -20,13 +20,13 @@ var tagCmd = &cobra.Command{
 			return exitWithError(fmt.Sprintf("Invalid secret name %q. Must match [A-Z][A-Z0-9_]*", name))
 		}
 
-		v, err := getUnlockedVault(jsonOut, quiet, global, env)
+		v, err := getUnlockedVault(cmd.Context(), jsonOut, quiet, global, env)
 		if err != nil {
 			return err
 		}
 		defer v.Close()
 
-		if tagErr := v.AddTag(name, tag); tagErr != nil {
+		if tagErr := v.AddTag(cmd.Context(), name, tag); tagErr != nil {
 			return exitWithError(tagErr.Error())
 		}
 
@@ -49,13 +49,13 @@ var untagCmd = &cobra.Command{
 			return exitWithError(fmt.Sprintf("Invalid secret name %q. Must match [A-Z][A-Z0-9_]*", name))
 		}
 
-		v, err := getUnlockedVault(jsonOut, quiet, global, env)
+		v, err := getUnlockedVault(cmd.Context(), jsonOut, quiet, global, env)
 		if err != nil {
 			return err
 		}
 		defer v.Close()
 
-		if tagErr := v.RemoveTag(name, tag); tagErr != nil {
+		if tagErr := v.RemoveTag(cmd.Context(), name, tag); tagErr != nil {
 			return exitWithError(tagErr.Error())
 		}
 

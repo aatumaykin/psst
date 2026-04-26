@@ -58,7 +58,7 @@ var setCmd = &cobra.Command{
 			return exitWithError("Value cannot be empty")
 		}
 
-		v, err := getUnlockedVault(jsonOut, quiet, global, env)
+		v, err := getUnlockedVault(cmd.Context(), jsonOut, quiet, global, env)
 		if err != nil {
 			return err
 		}
@@ -70,7 +70,7 @@ var setCmd = &cobra.Command{
 				valueBytes[i] = 0
 			}
 		}()
-		if setErr := v.SetSecret(name, valueBytes, tags); setErr != nil {
+		if setErr := v.SetSecret(cmd.Context(), name, valueBytes, tags); setErr != nil {
 			return exitWithError(setErr.Error())
 		}
 

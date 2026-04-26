@@ -38,24 +38,21 @@ func NewSQLite(dbPath string) (*SQLiteStore, error) {
 	return &SQLiteStore{db: db, dbPath: dbPath}, nil
 }
 
-func (s *SQLiteStore) exec(query string, args ...any) (sql.Result, error) {
-	ctx := context.Background()
+func (s *SQLiteStore) exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	if tx := s.currentTx.Load(); tx != nil {
 		return tx.ExecContext(ctx, query, args...)
 	}
 	return s.db.ExecContext(ctx, query, args...)
 }
 
-func (s *SQLiteStore) query(query string, args ...any) (*sql.Rows, error) {
-	ctx := context.Background()
+func (s *SQLiteStore) query(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	if tx := s.currentTx.Load(); tx != nil {
 		return tx.QueryContext(ctx, query, args...)
 	}
 	return s.db.QueryContext(ctx, query, args...)
 }
 
-func (s *SQLiteStore) queryRow(query string, args ...any) *sql.Row {
-	ctx := context.Background()
+func (s *SQLiteStore) queryRow(ctx context.Context, query string, args ...any) *sql.Row {
 	if tx := s.currentTx.Load(); tx != nil {
 		return tx.QueryRowContext(ctx, query, args...)
 	}
@@ -106,8 +103,8 @@ func (s *SQLiteStore) InitSchema() error {
 	return nil
 }
 
-func (s *SQLiteStore) GetSecret(name string) (*StoredSecret, error) {
-	row := s.queryRow(
+func (s *SQLiteStore) GetSecret(ctx context.Context, name string) (*StoredSecret, error) {
+	row := s.queryRow(ctx,
 		"SELECT name, encrypted_value, iv, tags, created_at, updated_at FROM secrets WHERE name = ?",
 		name,
 	)
@@ -130,8 +127,8 @@ func (s *SQLiteStore) GetSecret(name string) (*StoredSecret, error) {
 	return &sec, nil
 }
 
-func (s *SQLiteStore) GetAllSecrets() ([]StoredSecret, error) {
-	rows, err := s.query("SELECT name, encrypted_value, iv, tags, created_at, updated_at FROM secrets ORDER BY name")
+func (s *SQLiteStore) GetAllSecrets(ctx context.Context) ([]StoredSecret, error) {
+	rows, err := s.query(ctx, "SELECT name, encrypted_value, iv, tags, created_at, updated_at FROM secrets ORDER BY name")
 	if err != nil {
 		return nil, err
 	}
@@ -164,12 +161,12 @@ func (s *SQLiteStore) GetAllSecrets() ([]StoredSecret, error) {
 	return result, nil
 }
 
-func (s *SQLiteStore) SetSecret(name string, encValue, iv []byte, tags []string) error {
+func (s *SQLiteStore) SetSecret(ctx context.Context, name string, encValue, iv []byte, tags []string) error {
 	tagsJSON, err := json.Marshal(tags)
 	if err != nil {
 		return fmt.Errorf("marshal tags: %w", err)
 	}
-	_, err = s.exec(
+	_, err = s.exec(ctx,
 		`INSERT INTO secrets (name, encrypted_value, iv, tags, updated_at)
 		 VALUES (?, ?, ?, ?, strftime('%Y-%m-%d %H:%M:%S','now'))
 		 ON CONFLICT(name) DO UPDATE SET
@@ -182,18 +179,18 @@ func (s *SQLiteStore) SetSecret(name string, encValue, iv []byte, tags []string)
 	return err
 }
 
-func (s *SQLiteStore) DeleteSecret(name string) error {
-	_, err := s.exec("DELETE FROM secrets WHERE name = ?", name)
+func (s *SQLiteStore) DeleteSecret(ctx context.Context, name string) error {
+	_, err := s.exec(ctx, "DELETE FROM secrets WHERE name = ?", name)
 	return err
 }
 
-func (s *SQLiteStore) DeleteHistory(name string) error {
-	_, err := s.exec("DELETE FROM secrets_history WHERE name = ?", name)
+func (s *SQLiteStore) DeleteHistory(ctx context.Context, name string) error {
+	_, err := s.exec(ctx, "DELETE FROM secrets_history WHERE name = ?", name)
 	return err
 }
 
-func (s *SQLiteStore) ListSecrets() ([]SecretMeta, error) {
-	rows, err := s.query("SELECT name, tags, created_at, updated_at FROM secrets ORDER BY name")
+func (s *SQLiteStore) ListSecrets(ctx context.Context) ([]SecretMeta, error) {
+	rows, err := s.query(ctx, "SELECT name, tags, created_at, updated_at FROM secrets ORDER BY name")
 	if err != nil {
 		return nil, err
 	}
@@ -222,8 +219,8 @@ func (s *SQLiteStore) ListSecrets() ([]SecretMeta, error) {
 	return result, nil
 }
 
-func (s *SQLiteStore) GetHistory(name string) ([]HistoryEntry, error) {
-	rows, err := s.query(
+func (s *SQLiteStore) GetHistory(ctx context.Context, name string) ([]HistoryEntry, error) {
+	rows, err := s.query(ctx,
 		"SELECT id, name, version, encrypted_value, iv, tags, archived_at FROM secrets_history WHERE name = ? ORDER BY version DESC",
 		name,
 	)
@@ -258,20 +255,20 @@ func (s *SQLiteStore) GetHistory(name string) ([]HistoryEntry, error) {
 	return result, nil
 }
 
-func (s *SQLiteStore) AddHistory(name string, version int, encValue, iv []byte, tags []string) error {
+func (s *SQLiteStore) AddHistory(ctx context.Context, name string, version int, encValue, iv []byte, tags []string) error {
 	tagsJSON, err := json.Marshal(tags)
 	if err != nil {
 		return fmt.Errorf("marshal tags: %w", err)
 	}
-	_, err = s.exec(
+	_, err = s.exec(ctx,
 		"INSERT INTO secrets_history (name, version, encrypted_value, iv, tags) VALUES (?, ?, ?, ?, ?)",
 		name, version, encValue, iv, string(tagsJSON),
 	)
 	return err
 }
 
-func (s *SQLiteStore) PruneHistory(name string, keepVersions int) error {
-	_, err := s.exec(
+func (s *SQLiteStore) PruneHistory(ctx context.Context, name string, keepVersions int) error {
+	_, err := s.exec(ctx,
 		`DELETE FROM secrets_history WHERE name = ? AND version <= (
 			SELECT MAX(version) - ? FROM secrets_history WHERE name = ?
 		)`,
@@ -305,30 +302,30 @@ func (s *SQLiteStore) ExecTx(fn func() error) error {
 	return tx.Commit()
 }
 
-func (s *SQLiteStore) GetMeta(key string) (string, error) {
+func (s *SQLiteStore) GetMeta(ctx context.Context, key string) (string, error) {
 	var value string
-	err := s.queryRow("SELECT value FROM vault_meta WHERE key = ?", key).Scan(&value)
+	err := s.queryRow(ctx, "SELECT value FROM vault_meta WHERE key = ?", key).Scan(&value)
 	if err == sql.ErrNoRows {
 		return "", nil
 	}
 	return value, err
 }
 
-func (s *SQLiteStore) SetMeta(key, value string) error {
+func (s *SQLiteStore) SetMeta(ctx context.Context, key, value string) error {
 	q := `INSERT INTO vault_meta (key, value) VALUES (?, ?)
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value`
-	_, err := s.exec(q, key, value)
+	_, err := s.exec(ctx, q, key, value)
 	return err
 }
 
-func (s *SQLiteStore) IncrementMetaInt(key string, increment int) (int, error) {
+func (s *SQLiteStore) IncrementMetaInt(ctx context.Context, key string, increment int) (int, error) {
 	q := `INSERT INTO vault_meta (key, value) VALUES (?, ?)
 		ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + ? AS TEXT)`
-	_, err := s.exec(q, key, strconv.Itoa(increment), increment)
+	_, err := s.exec(ctx, q, key, strconv.Itoa(increment), increment)
 	if err != nil {
 		return 0, err
 	}
-	val, err := s.GetMeta(key)
+	val, err := s.GetMeta(ctx, key)
 	if err != nil {
 		return 0, err
 	}

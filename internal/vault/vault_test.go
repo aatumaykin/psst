@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -64,12 +65,13 @@ func setupTestVault(t *testing.T) *Vault {
 func TestSetGetSecret(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
+	ctx := context.Background()
 
-	if err := v.SetSecret("API_KEY", []byte("secret123"), []string{"prod"}); err != nil {
+	if err := v.SetSecret(ctx, "API_KEY", []byte("secret123"), []string{"prod"}); err != nil {
 		t.Fatal(err)
 	}
 
-	sec, err := v.GetSecret("API_KEY")
+	sec, err := v.GetSecret(ctx, "API_KEY")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,11 +86,12 @@ func TestSetGetSecret(t *testing.T) {
 func TestListSecrets(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
+	ctx := context.Background()
 
-	v.SetSecret("A", []byte("val_a"), nil)
-	v.SetSecret("B", []byte("val_b"), nil)
+	v.SetSecret(ctx, "A", []byte("val_a"), nil)
+	v.SetSecret(ctx, "B", []byte("val_b"), nil)
 
-	list, err := v.ListSecrets()
+	list, err := v.ListSecrets(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,11 +103,12 @@ func TestListSecrets(t *testing.T) {
 func TestDeleteSecret(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
+	ctx := context.Background()
 
-	v.SetSecret("KEY", []byte("val"), nil)
-	v.DeleteSecret("KEY")
+	v.SetSecret(ctx, "KEY", []byte("val"), nil)
+	v.DeleteSecret(ctx, "KEY")
 
-	sec, _ := v.GetSecret("KEY")
+	sec, _ := v.GetSecret(ctx, "KEY")
 	if sec != nil {
 		t.Fatal("secret should be nil after delete")
 	}
@@ -113,12 +117,13 @@ func TestDeleteSecret(t *testing.T) {
 func TestHistoryAndRollback(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
+	ctx := context.Background()
 
-	v.SetSecret("KEY", []byte("v1"), nil)
-	v.SetSecret("KEY", []byte("v2"), nil)
-	v.SetSecret("KEY", []byte("v3"), nil)
+	v.SetSecret(ctx, "KEY", []byte("v1"), nil)
+	v.SetSecret(ctx, "KEY", []byte("v2"), nil)
+	v.SetSecret(ctx, "KEY", []byte("v3"), nil)
 
-	history, err := v.GetHistory("KEY")
+	history, err := v.GetHistory(ctx, "KEY")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,12 +131,12 @@ func TestHistoryAndRollback(t *testing.T) {
 		t.Fatalf("history len = %d, want >= 2", len(history))
 	}
 
-	err = v.Rollback("KEY", 1)
+	err = v.Rollback(ctx, "KEY", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	sec, _ := v.GetSecret("KEY")
+	sec, _ := v.GetSecret(ctx, "KEY")
 	if string(sec.Value) != "v1" {
 		t.Fatalf("after rollback value = %q, want %q", string(sec.Value), "v1")
 	}
@@ -140,18 +145,19 @@ func TestHistoryAndRollback(t *testing.T) {
 func TestTags(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
+	ctx := context.Background()
 
-	v.SetSecret("KEY", []byte("val"), nil)
-	v.AddTag("KEY", "aws")
-	v.AddTag("KEY", "prod")
+	v.SetSecret(ctx, "KEY", []byte("val"), nil)
+	v.AddTag(ctx, "KEY", "aws")
+	v.AddTag(ctx, "KEY", "prod")
 
-	sec, _ := v.GetSecret("KEY")
+	sec, _ := v.GetSecret(ctx, "KEY")
 	if len(sec.Tags) != 2 {
 		t.Fatalf("tags = %v, want 2", sec.Tags)
 	}
 
-	v.RemoveTag("KEY", "aws")
-	sec, _ = v.GetSecret("KEY")
+	v.RemoveTag(ctx, "KEY", "aws")
+	sec, _ = v.GetSecret(ctx, "KEY")
 	if len(sec.Tags) != 1 || sec.Tags[0] != "prod" {
 		t.Fatalf("after remove tags = %v", sec.Tags)
 	}
@@ -160,12 +166,13 @@ func TestTags(t *testing.T) {
 func TestGetSecretsByTags(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
+	ctx := context.Background()
 
-	v.SetSecret("A", []byte("val_a"), []string{"aws", "prod"})
-	v.SetSecret("B", []byte("val_b"), []string{"stripe"})
-	v.SetSecret("C", []byte("val_c"), []string{"prod"})
+	v.SetSecret(ctx, "A", []byte("val_a"), []string{"aws", "prod"})
+	v.SetSecret(ctx, "B", []byte("val_b"), []string{"stripe"})
+	v.SetSecret(ctx, "C", []byte("val_c"), []string{"prod"})
 
-	result, err := v.GetSecretsByTags([]string{"aws"})
+	result, err := v.GetSecretsByTags(ctx, []string{"aws"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +180,7 @@ func TestGetSecretsByTags(t *testing.T) {
 		t.Fatalf("result = %v", result)
 	}
 
-	result2, _ := v.GetSecretsByTags([]string{"prod"})
+	result2, _ := v.GetSecretsByTags(ctx, []string{"prod"})
 	if len(result2) != 2 {
 		t.Fatalf("prod filter: len = %d, want 2", len(result2))
 	}
@@ -182,11 +189,12 @@ func TestGetSecretsByTags(t *testing.T) {
 func TestGetAllSecrets(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
+	ctx := context.Background()
 
-	v.SetSecret("A", []byte("val_a"), nil)
-	v.SetSecret("B", []byte("val_b"), nil)
+	v.SetSecret(ctx, "A", []byte("val_a"), nil)
+	v.SetSecret(ctx, "B", []byte("val_b"), nil)
 
-	all, err := v.GetAllSecrets()
+	all, err := v.GetAllSecrets(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,16 +212,17 @@ func TestVault_LockedOperations(t *testing.T) {
 	}
 	defer s.Close()
 	s.InitSchema()
+	ctx := context.Background()
 
 	v := New(enc, kp, s)
 
-	if err = v.SetSecret("A", []byte("val"), nil); err == nil {
+	if err = v.SetSecret(ctx, "A", []byte("val"), nil); err == nil {
 		t.Fatal("SetSecret on locked vault should fail")
 	}
-	if _, err = v.GetSecret("A"); err == nil {
+	if _, err = v.GetSecret(ctx, "A"); err == nil {
 		t.Fatal("GetSecret on locked vault should fail")
 	}
-	if _, err = v.GetAllSecrets(); err == nil {
+	if _, err = v.GetAllSecrets(ctx); err == nil {
 		t.Fatal("GetAllSecrets on locked vault should fail")
 	}
 }
@@ -244,7 +253,8 @@ func TestFindVaultPath(t *testing.T) {
 func TestRollback_SecretNotFound(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
-	err := v.Rollback("NONEXISTENT", 1)
+	ctx := context.Background()
+	err := v.Rollback(ctx, "NONEXISTENT", 1)
 	if err == nil {
 		t.Fatal("rollback nonexistent secret should fail")
 	}
@@ -253,8 +263,9 @@ func TestRollback_SecretNotFound(t *testing.T) {
 func TestRollback_VersionNotFound(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
-	v.SetSecret("TEST", []byte("val"), nil)
-	err := v.Rollback("TEST", 999)
+	ctx := context.Background()
+	v.SetSecret(ctx, "TEST", []byte("val"), nil)
+	err := v.Rollback(ctx, "TEST", 999)
 	if err == nil {
 		t.Fatal("rollback nonexistent version should fail")
 	}
@@ -290,7 +301,8 @@ func setupTestVaultV1(t *testing.T) *Vault {
 	}
 	v.key = v1Key
 
-	if err = s.SetMeta("kdf_version", "1"); err != nil {
+	ctx := context.Background()
+	if err = s.SetMeta(ctx, "kdf_version", "1"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -300,6 +312,7 @@ func setupTestVaultV1(t *testing.T) *Vault {
 func TestMigrateKDF(t *testing.T) {
 	v := setupTestVaultV1(t)
 	defer v.Close()
+	ctx := context.Background()
 
 	secrets := map[string]string{
 		"API_KEY": "secret123",
@@ -307,7 +320,7 @@ func TestMigrateKDF(t *testing.T) {
 		"DB_PORT": "5432",
 	}
 	for name, val := range secrets {
-		if err := v.SetSecret(name, []byte(val), nil); err != nil {
+		if err := v.SetSecret(ctx, name, []byte(val), nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -315,17 +328,17 @@ func TestMigrateKDF(t *testing.T) {
 	oldKey := make([]byte, len(v.key))
 	copy(oldKey, v.key)
 
-	if err := v.MigrateKDF(); err != nil {
+	if err := v.MigrateKDF(ctx); err != nil {
 		t.Fatalf("MigrateKDF: %v", err)
 	}
 
-	kdfVer, _ := v.store.GetMeta("kdf_version")
+	kdfVer, _ := v.store.GetMeta(ctx, "kdf_version")
 	if kdfVer != "2" {
 		t.Fatalf("kdf_version = %q, want %q", kdfVer, "2")
 	}
 
 	rawKeyHex, _ := v.kp.GetRawKey(serviceName, accountName)
-	saltB64, _ := v.store.GetMeta("kdf_salt")
+	saltB64, _ := v.store.GetMeta(ctx, "kdf_salt")
 	var v2Key []byte
 	var deriveErr error
 	if saltB64 != "" {
@@ -343,7 +356,7 @@ func TestMigrateKDF(t *testing.T) {
 	v.key = v2Key
 
 	for name, want := range secrets {
-		sec, err := v.GetSecret(name)
+		sec, err := v.GetSecret(ctx, name)
 		if err != nil {
 			t.Fatalf("GetSecret(%q) after migrate: %v", name, err)
 		}
@@ -360,16 +373,17 @@ func TestMigrateKDF(t *testing.T) {
 func TestMigrateKDF_UpdatesKey(t *testing.T) {
 	v := setupTestVaultV1(t)
 	defer v.Close()
+	ctx := context.Background()
 
-	if err := v.SetSecret("API_KEY", []byte("secret123"), nil); err != nil {
+	if err := v.SetSecret(ctx, "API_KEY", []byte("secret123"), nil); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := v.MigrateKDF(); err != nil {
+	if err := v.MigrateKDF(ctx); err != nil {
 		t.Fatalf("MigrateKDF: %v", err)
 	}
 
-	sec, err := v.GetSecret("API_KEY")
+	sec, err := v.GetSecret(ctx, "API_KEY")
 	if err != nil {
 		t.Fatalf("GetSecret after migrate without manual key fix: %v", err)
 	}
@@ -381,14 +395,15 @@ func TestMigrateKDF_UpdatesKey(t *testing.T) {
 func TestSetSecret_VersionCollision(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
+	ctx := context.Background()
 
 	for i := range 15 {
-		if err := v.SetSecret("KEY", fmt.Appendf(nil, "v%d", i), nil); err != nil {
+		if err := v.SetSecret(ctx, "KEY", fmt.Appendf(nil, "v%d", i), nil); err != nil {
 			t.Fatalf("SetSecret iteration %d: %v", i, err)
 		}
 	}
 
-	sec, err := v.GetSecret("KEY")
+	sec, err := v.GetSecret(ctx, "KEY")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,16 +415,17 @@ func TestSetSecret_VersionCollision(t *testing.T) {
 func TestMigrateKDF_GeneratesSalt(t *testing.T) {
 	v := setupTestVaultV1(t)
 	defer v.Close()
+	ctx := context.Background()
 
-	if err := v.SetSecret("TEST", []byte("value"), nil); err != nil {
+	if err := v.SetSecret(ctx, "TEST", []byte("value"), nil); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := v.MigrateKDF(); err != nil {
+	if err := v.MigrateKDF(ctx); err != nil {
 		t.Fatal(err)
 	}
 
-	saltB64, err := v.store.GetMeta("kdf_salt")
+	saltB64, err := v.store.GetMeta(ctx, "kdf_salt")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,7 +433,7 @@ func TestMigrateKDF_GeneratesSalt(t *testing.T) {
 		t.Fatal("MigrateKDF should generate kdf_salt when migrating from V1")
 	}
 
-	sec, err := v.GetSecret("TEST")
+	sec, err := v.GetSecret(ctx, "TEST")
 	if err != nil {
 		t.Fatalf("GetSecret after migrate: %v", err)
 	}
@@ -429,14 +445,15 @@ func TestMigrateKDF_GeneratesSalt(t *testing.T) {
 func TestRollback_AfterPrunedHistory(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
+	ctx := context.Background()
 
 	for i := range 15 {
-		if err := v.SetSecret("KEY", fmt.Appendf(nil, "v%d", i), nil); err != nil {
+		if err := v.SetSecret(ctx, "KEY", fmt.Appendf(nil, "v%d", i), nil); err != nil {
 			t.Fatalf("SetSecret iteration %d: %v", i, err)
 		}
 	}
 
-	history, err := v.GetHistory("KEY")
+	history, err := v.GetHistory(ctx, "KEY")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -446,12 +463,12 @@ func TestRollback_AfterPrunedHistory(t *testing.T) {
 
 	oldestVersion := history[0].Version
 
-	err = v.Rollback("KEY", oldestVersion)
+	err = v.Rollback(ctx, "KEY", oldestVersion)
 	if err != nil {
 		t.Fatalf("Rollback to version %d after pruning: %v", oldestVersion, err)
 	}
 
-	sec, err := v.GetSecret("KEY")
+	sec, err := v.GetSecret(ctx, "KEY")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,12 +481,13 @@ func TestRollback_AfterPrunedHistory(t *testing.T) {
 func TestMigrateKDF_ZeroesOldKey(t *testing.T) {
 	v := setupTestVaultV1(t)
 	defer v.Close()
+	ctx := context.Background()
 
-	v.SetSecret("K", []byte("val"), nil)
+	v.SetSecret(ctx, "K", []byte("val"), nil)
 
 	oldKey := v.key
 
-	v.MigrateKDF()
+	v.MigrateKDF(ctx)
 
 	allZero := true
 	for _, b := range oldKey {
@@ -491,18 +509,19 @@ func TestUnlock_V2WithoutSaltFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.InitSchema()
+	ctx := context.Background()
 
 	enc := crypto.NewAESGCM()
 	kp := &testKeyProvider{enc: enc, key: nil}
 	rawKey, _ := enc.GenerateKey()
 	kp.key = rawKey
 
-	s.SetMeta("kdf_version", "2")
+	s.SetMeta(ctx, "kdf_version", "2")
 
 	v := New(enc, kp, s)
 	defer v.Close()
 
-	err = v.Unlock()
+	err = v.Unlock(ctx)
 	if err == nil {
 		t.Fatal("Unlock should fail when kdf_salt is missing for V2")
 	}
@@ -514,10 +533,11 @@ func TestUnlock_V2WithoutSaltFails(t *testing.T) {
 func TestPerVaultSalt(t *testing.T) {
 	dir := t.TempDir()
 	enc := crypto.NewAESGCM()
+	ctx := context.Background()
 
 	path1 := filepath.Join(dir, "vault1.db")
 	kp1 := &testKeyProvider{enc: enc, key: nil}
-	if err := InitVault(path1, enc, kp1, InitOptions{SkipKeychain: true}); err != nil {
+	if err := InitVault(ctx, path1, enc, kp1, InitOptions{SkipKeychain: true}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -526,14 +546,14 @@ func TestPerVaultSalt(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s1.Close()
-	salt1, _ := s1.GetMeta("kdf_salt")
+	salt1, _ := s1.GetMeta(ctx, "kdf_salt")
 	if salt1 == "" {
 		t.Fatal("kdf_salt should be set")
 	}
 
 	path2 := filepath.Join(dir, "vault2.db")
 	kp2 := &testKeyProvider{enc: enc, key: nil}
-	if initErr := InitVault(path2, enc, kp2, InitOptions{SkipKeychain: true}); initErr != nil {
+	if initErr := InitVault(ctx, path2, enc, kp2, InitOptions{SkipKeychain: true}); initErr != nil {
 		t.Fatal(initErr)
 	}
 
@@ -542,7 +562,7 @@ func TestPerVaultSalt(t *testing.T) {
 		t.Fatal(storeErr)
 	}
 	defer s2.Close()
-	salt2, _ := s2.GetMeta("kdf_salt")
+	salt2, _ := s2.GetMeta(ctx, "kdf_salt")
 	if salt2 == "" {
 		t.Fatal("kdf_salt should be set")
 	}
@@ -555,9 +575,10 @@ func TestPerVaultSalt(t *testing.T) {
 func TestSetSecret_NameTooLong(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
+	ctx := context.Background()
 
 	longName := strings.Repeat("A", 257)
-	err := v.SetSecret(longName, []byte("val"), nil)
+	err := v.SetSecret(ctx, longName, []byte("val"), nil)
 	if err == nil {
 		t.Fatal("should reject long name")
 	}
@@ -566,9 +587,10 @@ func TestSetSecret_NameTooLong(t *testing.T) {
 func TestSetSecret_ValueTooLong(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
+	ctx := context.Background()
 
 	longValue := make([]byte, 4097)
-	err := v.SetSecret("KEY", longValue, nil)
+	err := v.SetSecret(ctx, "KEY", longValue, nil)
 	if err == nil {
 		t.Fatal("should reject long value")
 	}
@@ -582,6 +604,7 @@ func TestUnlock_BruteForceProtection(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.InitSchema()
+	ctx := context.Background()
 
 	enc := crypto.NewAESGCM()
 	rightKey, _ := enc.GenerateKey()
@@ -589,7 +612,7 @@ func TestUnlock_BruteForceProtection(t *testing.T) {
 
 	v := New(enc, rightKp, s)
 	v.key = rightKey
-	v.SetSecret("TEST", []byte("verify"), nil)
+	v.SetSecret(ctx, "TEST", []byte("verify"), nil)
 	v.key = nil
 
 	wrongKey, _ := enc.GenerateKey()
@@ -600,10 +623,10 @@ func TestUnlock_BruteForceProtection(t *testing.T) {
 	defer wrongV.Close()
 
 	for range maxUnlockAttempts {
-		wrongV.Unlock()
+		wrongV.Unlock(ctx)
 	}
 
-	err = wrongV.Unlock()
+	err = wrongV.Unlock(ctx)
 	if err == nil {
 		t.Fatal("should be locked after max failed attempts")
 	}

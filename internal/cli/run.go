@@ -17,7 +17,7 @@ var runCmd = &cobra.Command{
 		jsonOut, quiet, global, env, tags := getGlobalFlags(cmd)
 		noMask, _ := cmd.Flags().GetBool("no-mask")
 
-		v, err := getUnlockedVault(jsonOut, quiet, global, env)
+		v, err := getUnlockedVault(cmd.Context(), jsonOut, quiet, global, env)
 		if err != nil {
 			return err
 		}
@@ -25,9 +25,9 @@ var runCmd = &cobra.Command{
 
 		var secrets map[string][]byte
 		if len(tags) > 0 {
-			secrets, err = v.GetSecretsByTagValues(tags)
+			secrets, err = v.GetSecretsByTagValues(cmd.Context(), tags)
 		} else {
-			secrets, err = v.GetAllSecrets()
+			secrets, err = v.GetAllSecrets(cmd.Context())
 		}
 		if err != nil {
 			return exitWithError(err.Error())

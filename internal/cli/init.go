@@ -36,7 +36,7 @@ var initCmd = &cobra.Command{
 			Env:    env,
 		}
 
-		if initErr := vault.InitVault(vaultPath, enc, kp, opts); initErr != nil {
+		if initErr := vault.InitVault(cmd.Context(), vaultPath, enc, kp, opts); initErr != nil {
 			return exitWithError(initErr.Error())
 		}
 

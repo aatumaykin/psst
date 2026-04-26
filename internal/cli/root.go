@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -51,6 +52,7 @@ func Execute() error {
 		if len(commandArgs) > 0 && (len(secretNames) > 0 || len(tags) > 0) {
 			noMask := containsFlag(args, "--no-mask")
 			err := handleExecPatternDirect(
+				context.Background(),
 				secretNames, commandArgs,
 				jsonOut, quiet, global, env, tags, noMask,
 			)
@@ -113,7 +115,7 @@ func createDependencies() (crypto.Encryptor, keyring.KeyProvider) {
 	return enc, kp
 }
 
-func getUnlockedVault(jsonOut, quiet, global bool, env string) (*vault.Vault, error) {
+func getUnlockedVault(ctx context.Context, jsonOut, quiet, global bool, env string) (*vault.Vault, error) {
 	vaultPath, err := vault.FindVaultPath(global, env)
 	if err != nil {
 		return nil, err
@@ -139,7 +141,7 @@ func getUnlockedVault(jsonOut, quiet, global bool, env string) (*vault.Vault, er
 	}
 
 	v := vault.New(enc, kp, s)
-	if unlockErr := v.Unlock(); unlockErr != nil {
+	if unlockErr := v.Unlock(ctx); unlockErr != nil {
 		_ = s.Close()
 		printAuthFailed(jsonOut, quiet)
 		//nolint:mnd // exit code for auth failure
