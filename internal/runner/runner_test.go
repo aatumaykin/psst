@@ -367,7 +367,7 @@ func TestExec_NoGoroutineLeak(t *testing.T) {
 	initial := runtime.NumGoroutine()
 
 	runner := New()
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		_, err := runner.Exec(map[string][]byte{}, "true", []string{}, ExecOptions{})
 		if err != nil {
 			t.Fatalf("Exec() error: %v", err)

@@ -32,10 +32,12 @@ func parseGlobalFlagsFromArgs(args []string) (bool, bool, bool, string, []string
 				tags = append(tags, args[i])
 			}
 		default:
-			if val, ok := strings.CutPrefix(args[i], "--env="); ok {
-				env = val
-			} else if val, ok := strings.CutPrefix(args[i], "--tag="); ok {
-				tags = append(tags, val)
+			if v, found := strings.CutPrefix(args[i], "--env="); found {
+				env = v
+				continue
+			}
+			if v, found := strings.CutPrefix(args[i], "--tag="); found {
+				tags = append(tags, v)
 			}
 		}
 	}

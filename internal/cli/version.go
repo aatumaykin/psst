@@ -3,9 +3,10 @@ package cli
 import (
 	"runtime"
 
+	"github.com/spf13/cobra"
+
 	"github.com/aatumaykin/psst/internal/output"
 	"github.com/aatumaykin/psst/internal/version"
-	"github.com/spf13/cobra"
 )
 
 var versionCmd = &cobra.Command{

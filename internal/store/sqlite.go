@@ -128,7 +128,10 @@ func (s *SQLiteStore) GetSecret(ctx context.Context, name string) (*StoredSecret
 }
 
 func (s *SQLiteStore) GetAllSecrets(ctx context.Context) ([]StoredSecret, error) {
-	rows, err := s.query(ctx, "SELECT name, encrypted_value, iv, tags, created_at, updated_at FROM secrets ORDER BY name")
+	rows, err := s.query(
+		ctx,
+		"SELECT name, encrypted_value, iv, tags, created_at, updated_at FROM secrets ORDER BY name",
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +223,8 @@ func (s *SQLiteStore) ListSecrets(ctx context.Context) ([]SecretMeta, error) {
 }
 
 func (s *SQLiteStore) GetHistory(ctx context.Context, name string) ([]HistoryEntry, error) {
-	rows, err := s.query(ctx,
+	rows, err := s.query(
+		ctx,
 		"SELECT id, name, version, encrypted_value, iv, tags, archived_at FROM secrets_history WHERE name = ? ORDER BY version DESC",
 		name,
 	)
@@ -255,7 +259,13 @@ func (s *SQLiteStore) GetHistory(ctx context.Context, name string) ([]HistoryEnt
 	return result, nil
 }
 
-func (s *SQLiteStore) AddHistory(ctx context.Context, name string, version int, encValue, iv []byte, tags []string) error {
+func (s *SQLiteStore) AddHistory(
+	ctx context.Context,
+	name string,
+	version int,
+	encValue, iv []byte,
+	tags []string,
+) error {
 	tagsJSON, err := json.Marshal(tags)
 	if err != nil {
 		return fmt.Errorf("marshal tags: %w", err)

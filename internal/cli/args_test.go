@@ -39,12 +39,12 @@ func TestParseGlobalFlagsFromArgs_EqualsSyntax(t *testing.T) {
 	os.Unsetenv("PSST_ENV")
 
 	tests := []struct {
-		name      string
-		args      []string
-		wantEnv   string
-		wantTags  []string
-		wantJSON  bool
-		wantQuiet bool
+		name       string
+		args       []string
+		wantEnv    string
+		wantTags   []string
+		wantJSON   bool
+		wantQuiet  bool
 		wantGlobal bool
 	}{
 		{
@@ -59,9 +59,9 @@ func TestParseGlobalFlagsFromArgs_EqualsSyntax(t *testing.T) {
 			wantTags: []string{"aws"},
 		},
 		{
-			name:     "--env space",
-			args:     []string{"--env", "staging", "KEY", "--", "echo"},
-			wantEnv:  "staging",
+			name:    "--env space",
+			args:    []string{"--env", "staging", "KEY", "--", "echo"},
+			wantEnv: "staging",
 		},
 		{
 			name:     "--tag space",
@@ -69,21 +69,21 @@ func TestParseGlobalFlagsFromArgs_EqualsSyntax(t *testing.T) {
 			wantTags: []string{"gcp"},
 		},
 		{
-			name:      "mixed equals and space",
-			args:      []string{"--env=prod", "--tag", "aws", "--json", "KEY", "--", "echo"},
-			wantEnv:   "prod",
-			wantTags:  []string{"aws"},
-			wantJSON:  true,
+			name:     "mixed equals and space",
+			args:     []string{"--env=prod", "--tag", "aws", "--json", "KEY", "--", "echo"},
+			wantEnv:  "prod",
+			wantTags: []string{"aws"},
+			wantJSON: true,
 		},
 		{
-			name:       "multiple tags with equals",
-			args:       []string{"--tag=aws", "--tag=gcp", "KEY", "--", "echo"},
-			wantTags:   []string{"aws", "gcp"},
+			name:     "multiple tags with equals",
+			args:     []string{"--tag=aws", "--tag=gcp", "KEY", "--", "echo"},
+			wantTags: []string{"aws", "gcp"},
 		},
 		{
-			name:       "--quiet short",
-			args:       []string{"-q", "KEY", "--", "echo"},
-			wantQuiet:  true,
+			name:      "--quiet short",
+			args:      []string{"-q", "KEY", "--", "echo"},
+			wantQuiet: true,
 		},
 		{
 			name:       "--global short",
@@ -121,9 +121,9 @@ func TestParseGlobalFlagsFromArgs_EqualsSyntax(t *testing.T) {
 
 func TestFilterSecretNames_EqualsSyntax(t *testing.T) {
 	tests := []struct {
-		name  string
-		args  []string
-		want  []string
+		name string
+		args []string
+		want []string
 	}{
 		{
 			name: "--env=prod filtered",

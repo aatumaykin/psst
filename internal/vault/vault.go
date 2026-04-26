@@ -59,7 +59,13 @@ func FindVaultPath(global bool, env string) (string, error) {
 	return filepath.Join(baseDir, "vault.db"), nil
 }
 
-func InitVault(ctx context.Context, vaultPath string, _ crypto.Encryptor, kp keyring.KeyProvider, opts InitOptions) error {
+func InitVault(
+	ctx context.Context,
+	vaultPath string,
+	_ crypto.Encryptor,
+	kp keyring.KeyProvider,
+	opts InitOptions,
+) error {
 	dir := filepath.Dir(vaultPath)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("create vault directory: %w", err)
@@ -150,27 +156,26 @@ func (v *Vault) Unlock(ctx context.Context) error {
 		v.key = nil
 		return fmt.Errorf("verify vault: %w", verifyErr)
 	}
-	for _, s := range all {
-		_, decErr := v.enc.Decrypt(s.EncryptedValue, s.IV, v.key)
+	if len(all) > 0 {
+		_, decErr := v.enc.Decrypt(all[0].EncryptedValue, all[0].IV, v.key)
 		if decErr != nil {
 			attempts, _ := v.store.IncrementMetaInt(ctx, metaUnlockAttempts, 1)
 			if attempts >= maxUnlockAttempts {
 				lockDuration := time.Duration(attempts*unlockDelayBaseMs) * time.Millisecond
 				lockedUntil := time.Now().Add(lockDuration)
-				v.store.SetMeta(ctx, metaUnlockLockedUntil, lockedUntil.Format(time.RFC3339))
-				v.store.SetMeta(ctx, metaUnlockAttempts, "0")
+				_ = v.store.SetMeta(ctx, metaUnlockLockedUntil, lockedUntil.Format(time.RFC3339))
+				_ = v.store.SetMeta(ctx, metaUnlockAttempts, "0")
 			}
 			for i := range v.key {
 				v.key[i] = 0
 			}
 			v.key = nil
-			return fmt.Errorf("authentication failed")
+			return errors.New("authentication failed")
 		}
-		break
 	}
 
-	v.store.SetMeta(ctx, metaUnlockAttempts, "0")
-	v.store.SetMeta(ctx, metaUnlockLockedUntil, "")
+	_ = v.store.SetMeta(ctx, metaUnlockAttempts, "0")
+	_ = v.store.SetMeta(ctx, metaUnlockLockedUntil, "")
 	return nil
 }
 
@@ -347,7 +352,14 @@ func (v *Vault) Rollback(ctx context.Context, name string, version int) error {
 			}
 		}
 		newVersion := maxVersion + 1
-		if err = v.store.AddHistory(ctx, name, newVersion, current.EncryptedValue, current.IV, current.Tags); err != nil {
+		if err = v.store.AddHistory(
+			ctx,
+			name,
+			newVersion,
+			current.EncryptedValue,
+			current.IV,
+			current.Tags,
+		); err != nil {
 			return fmt.Errorf("archive history: %w", err)
 		}
 		if err = v.store.PruneHistory(ctx, name, maxHistory); err != nil {

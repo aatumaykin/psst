@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -39,9 +40,7 @@ var scanCmd = &cobra.Command{
 		}
 
 		byteSecrets := make(map[string][]byte, len(secrets))
-		for k, v := range secrets {
-			byteSecrets[k] = v
-		}
+		maps.Copy(byteSecrets, secrets)
 
 		files, err := getScanFiles(staged, scanPath)
 		if err != nil {

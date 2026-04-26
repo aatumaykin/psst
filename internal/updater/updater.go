@@ -113,11 +113,18 @@ func compareVersions(a, b string) int {
 	return 0
 }
 
+const (
+	prereleaseDev   = 0
+	prereleaseAlpha = 1
+	prereleaseBeta  = 2
+	prereleaseRC    = 3
+)
+
 var prereleaseOrder = map[string]int{
-	"dev":   0,
-	"alpha": 1,
-	"beta":  2,
-	"rc":    3,
+	"dev":   prereleaseDev,
+	"alpha": prereleaseAlpha,
+	"beta":  prereleaseBeta,
+	"rc":    prereleaseRC,
 }
 
 func prereleasePriority(s string) int {

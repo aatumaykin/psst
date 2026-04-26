@@ -111,7 +111,7 @@ func extractBinaryFromTarGz(archivePath string) ([]byte, error) {
 }
 
 func replaceBinary(currentPath, newPath string) error {
-	if chmodErr := os.Chmod(newPath, 0o755); chmodErr != nil {
+	if chmodErr := os.Chmod(newPath, 0o755); chmodErr != nil { //nolint:gosec // binary must be executable
 		return fmt.Errorf("chmod new binary: %w", chmodErr)
 	}
 
@@ -154,8 +154,8 @@ func copyFile(src, dst string) error {
 	}
 	defer out.Close()
 
-	if _, err := io.Copy(out, in); err != nil {
-		return err
+	if _, copyErr := io.Copy(out, in); copyErr != nil {
+		return copyErr
 	}
 
 	return out.Sync()

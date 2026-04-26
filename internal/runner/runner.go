@@ -130,7 +130,6 @@ func streamWithMasking(src io.Reader, dst io.Writer, secrets [][]byte) {
 		data = append(data, tail...)
 		data = append(data, buf[:n]...)
 		zeroBytes(tail)
-		tail = nil
 
 		if len(data) == 0 {
 			break
