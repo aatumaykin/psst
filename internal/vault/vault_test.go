@@ -483,6 +483,34 @@ func TestMigrateKDF_ZeroesOldKey(t *testing.T) {
 	}
 }
 
+func TestUnlock_V2WithoutSaltFails(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "vault.db")
+	s, err := store.NewSQLite(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.InitSchema()
+
+	enc := crypto.NewAESGCM()
+	kp := &testKeyProvider{enc: enc, key: nil}
+	rawKey, _ := enc.GenerateKey()
+	kp.key = rawKey
+
+	s.SetMeta("kdf_version", "2")
+
+	v := New(enc, kp, s)
+	defer v.Close()
+
+	err = v.Unlock()
+	if err == nil {
+		t.Fatal("Unlock should fail when kdf_salt is missing for V2")
+	}
+	if !strings.Contains(err.Error(), "kdf_salt") {
+		t.Fatalf("expected kdf_salt error, got: %v", err)
+	}
+}
+
 func TestPerVaultSalt(t *testing.T) {
 	dir := t.TempDir()
 	enc := crypto.NewAESGCM()
@@ -521,5 +549,27 @@ func TestPerVaultSalt(t *testing.T) {
 
 	if salt1 == salt2 {
 		t.Fatal("two different vaults should have different salts")
+	}
+}
+
+func TestSetSecret_NameTooLong(t *testing.T) {
+	v := setupTestVault(t)
+	defer v.Close()
+
+	longName := strings.Repeat("A", 257)
+	err := v.SetSecret(longName, []byte("val"), nil)
+	if err == nil {
+		t.Fatal("should reject long name")
+	}
+}
+
+func TestSetSecret_ValueTooLong(t *testing.T) {
+	v := setupTestVault(t)
+	defer v.Close()
+
+	longValue := make([]byte, 4097)
+	err := v.SetSecret("KEY", longValue, nil)
+	if err == nil {
+		t.Fatal("should reject long value")
 	}
 }

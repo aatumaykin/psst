@@ -23,10 +23,12 @@ type Vault struct {
 }
 
 const (
-	serviceName = "psst"
-	accountName = "vault-key"
-	maxHistory  = 10
-	saltSize    = 16
+	serviceName       = "psst"
+	accountName       = "vault-key"
+	maxHistory        = 10
+	saltSize          = 16
+	maxSecretNameLen  = 256
+	maxSecretValueLen = 4096
 )
 
 func New(enc crypto.Encryptor, kp keyring.KeyProvider, s store.SecretStore) *Vault {
@@ -109,15 +111,14 @@ func (v *Vault) Unlock() error {
 		if metaErr != nil {
 			return fmt.Errorf("get kdf_salt: %w", metaErr)
 		}
-		if saltB64 != "" {
-			salt, decodeErr := base64.StdEncoding.DecodeString(saltB64)
-			if decodeErr != nil {
-				return fmt.Errorf("decode kdf_salt: %w", decodeErr)
-			}
-			key, err = v.enc.KeyToBufferV2WithSalt(rawKey, salt)
-		} else {
-			key, err = v.enc.KeyToBufferV2(rawKey)
+		if saltB64 == "" {
+			return errors.New("vault corrupted: kdf_salt missing for V2 vault")
 		}
+		salt, decodeErr := base64.StdEncoding.DecodeString(saltB64)
+		if decodeErr != nil {
+			return fmt.Errorf("decode kdf_salt: %w", decodeErr)
+		}
+		key, err = v.enc.KeyToBufferV2WithSalt(rawKey, salt)
 	default:
 		key, err = v.enc.KeyToBuffer(rawKey)
 	}
@@ -147,6 +148,13 @@ func (v *Vault) readKDFVersion() (int, error) {
 func (v *Vault) SetSecret(name string, value []byte, tags []string) error {
 	if v.key == nil {
 		return errors.New("vault is locked")
+	}
+
+	if len(name) > maxSecretNameLen {
+		return fmt.Errorf("secret name too long: max %d bytes", maxSecretNameLen)
+	}
+	if len(value) > maxSecretValueLen {
+		return fmt.Errorf("secret value too long: max %d bytes", maxSecretValueLen)
 	}
 
 	return v.store.ExecTx(func() error {
