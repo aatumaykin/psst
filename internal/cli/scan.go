@@ -38,9 +38,9 @@ var scanCmd = &cobra.Command{
 			return nil
 		}
 
-		strSecrets := make(map[string]string, len(secrets))
+		byteSecrets := make(map[string][]byte, len(secrets))
 		for k, v := range secrets {
-			strSecrets[k] = string(v)
+			byteSecrets[k] = v
 		}
 
 		files, err := getScanFiles(staged, scanPath)
@@ -50,7 +50,7 @@ var scanCmd = &cobra.Command{
 
 		var results []output.ScanMatch
 		for _, file := range files {
-			matches := scanFile(file, strSecrets)
+			matches := scanFile(file, byteSecrets)
 			results = append(results, matches...)
 		}
 
@@ -96,7 +96,7 @@ func getScanFiles(staged bool, scanPath string) ([]string, error) {
 	return splitLines(string(out)), nil
 }
 
-func scanFile(path string, secrets map[string]string) []output.ScanMatch {
+func scanFile(path string, secrets map[string][]byte) []output.ScanMatch {
 	info, err := os.Stat(path)
 	if err != nil || info.IsDir() || info.Size() > 1024*1024 {
 		return nil
@@ -121,8 +121,9 @@ func scanFile(path string, secrets map[string]string) []output.ScanMatch {
 		if strings.ContainsRune(line, 0) {
 			return nil
 		}
+		lineData := []byte(line)
 		for name, value := range secrets {
-			if len(value) >= 4 && strings.Contains(line, value) {
+			if len(value) >= 4 && bytes.Contains(lineData, value) {
 				results = append(results, output.ScanMatch{
 					File:       path,
 					Line:       lineNum,
