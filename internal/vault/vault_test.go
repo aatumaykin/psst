@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -353,6 +354,75 @@ func TestMigrateKDF(t *testing.T) {
 
 	if hex.EncodeToString(oldKey) == hex.EncodeToString(v2Key) {
 		t.Fatal("key should have changed after KDF migration")
+	}
+}
+
+func TestMigrateKDF_UpdatesKey(t *testing.T) {
+	v := setupTestVaultV1(t)
+	defer v.Close()
+
+	if err := v.SetSecret("API_KEY", []byte("secret123"), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := v.MigrateKDF(); err != nil {
+		t.Fatalf("MigrateKDF: %v", err)
+	}
+
+	sec, err := v.GetSecret("API_KEY")
+	if err != nil {
+		t.Fatalf("GetSecret after migrate without manual key fix: %v", err)
+	}
+	if string(sec.Value) != "secret123" {
+		t.Fatalf("secret = %q, want %q", string(sec.Value), "secret123")
+	}
+}
+
+func TestSetSecret_VersionCollision(t *testing.T) {
+	v := setupTestVault(t)
+	defer v.Close()
+
+	for i := range 15 {
+		if err := v.SetSecret("KEY", fmt.Appendf(nil, "v%d", i), nil); err != nil {
+			t.Fatalf("SetSecret iteration %d: %v", i, err)
+		}
+	}
+
+	sec, err := v.GetSecret("KEY")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(sec.Value) != "v14" {
+		t.Fatalf("value = %q, want %q", string(sec.Value), "v14")
+	}
+}
+
+func TestMigrateKDF_GeneratesSalt(t *testing.T) {
+	v := setupTestVaultV1(t)
+	defer v.Close()
+
+	if err := v.SetSecret("TEST", []byte("value"), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := v.MigrateKDF(); err != nil {
+		t.Fatal(err)
+	}
+
+	saltB64, err := v.store.GetMeta("kdf_salt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saltB64 == "" {
+		t.Fatal("MigrateKDF should generate kdf_salt when migrating from V1")
+	}
+
+	sec, err := v.GetSecret("TEST")
+	if err != nil {
+		t.Fatalf("GetSecret after migrate: %v", err)
+	}
+	if string(sec.Value) != "value" {
+		t.Fatalf("value = %q, want %q", string(sec.Value), "value")
 	}
 }
 

@@ -1,8 +1,11 @@
 package crypto
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"testing"
+
+	"golang.org/x/crypto/argon2"
 )
 
 func TestEncryptDecryptRoundTrip(t *testing.T) {
@@ -121,7 +124,7 @@ func TestKeyToBufferV2_Argon2id(t *testing.T) {
 	}
 }
 
-func TestKeyToBufferV2_Base64Passthrough(t *testing.T) {
+func TestKeyToBufferV2_NeverBypassesArgon2id(t *testing.T) {
 	enc := NewAESGCM()
 	raw := make([]byte, 32)
 	raw[0] = 42
@@ -131,8 +134,19 @@ func TestKeyToBufferV2_Base64Passthrough(t *testing.T) {
 	if err != nil {
 		t.Fatalf("KeyToBufferV2 failed: %v", err)
 	}
-	if result[0] != 42 {
-		t.Fatalf("first byte = %d, want 42", result[0])
+
+	if string(result) == string(raw) {
+		t.Fatal("KeyToBufferV2 must not return raw base64-decoded bytes; Argon2id KDF must always be applied")
+	}
+
+	if len(result) != 32 {
+		t.Fatalf("key length = %d, want 32", len(result))
+	}
+
+	salt := sha256.Sum256([]byte("psst-argon2id-v2-salt"))
+	expected := argon2.IDKey([]byte(b64), salt[:], argon2Iterations, argon2Memory, argon2Threads, aesKeySize)
+	if string(result) != string(expected) {
+		t.Fatal("KeyToBufferV2 should use Argon2id on the password string, not raw decoded bytes")
 	}
 }
 
@@ -180,17 +194,24 @@ func TestKeyToBufferV2WithSalt_DifferentFromHardcoded(t *testing.T) {
 	}
 }
 
-func TestKeyToBufferV2WithSalt_Base64Passthrough(t *testing.T) {
+func TestKeyToBufferV2WithSalt_NeverBypassesArgon2id(t *testing.T) {
 	enc := NewAESGCM()
 	raw := make([]byte, 32)
 	raw[0] = 99
 	b64 := base64.StdEncoding.EncodeToString(raw)
+	salt := []byte("any-salt")
 
-	result, err := enc.KeyToBufferV2WithSalt(b64, []byte("any-salt"))
+	result, err := enc.KeyToBufferV2WithSalt(b64, salt)
 	if err != nil {
 		t.Fatalf("KeyToBufferV2WithSalt failed: %v", err)
 	}
-	if result[0] != 99 {
-		t.Fatalf("first byte = %d, want 99", result[0])
+
+	if string(result) == string(raw) {
+		t.Fatal("KeyToBufferV2WithSalt must not return raw base64-decoded bytes; Argon2id KDF must always be applied")
+	}
+
+	expected := argon2.IDKey([]byte(b64), salt, argon2Iterations, argon2Memory, argon2Threads, aesKeySize)
+	if string(result) != string(expected) {
+		t.Fatal("KeyToBufferV2WithSalt should use Argon2id on the password string, not raw decoded bytes")
 	}
 }

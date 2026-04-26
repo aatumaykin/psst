@@ -75,21 +75,11 @@ func (a *AESGCM) KeyToBuffer(key string) ([]byte, error) {
 }
 
 func (a *AESGCM) KeyToBufferV2(key string) ([]byte, error) {
-	decoded, err := base64.StdEncoding.DecodeString(key)
-	if err == nil && len(decoded) == aesKeySize {
-		return decoded, nil
-	}
-
 	salt := sha256.Sum256([]byte("psst-argon2id-v2-salt"))
 	return argon2.IDKey([]byte(key), salt[:], argon2Iterations, argon2Memory, argon2Threads, aesKeySize), nil
 }
 
 func (a *AESGCM) KeyToBufferV2WithSalt(key string, salt []byte) ([]byte, error) {
-	decoded, err := base64.StdEncoding.DecodeString(key)
-	if err == nil && len(decoded) == aesKeySize {
-		return decoded, nil
-	}
-
 	return argon2.IDKey([]byte(key), salt, argon2Iterations, argon2Memory, argon2Threads, aesKeySize), nil
 }
 

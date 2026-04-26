@@ -26,6 +26,7 @@ const (
 	serviceName = "psst"
 	accountName = "vault-key"
 	maxHistory  = 10
+	saltSize    = 16
 )
 
 func New(enc crypto.Encryptor, kp keyring.KeyProvider, s store.SecretStore) *Vault {
@@ -69,7 +70,7 @@ func InitVault(vaultPath string, _ crypto.Encryptor, kp keyring.KeyProvider, opt
 		return fmt.Errorf("set vault metadata: %w", err)
 	}
 
-	salt := make([]byte, 16)
+	salt := make([]byte, saltSize)
 	if _, err = rand.Read(salt); err != nil {
 		return fmt.Errorf("generate salt: %w", err)
 	}
@@ -150,7 +151,13 @@ func (v *Vault) SetSecret(name string, value []byte, tags []string) error {
 			if err != nil {
 				return fmt.Errorf("get history: %w", err)
 			}
-			version := len(history) + 1
+			maxVersion := 0
+			for _, h := range history {
+				if h.Version > maxVersion {
+					maxVersion = h.Version
+				}
+			}
+			version := maxVersion + 1
 			if err = v.store.AddHistory(
 				name, version,
 				existing.EncryptedValue, existing.IV, existing.Tags,
@@ -392,24 +399,24 @@ func (v *Vault) MigrateKDF() error {
 		return fmt.Errorf("get raw key: %w", err)
 	}
 
-	newKey, err := v.enc.KeyToBufferV2(rawKey)
-	if err != nil {
-		return fmt.Errorf("derive new key: %w", err)
-	}
-
 	saltB64, _ := v.store.GetMeta("kdf_salt")
-	if saltB64 != "" {
-		salt, decodeErr := base64.StdEncoding.DecodeString(saltB64)
-		if decodeErr != nil {
-			return fmt.Errorf("decode kdf_salt: %w", decodeErr)
+	if saltB64 == "" {
+		salt := make([]byte, saltSize)
+		if _, err = rand.Read(salt); err != nil {
+			return fmt.Errorf("generate salt: %w", err)
 		}
-		newKey, err = v.enc.KeyToBufferV2WithSalt(rawKey, salt)
-		if err != nil {
-			return fmt.Errorf("derive key with salt: %w", err)
-		}
+		saltB64 = base64.StdEncoding.EncodeToString(salt)
+	}
+	salt, decodeErr := base64.StdEncoding.DecodeString(saltB64)
+	if decodeErr != nil {
+		return fmt.Errorf("decode kdf_salt: %w", decodeErr)
+	}
+	newKey, err := v.enc.KeyToBufferV2WithSalt(rawKey, salt)
+	if err != nil {
+		return fmt.Errorf("derive key with salt: %w", err)
 	}
 
-	return v.store.ExecTx(func() error {
+	if txErr := v.store.ExecTx(func() error {
 		for _, s := range all {
 			var plaintext []byte
 			plaintext, err = v.enc.Decrypt(s.EncryptedValue, s.IV, v.key)
@@ -429,6 +436,13 @@ func (v *Vault) MigrateKDF() error {
 				return fmt.Errorf("update %s: %w", s.Name, err)
 			}
 		}
+		if metaErr := v.store.SetMeta("kdf_salt", saltB64); metaErr != nil {
+			return fmt.Errorf("store kdf_salt: %w", metaErr)
+		}
 		return v.store.SetMeta("kdf_version", strconv.Itoa(crypto.CurrentKDFVersion))
-	})
+	}); txErr != nil {
+		return txErr
+	}
+	v.key = newKey
+	return nil
 }
