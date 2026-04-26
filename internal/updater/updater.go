@@ -102,11 +102,30 @@ func compareVersions(a, b string) int {
 	if bPre == "" {
 		return -1
 	}
-	if aPre < bPre {
-		return -1
-	}
-	if aPre > bPre {
+	aPri := prereleasePriority(aPre)
+	bPri := prereleasePriority(bPre)
+	if aPri != bPri {
+		if aPri < bPri {
+			return -1
+		}
 		return 1
+	}
+	return 0
+}
+
+var prereleaseOrder = map[string]int{
+	"dev":   0,
+	"alpha": 1,
+	"beta":  2,
+	"rc":    3,
+}
+
+func prereleasePriority(s string) int {
+	lower := strings.ToLower(s)
+	for prefix, prio := range prereleaseOrder {
+		if strings.HasPrefix(lower, prefix) {
+			return prio
+		}
 	}
 	return 0
 }
