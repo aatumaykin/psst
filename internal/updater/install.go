@@ -111,25 +111,28 @@ func extractBinaryFromTarGz(archivePath string) ([]byte, error) {
 }
 
 func replaceBinary(currentPath, newPath string) error {
-	//nolint:gosec // executable binary needs execute permission
 	if chmodErr := os.Chmod(newPath, 0o755); chmodErr != nil {
 		return fmt.Errorf("chmod new binary: %w", chmodErr)
 	}
 
 	backupPath := currentPath + ".bak"
-	if renameErr := os.Rename(currentPath, backupPath); renameErr != nil {
-		if copyErr := copyFile(newPath, currentPath); copyErr != nil {
-			return fmt.Errorf("copy over current binary: %w", copyErr)
-		}
-		return os.Remove(newPath)
+	backupCreated := false
+	if renameErr := os.Rename(currentPath, backupPath); renameErr == nil {
+		backupCreated = true
 	}
 
 	if moveErr := os.Rename(newPath, currentPath); moveErr != nil {
-		_ = os.Rename(backupPath, currentPath)
-		return fmt.Errorf("rename new binary: %w", moveErr)
+		if copyErr := copyFile(newPath, currentPath); copyErr != nil {
+			if backupCreated {
+				_ = os.Rename(backupPath, currentPath)
+			}
+			return fmt.Errorf("copy over current binary: %w", copyErr)
+		}
 	}
 
-	_ = os.Remove(backupPath)
+	if backupCreated {
+		_ = os.Remove(backupPath)
+	}
 	return nil
 }
 
