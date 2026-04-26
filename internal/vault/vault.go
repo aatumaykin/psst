@@ -330,7 +330,7 @@ func (v *Vault) RemoveTag(name string, tag string) error {
 		return fmt.Errorf("secret %q not found", name)
 	}
 
-	filtered := sec.Tags[:0]
+	filtered := make([]string, 0, len(sec.Tags))
 	for _, t := range sec.Tags {
 		if t != tag {
 			filtered = append(filtered, t)
@@ -481,6 +481,9 @@ func (v *Vault) MigrateKDF() error {
 		return v.store.SetMeta("kdf_version", strconv.Itoa(crypto.CurrentKDFVersion))
 	}); txErr != nil {
 		return txErr
+	}
+	for i := range v.key {
+		v.key[i] = 0
 	}
 	v.key = newKey
 	return nil
