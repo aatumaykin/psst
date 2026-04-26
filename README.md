@@ -44,7 +44,6 @@ sudo install psst /usr/local/bin/
 ### Requirements
 
 - Go 1.26+ (for building)
-- gcc (for CGo — mattn/go-sqlite3)
 - On Linux: `libsecret` headers (for OS keyring support)
 
 ## Quick Start
@@ -125,6 +124,14 @@ psst list --tag prod                  # Filter by tag (OR logic)
 psst --tag aws -- aws s3 ls           # Run with tagged secrets only
 ```
 
+### Self-Update
+
+```bash
+psst update check                     # Check for newer version
+psst update install                   # Download and install latest
+psst update install --force           # Reinstall current version
+```
+
 ### Secret Scanner
 
 ```bash
@@ -158,6 +165,7 @@ All commands support:
 -g, --global        Use global vault (~/.psst/)
 --env <name>        Use specific environment
 --tag <name>        Filter by tag (repeatable, OR logic)
+--no-mask           Disable output masking (debugging only)
 ```
 
 Fallback environment variables: `PSST_GLOBAL=1`, `PSST_ENV=<name>`.
@@ -198,7 +206,9 @@ internal/
 ├── vault/                Business logic facade
 ├── output/               Human/JSON/quiet formatting
 ├── runner/               Subprocess execution + output masking
-└── cli/                  Cobra commands (15 commands)
+├── updater/              Self-update mechanism (GitHub releases)
+├── version/              Build-time version info (ldflags)
+└── cli/                  Cobra commands (18 root commands + exec pattern)
 ```
 
 ### Key Interfaces
@@ -209,11 +219,17 @@ type Encryptor interface {
     Decrypt(ciphertext, iv, key []byte) ([]byte, error)
     KeyToBuffer(key string) ([]byte, error)
     KeyToBufferV2(key string) ([]byte, error)
+    KeyToBufferV2WithSalt(key string, salt []byte) ([]byte, error)
+    GenerateKey() ([]byte, error)
+}
+
+type KeyDeriver interface {
+    KeyToBuffer(key string) ([]byte, error)
+    KeyToBufferV2(key string) ([]byte, error)
     GenerateKey() ([]byte, error)
 }
 
 type KeyProvider interface {
-    GetKey(service, account string) ([]byte, error)
     GetRawKey(service, account string) (string, error)
     SetKey(service, account string, key []byte) error
     IsAvailable() bool
@@ -223,6 +239,7 @@ type KeyProvider interface {
 type SecretStore interface {
     InitSchema() error
     GetSecret(name string) (*StoredSecret, error)
+    GetAllSecrets() ([]StoredSecret, error)
     SetSecret(name string, encValue, iv []byte, tags []string) error
     // ... (full interface in internal/store/store.go)
 }
@@ -245,7 +262,7 @@ make build-linux-arm64
 | Package | Purpose |
 |---------|---------|
 | `spf13/cobra` | CLI framework |
-| `mattn/go-sqlite3` | SQLite driver (CGo) |
+| `modernc.org/sqlite` | Pure Go SQLite driver (no CGo) |
 | `zalando/go-keyring` | OS keychain integration |
 | `golang.org/x/term` | Secure terminal input |
 | `golang.org/x/crypto` | Argon2id KDF |
@@ -284,7 +301,7 @@ CREATE TABLE secrets_history (
 | Property | Original (TS) | This (Go) |
 |----------|---------------|-----------|
 | Runtime | Bun | Static binary |
-| SQLite | bun:sqlite / better-sqlite3 | mattn/go-sqlite3 |
+| SQLite | bun:sqlite / better-sqlite3 | modernc.org/sqlite (pure Go) |
 | Crypto | Web Crypto API | stdlib crypto/aes + crypto/cipher |
 | Keychain | CLI utility calls | zalando/go-keyring |
 | CLI | Manual argument parsing | spf13/cobra |

@@ -46,7 +46,7 @@ This is a **security-critical** project — a secrets manager. Security rules ap
 ## Encryption
 
 - AES-256-GCM with unique random 12-byte IV per encryption.
-- Key derivation from password via SHA-256 (when OS keychain unavailable).
+- Key derivation from password via Argon2id (v2, current) or SHA-256 (v1, legacy). New vaults use Argon2id; upgrade via `psst migrate`.
 - OS keychain stores base64-encoded 32-byte key.
 - Key never written to disk outside keychain.
 

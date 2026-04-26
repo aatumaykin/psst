@@ -5,21 +5,23 @@
 - **psst** — secrets manager for AI agents. Written in Go, CLI-only (no SDK/library).
 - Repository: `github.com/aatumaykin/psst`
 - License: MIT
-- Go version: 1.25+
-- Requires CGo (mattn/go-sqlite3)
+- Go version: 1.26+
+- No CGo required (uses modernc.org/sqlite — pure Go SQLite)
 
 ## Repository Structure
 
 ```
 cmd/psst/main.go       — Entry point (minimal: calls cli.Execute())
 internal/
-  cli/                  — Cobra commands (14+ commands)
+  cli/                  — Cobra commands (18 root commands + exec pattern)
   crypto/               — AES-256-GCM encryption (Encryptor interface)
   store/                — SQLite persistence (SecretStore interface)
   keyring/              — OS keychain + env var fallback (KeyProvider interface)
   vault/                — Business logic facade (Vault struct)
   output/               — Human/JSON/quiet formatting (Formatter)
   runner/               — Subprocess execution + output masking
+  updater/              — Self-update mechanism (GitHub releases)
+  version/              — Build-time version info (ldflags)
 docs/
   rules/                — This directory: AI agent rules
   ru/                   — Russian documentation
@@ -36,7 +38,7 @@ make build-linux-arm64  # Cross-compile for Linux arm64
 ```
 
 - Before committing, run `make test` and ensure all tests pass.
-- No linter config in repo yet — follow `gofmt` and `go vet` conventions.
+- Linter: `make lint` (golangci-lint v2, config in `.golangci.yml`).
 
 ## Branches & Commits
 
@@ -52,9 +54,10 @@ make build-linux-arm64  # Cross-compile for Linux arm64
 | Package | Purpose |
 |---------|---------|
 | `spf13/cobra` | CLI framework |
-| `mattn/go-sqlite3` | SQLite driver (CGo) |
+| `modernc.org/sqlite` | Pure Go SQLite driver (no CGo) |
 | `zalando/go-keyring` | OS keychain integration |
-| `golang.org/x/sys` | System calls (indirect) |
+| `golang.org/x/term` | Secure terminal input |
+| `golang.org/x/crypto` | Argon2id KDF |
 
 - Do not add new dependencies without justification.
 - `renovate.json` is configured for automated dependency updates.

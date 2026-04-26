@@ -44,7 +44,6 @@ sudo install psst /usr/local/bin/
 ### Требования
 
 - Go 1.26+ (для сборки)
-- gcc (для CGo — mattn/go-sqlite3)
 - На Linux: заголовки `libsecret` (для поддержки OS keyring)
 
 ## Быстрый старт
@@ -125,6 +124,14 @@ psst list --tag prod                  # Фильтр по тегу (логика
 psst --tag aws -- aws s3 ls           # Запустить только с тегированными секретами
 ```
 
+### Автообновление
+
+```bash
+psst update check                     # Проверить наличие обновления
+psst update install                   # Скачать и установить последнюю версию
+psst update install --force           # Переустановить текущую версию
+```
+
 ### Сканер утечек
 
 ```bash
@@ -158,6 +165,7 @@ psst list-envs                        # Список всех окружений
 -g, --global        Использовать глобальный vault (~/.psst/)
 --env <name>        Использовать конкретное окружение
 --tag <name>        Фильтр по тегу (повторяемый, логика OR)
+--no-mask           Отключить маскирование вывода (для отладки)
 ```
 
 Резервные переменные окружения: `PSST_GLOBAL=1`, `PSST_ENV=<name>`.
@@ -198,7 +206,9 @@ internal/
 ├── vault/                Фасад бизнес-логики
 ├── output/               Форматирование human/JSON/quiet
 ├── runner/               Выполнение подпроцессов + маскирование вывода
-└── cli/                  Cobra-команды (15 команд)
+├── updater/              Механизм самообновления (GitHub releases)
+├── version/              Информация о версии (ldflags)
+└── cli/                  Cobra-команды (18 корневых команд + exec-паттерн)
 ```
 
 ### Ключевые интерфейсы
@@ -209,11 +219,17 @@ type Encryptor interface {
     Decrypt(ciphertext, iv, key []byte) ([]byte, error)
     KeyToBuffer(key string) ([]byte, error)
     KeyToBufferV2(key string) ([]byte, error)
+    KeyToBufferV2WithSalt(key string, salt []byte) ([]byte, error)
+    GenerateKey() ([]byte, error)
+}
+
+type KeyDeriver interface {
+    KeyToBuffer(key string) ([]byte, error)
+    KeyToBufferV2(key string) ([]byte, error)
     GenerateKey() ([]byte, error)
 }
 
 type KeyProvider interface {
-    GetKey(service, account string) ([]byte, error)
     GetRawKey(service, account string) (string, error)
     SetKey(service, account string, key []byte) error
     IsAvailable() bool
@@ -223,6 +239,7 @@ type KeyProvider interface {
 type SecretStore interface {
     InitSchema() error
     GetSecret(name string) (*StoredSecret, error)
+    GetAllSecrets() ([]StoredSecret, error)
     SetSecret(name string, encValue, iv []byte, tags []string) error
     // ... (полный интерфейс в internal/store/store.go)
 }
@@ -245,7 +262,7 @@ make build-linux-arm64
 | Пакет | Назначение |
 |-------|------------|
 | `spf13/cobra` | CLI-фреймворк |
-| `mattn/go-sqlite3` | SQLite-драйвер (CGo) |
+| `modernc.org/sqlite` | Pure Go SQLite-драйвер (без CGo) |
 | `zalando/go-keyring` | Интеграция с OS keychain |
 | `golang.org/x/term` | Безопасный ввод в терминале |
 | `golang.org/x/crypto` | Argon2id KDF |
@@ -284,7 +301,7 @@ CREATE TABLE secrets_history (
 | Свойство | Оригинал (TS) | Здесь (Go) |
 |----------|---------------|------------|
 | Runtime | Bun | Статический бинарник |
-| SQLite | bun:sqlite / better-sqlite3 | mattn/go-sqlite3 |
+| SQLite | bun:sqlite / better-sqlite3 | modernc.org/sqlite (pure Go) |
 | Криптография | Web Crypto API | stdlib crypto/aes + crypto/cipher |
 | Keychain | Вызов CLI-утилит | zalando/go-keyring |
 | CLI | Ручной парсинг аргументов | spf13/cobra |
