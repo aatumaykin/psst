@@ -42,5 +42,6 @@ type SecretStore interface {
 	ExecTx(fn func() error) error
 	GetMeta(key string) (string, error)
 	SetMeta(key, value string) error
+	IncrementMetaInt(key string, increment int) (int, error)
 	Close() error
 }

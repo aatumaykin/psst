@@ -573,3 +573,38 @@ func TestSetSecret_ValueTooLong(t *testing.T) {
 		t.Fatal("should reject long value")
 	}
 }
+
+func TestUnlock_BruteForceProtection(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "vault.db")
+	s, err := store.NewSQLite(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.InitSchema()
+
+	enc := crypto.NewAESGCM()
+	rightKey, _ := enc.GenerateKey()
+	rightKp := &testKeyProvider{enc: enc, key: rightKey}
+
+	v := New(enc, rightKp, s)
+	v.key = rightKey
+	v.SetSecret("TEST", []byte("verify"), nil)
+	v.key = nil
+
+	wrongKey, _ := enc.GenerateKey()
+	wrongKey[0] ^= 0xFF
+	wrongKp := &testKeyProvider{enc: enc, key: wrongKey}
+
+	wrongV := New(enc, wrongKp, s)
+	defer wrongV.Close()
+
+	for range maxUnlockAttempts {
+		wrongV.Unlock()
+	}
+
+	err = wrongV.Unlock()
+	if err == nil {
+		t.Fatal("should be locked after max failed attempts")
+	}
+}

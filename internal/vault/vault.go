@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"time"
 
 	"github.com/aatumaykin/psst/internal/crypto"
 	"github.com/aatumaykin/psst/internal/keyring"
@@ -29,6 +30,11 @@ const (
 	saltSize          = 16
 	maxSecretNameLen  = 256
 	maxSecretValueLen = 4096
+
+	maxUnlockAttempts     = 10
+	unlockDelayBaseMs     = 500
+	metaUnlockAttempts    = "unlock_attempts"
+	metaUnlockLockedUntil = "unlock_locked_until"
 )
 
 func New(enc crypto.Encryptor, kp keyring.KeyProvider, s store.SecretStore) *Vault {
@@ -95,6 +101,13 @@ func InitVault(vaultPath string, _ crypto.Encryptor, kp keyring.KeyProvider, opt
 }
 
 func (v *Vault) Unlock() error {
+	if lockedUntil, _ := v.store.GetMeta(metaUnlockLockedUntil); lockedUntil != "" {
+		ts, parseErr := time.Parse(time.RFC3339, lockedUntil)
+		if parseErr == nil && time.Now().Before(ts) {
+			return fmt.Errorf("vault locked until %s due to too many failed unlock attempts", ts.Format(time.Kitchen))
+		}
+	}
+
 	rawKey, err := v.kp.GetRawKey(serviceName, accountName)
 	if err != nil {
 		return fmt.Errorf("unlock vault: %w", err)
@@ -127,6 +140,36 @@ func (v *Vault) Unlock() error {
 	}
 
 	v.key = key
+
+	all, verifyErr := v.store.GetAllSecrets()
+	if verifyErr != nil {
+		for i := range v.key {
+			v.key[i] = 0
+		}
+		v.key = nil
+		return fmt.Errorf("verify vault: %w", verifyErr)
+	}
+	for _, s := range all {
+		_, decErr := v.enc.Decrypt(s.EncryptedValue, s.IV, v.key)
+		if decErr != nil {
+			attempts, _ := v.store.IncrementMetaInt(metaUnlockAttempts, 1)
+			if attempts >= maxUnlockAttempts {
+				lockDuration := time.Duration(attempts*unlockDelayBaseMs) * time.Millisecond
+				lockedUntil := time.Now().Add(lockDuration)
+				v.store.SetMeta(metaUnlockLockedUntil, lockedUntil.Format(time.RFC3339))
+				v.store.SetMeta(metaUnlockAttempts, "0")
+			}
+			for i := range v.key {
+				v.key[i] = 0
+			}
+			v.key = nil
+			return fmt.Errorf("authentication failed")
+		}
+		break
+	}
+
+	v.store.SetMeta(metaUnlockAttempts, "0")
+	v.store.SetMeta(metaUnlockLockedUntil, "")
 	return nil
 }
 

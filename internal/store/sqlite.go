@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -318,4 +319,19 @@ func (s *SQLiteStore) SetMeta(key, value string) error {
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value`
 	_, err := s.exec(q, key, value)
 	return err
+}
+
+func (s *SQLiteStore) IncrementMetaInt(key string, increment int) (int, error) {
+	q := `INSERT INTO vault_meta (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + ? AS TEXT)`
+	_, err := s.exec(q, key, strconv.Itoa(increment), increment)
+	if err != nil {
+		return 0, err
+	}
+	val, err := s.GetMeta(key)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := strconv.Atoi(val)
+	return n, nil
 }
