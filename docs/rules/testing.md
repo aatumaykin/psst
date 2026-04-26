@@ -107,3 +107,14 @@ func captureOutput(fn func()) string {
 - **Edge cases:** empty values, max-length names, concurrent access (SQLite WAL mode).
 - **Security:** masking works for all secret values, `PSST_PASSWORD` stripped from env.
 - **Round-trips:** encrypt → decrypt, set → get, set → history → rollback.
+
+## Security Tests
+
+These test categories are mandatory for any change touching encryption, vault, or runner:
+
+- **Key zeroing:** verify old key bytes are zeroed after `MigrateKDF`.
+- **Input limits:** verify rejection of names > 256 bytes and values > 4096 bytes.
+- **Brute-force protection:** verify vault locks after 10 failed unlock attempts.
+- **Masking boundary:** verify secrets split across stream chunks are fully masked.
+- **Memory safety:** verify no immutable `string` conversions for secret values in runner/scan paths.
+- **Corrupted vault:** verify graceful error when `kdf_salt` is missing for V2 vault.

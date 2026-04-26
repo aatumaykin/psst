@@ -15,13 +15,13 @@ var migrateCmd = &cobra.Command{
 		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
 		f := getFormatter(jsonOut, quiet)
 
-		v, err := getUnlockedVault(jsonOut, quiet, global, env)
+		v, err := getUnlockedVault(cmd.Context(), jsonOut, quiet, global, env)
 		if err != nil {
 			return err
 		}
 		defer v.Close()
 
-		if migrateErr := v.MigrateKDF(); migrateErr != nil {
+		if migrateErr := v.MigrateKDF(cmd.Context()); migrateErr != nil {
 			return exitWithError(fmt.Sprintf("Migration failed: %v", migrateErr))
 		}
 

@@ -44,6 +44,9 @@ var setCmd = &cobra.Command{
 					return exitWithError(fmt.Sprintf("Failed to read password: %v", readErr))
 				}
 				value = strings.TrimSpace(string(passwordBytes))
+				for i := range passwordBytes {
+					passwordBytes[i] = 0
+				}
 			} else {
 				reader := bufio.NewReader(os.Stdin)
 				line, _ := reader.ReadString('\n')
@@ -55,13 +58,19 @@ var setCmd = &cobra.Command{
 			return exitWithError("Value cannot be empty")
 		}
 
-		v, err := getUnlockedVault(jsonOut, quiet, global, env)
+		v, err := getUnlockedVault(cmd.Context(), jsonOut, quiet, global, env)
 		if err != nil {
 			return err
 		}
 		defer v.Close()
 
-		if setErr := v.SetSecret(name, []byte(value), tags); setErr != nil {
+		valueBytes := []byte(value)
+		defer func() {
+			for i := range valueBytes {
+				valueBytes[i] = 0
+			}
+		}()
+		if setErr := v.SetSecret(cmd.Context(), name, valueBytes, tags); setErr != nil {
 			return exitWithError(setErr.Error())
 		}
 

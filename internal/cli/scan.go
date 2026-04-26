@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,13 +23,13 @@ var scanCmd = &cobra.Command{
 		staged, _ := cmd.Flags().GetBool("staged")
 		scanPath, _ := cmd.Flags().GetString("path")
 
-		v, err := getUnlockedVault(jsonOut, quiet, global, env)
+		v, err := getUnlockedVault(cmd.Context(), jsonOut, quiet, global, env)
 		if err != nil {
 			return err
 		}
 		defer v.Close()
 
-		secrets, err := v.GetAllSecrets()
+		secrets, err := v.GetAllSecrets(cmd.Context())
 		if err != nil {
 			return exitWithError(err.Error())
 		}
@@ -38,10 +39,8 @@ var scanCmd = &cobra.Command{
 			return nil
 		}
 
-		strSecrets := make(map[string]string, len(secrets))
-		for k, v := range secrets {
-			strSecrets[k] = string(v)
-		}
+		byteSecrets := make(map[string][]byte, len(secrets))
+		maps.Copy(byteSecrets, secrets)
 
 		files, err := getScanFiles(staged, scanPath)
 		if err != nil {
@@ -50,7 +49,7 @@ var scanCmd = &cobra.Command{
 
 		var results []output.ScanMatch
 		for _, file := range files {
-			matches := scanFile(file, strSecrets)
+			matches := scanFile(file, byteSecrets)
 			results = append(results, matches...)
 		}
 
@@ -96,7 +95,7 @@ func getScanFiles(staged bool, scanPath string) ([]string, error) {
 	return splitLines(string(out)), nil
 }
 
-func scanFile(path string, secrets map[string]string) []output.ScanMatch {
+func scanFile(path string, secrets map[string][]byte) []output.ScanMatch {
 	info, err := os.Stat(path)
 	if err != nil || info.IsDir() || info.Size() > 1024*1024 {
 		return nil
@@ -121,8 +120,9 @@ func scanFile(path string, secrets map[string]string) []output.ScanMatch {
 		if strings.ContainsRune(line, 0) {
 			return nil
 		}
+		lineData := []byte(line)
 		for name, value := range secrets {
-			if len(value) >= 4 && strings.Contains(line, value) {
+			if len(value) >= 4 && bytes.Contains(lineData, value) {
 				results = append(results, output.ScanMatch{
 					File:       path,
 					Line:       lineNum,

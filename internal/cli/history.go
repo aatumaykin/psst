@@ -23,13 +23,13 @@ var historyCmd = &cobra.Command{
 			return exitWithError(fmt.Sprintf("Invalid secret name %q. Must match [A-Z][A-Z0-9_]*", name))
 		}
 
-		v, err := getUnlockedVault(jsonOut, quiet, global, env)
+		v, err := getUnlockedVault(cmd.Context(), jsonOut, quiet, global, env)
 		if err != nil {
 			return err
 		}
 		defer v.Close()
 
-		entries, err := v.GetHistory(name)
+		entries, err := v.GetHistory(cmd.Context(), name)
 		if err != nil {
 			return exitWithError(err.Error())
 		}

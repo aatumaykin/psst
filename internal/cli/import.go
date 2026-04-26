@@ -19,7 +19,7 @@ var importCmd = &cobra.Command{
 		useStdin, _ := cmd.Flags().GetBool("stdin")
 		fromEnv, _ := cmd.Flags().GetBool("from-env")
 
-		v, err := getUnlockedVault(jsonOut, quiet, global, env)
+		v, err := getUnlockedVault(cmd.Context(), jsonOut, quiet, global, env)
 		if err != nil {
 			return err
 		}
@@ -68,7 +68,7 @@ var importCmd = &cobra.Command{
 				}
 				continue
 			}
-			if setErr := v.SetSecret(name, []byte(value), nil); setErr != nil {
+			if setErr := v.SetSecret(cmd.Context(), name, []byte(value), nil); setErr != nil {
 				return exitWithError(fmt.Sprintf("Failed to set %s: %v", name, setErr))
 			}
 			count++

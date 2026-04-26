@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -8,6 +9,7 @@ import (
 )
 
 func handleExecPatternDirect(
+	ctx context.Context,
 	secretNames []string,
 	commandArgs []string,
 	jsonOut, quiet, global bool,
@@ -15,7 +17,7 @@ func handleExecPatternDirect(
 	tags []string,
 	noMask bool,
 ) error {
-	v, err := getUnlockedVault(jsonOut, quiet, global, env)
+	v, err := getUnlockedVault(ctx, jsonOut, quiet, global, env)
 	if err != nil {
 		return err
 	}
@@ -24,7 +26,7 @@ func handleExecPatternDirect(
 	secrets := make(map[string][]byte)
 
 	if len(tags) > 0 {
-		names, tagErr := v.GetSecretNamesByTags(tags)
+		names, tagErr := v.GetSecretNamesByTags(ctx, tags)
 		if tagErr != nil {
 			return exitWithError(tagErr.Error())
 		}
@@ -38,7 +40,7 @@ func handleExecPatternDirect(
 	}
 
 	for _, name := range secretNames {
-		sec, getErr := v.GetSecret(name)
+		sec, getErr := v.GetSecret(ctx, name)
 		if getErr != nil {
 			return exitWithError(getErr.Error())
 		}

@@ -20,13 +20,13 @@ var rmCmd = &cobra.Command{
 			return exitWithError(fmt.Sprintf("Invalid secret name %q. Must match [A-Z][A-Z0-9_]*", name))
 		}
 
-		v, err := getUnlockedVault(jsonOut, quiet, global, env)
+		v, err := getUnlockedVault(cmd.Context(), jsonOut, quiet, global, env)
 		if err != nil {
 			return err
 		}
 		defer v.Close()
 
-		if delErr := v.DeleteSecret(name); delErr != nil {
+		if delErr := v.DeleteSecret(cmd.Context(), name); delErr != nil {
 			return exitWithError(delErr.Error())
 		}
 

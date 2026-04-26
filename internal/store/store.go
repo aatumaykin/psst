@@ -1,6 +1,9 @@
 package store
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 type StoredSecret struct {
 	Name           string
@@ -30,17 +33,18 @@ type HistoryEntry struct {
 
 type SecretStore interface {
 	InitSchema() error
-	GetSecret(name string) (*StoredSecret, error)
-	GetAllSecrets() ([]StoredSecret, error)
-	SetSecret(name string, encValue, iv []byte, tags []string) error
-	DeleteSecret(name string) error
-	DeleteHistory(name string) error
-	ListSecrets() ([]SecretMeta, error)
-	GetHistory(name string) ([]HistoryEntry, error)
-	AddHistory(name string, version int, encValue, iv []byte, tags []string) error
-	PruneHistory(name string, keepVersions int) error
+	GetSecret(ctx context.Context, name string) (*StoredSecret, error)
+	GetAllSecrets(ctx context.Context) ([]StoredSecret, error)
+	SetSecret(ctx context.Context, name string, encValue, iv []byte, tags []string) error
+	DeleteSecret(ctx context.Context, name string) error
+	DeleteHistory(ctx context.Context, name string) error
+	ListSecrets(ctx context.Context) ([]SecretMeta, error)
+	GetHistory(ctx context.Context, name string) ([]HistoryEntry, error)
+	AddHistory(ctx context.Context, name string, version int, encValue, iv []byte, tags []string) error
+	PruneHistory(ctx context.Context, name string, keepVersions int) error
 	ExecTx(fn func() error) error
-	GetMeta(key string) (string, error)
-	SetMeta(key, value string) error
+	GetMeta(ctx context.Context, key string) (string, error)
+	SetMeta(ctx context.Context, key, value string) error
+	IncrementMetaInt(ctx context.Context, key string, increment int) (int, error)
 	Close() error
 }
