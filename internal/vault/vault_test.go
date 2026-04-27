@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aatumaykin/psst/internal/crypto"
 	"github.com/aatumaykin/psst/internal/store"
@@ -999,6 +1000,324 @@ func TestValidateTags(t *testing.T) {
 	}
 	if err := ValidateTags([]string{"invalid tag!"}); err == nil {
 		t.Fatal("invalid tag should fail")
+	}
+}
+
+func TestUnlock_FailedAttemptsIncrement(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "vault.db")
+	s, err := store.NewSQLite(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.InitSchema()
+	ctx := context.Background()
+
+	enc := crypto.NewAESGCM()
+	rightKey, _ := enc.GenerateKey()
+	rightKp := &testKeyProvider{enc: enc, key: rightKey}
+
+	v := New(enc, rightKp, s)
+	v.key = rightKey
+	v.SetSecret(ctx, "TEST", []byte("verify"), nil)
+	v.key = nil
+
+	wrongKey, _ := enc.GenerateKey()
+	wrongKey[0] ^= 0xFF
+	wrongKp := &testKeyProvider{enc: enc, key: wrongKey}
+
+	wrongV := New(enc, wrongKp, s)
+	defer wrongV.Close()
+
+	for range 3 {
+		wrongV.Unlock(ctx)
+	}
+
+	attempts, _ := s.GetMeta(ctx, metaUnlockAttempts)
+	if attempts != "3" {
+		t.Fatalf("unlock_attempts = %q, want %q", attempts, "3")
+	}
+}
+
+func TestUnlock_LockDurationExponential(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "vault.db")
+	s, err := store.NewSQLite(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.InitSchema()
+	ctx := context.Background()
+
+	enc := crypto.NewAESGCM()
+	rightKey, _ := enc.GenerateKey()
+	rightKp := &testKeyProvider{enc: enc, key: rightKey}
+
+	v := New(enc, rightKp, s)
+	v.key = rightKey
+	v.SetSecret(ctx, "TEST", []byte("verify"), nil)
+	v.key = nil
+
+	wrongKey, _ := enc.GenerateKey()
+	wrongKey[0] ^= 0xFF
+	wrongKp := &testKeyProvider{enc: enc, key: wrongKey}
+
+	wrongV := New(enc, wrongKp, s)
+	defer wrongV.Close()
+
+	for range maxUnlockAttempts {
+		wrongV.Unlock(ctx)
+	}
+
+	lockedUntil1, _ := s.GetMeta(ctx, metaUnlockLockedUntil)
+	if lockedUntil1 == "" {
+		t.Fatal("expected lock after first cycle")
+	}
+	ts1, parseErr := time.Parse(time.RFC3339, lockedUntil1)
+	if parseErr != nil {
+		t.Fatal(parseErr)
+	}
+
+	s.SetMeta(ctx, metaUnlockLockedUntil, "")
+	s.SetMeta(ctx, metaUnlockAttempts, "0")
+
+	for range maxUnlockAttempts {
+		wrongV.Unlock(ctx)
+	}
+
+	cycleStr, _ := s.GetMeta(ctx, metaUnlockCycle)
+	if cycleStr != "2" {
+		t.Fatalf("unlock_cycle = %q after 2 full cycles, want %q", cycleStr, "2")
+	}
+
+	lockedUntil2, _ := s.GetMeta(ctx, metaUnlockLockedUntil)
+	if lockedUntil2 == "" {
+		t.Fatal("expected lock after second cycle")
+	}
+	ts2, parseErr := time.Parse(time.RFC3339, lockedUntil2)
+	if parseErr != nil {
+		t.Fatal(parseErr)
+	}
+
+	duration1 := ts1.Sub(time.Now().Add(-500 * time.Millisecond))
+	duration2 := ts2.Sub(time.Now().Add(-500 * time.Millisecond))
+	if duration2 <= duration1 {
+		t.Fatalf("second lock duration (%v) should exceed first (%v)", duration2, duration1)
+	}
+}
+
+func TestUnlock_SuccessResetsState(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "vault.db")
+	enc := crypto.NewAESGCM()
+
+	rightKey, err := enc.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rightKp := &testKeyProvider{enc: enc, key: rightKey}
+
+	ctx := context.Background()
+	if err = InitVault(ctx, dbPath, enc, rightKp, InitOptions{SkipKeychain: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := store.NewSQLite(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rightV := New(enc, rightKp, s)
+	if err = rightV.Unlock(ctx); err != nil {
+		t.Fatalf("initial unlock: %v", err)
+	}
+	rightV.SetSecret(ctx, "TEST", []byte("verify"), nil)
+	rightV.key = nil
+
+	wrongKey, _ := enc.GenerateKey()
+	wrongKey[0] ^= 0xFF
+	wrongKp := &testKeyProvider{enc: enc, key: wrongKey}
+	wrongV := New(enc, wrongKp, s)
+
+	for range 5 {
+		wrongV.Unlock(ctx)
+	}
+
+	attemptsBefore, _ := s.GetMeta(ctx, metaUnlockAttempts)
+	if attemptsBefore == "0" {
+		t.Fatal("expected non-zero attempts before successful unlock")
+	}
+
+	s2, err := store.NewSQLite(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+
+	rightV2 := New(enc, rightKp, s2)
+	defer rightV2.Close()
+
+	err = rightV2.Unlock(ctx)
+	if err != nil {
+		t.Fatalf("Unlock with correct key: %v", err)
+	}
+
+	attempts, _ := s2.GetMeta(ctx, metaUnlockAttempts)
+	if attempts != "0" {
+		t.Fatalf("unlock_attempts = %q after successful unlock, want %q", attempts, "0")
+	}
+
+	lockedUntil, _ := s2.GetMeta(ctx, metaUnlockLockedUntil)
+	if lockedUntil != "" {
+		t.Fatalf("unlock_locked_until = %q after successful unlock, want empty", lockedUntil)
+	}
+
+	cycle, _ := s2.GetMeta(ctx, metaUnlockCycle)
+	if cycle != "0" {
+		t.Fatalf("unlock_cycle = %q after successful unlock, want %q", cycle, "0")
+	}
+}
+
+func TestUnlock_LockedVaultReturnsTimestamp(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "vault.db")
+	s, err := store.NewSQLite(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.InitSchema()
+	ctx := context.Background()
+
+	enc := crypto.NewAESGCM()
+	rightKey, _ := enc.GenerateKey()
+	rightKp := &testKeyProvider{enc: enc, key: rightKey}
+
+	v := New(enc, rightKp, s)
+	v.key = rightKey
+	v.SetSecret(ctx, "TEST", []byte("verify"), nil)
+	v.key = nil
+
+	wrongKey, _ := enc.GenerateKey()
+	wrongKey[0] ^= 0xFF
+	wrongKp := &testKeyProvider{enc: enc, key: wrongKey}
+
+	wrongV := New(enc, wrongKp, s)
+	defer wrongV.Close()
+
+	for range maxUnlockAttempts {
+		wrongV.Unlock(ctx)
+	}
+
+	lockedUntil, _ := s.GetMeta(ctx, metaUnlockLockedUntil)
+	if lockedUntil == "" {
+		t.Fatal("expected locked_until to be set after max failed attempts")
+	}
+	if _, parseErr := time.Parse(time.RFC3339, lockedUntil); parseErr != nil {
+		t.Fatalf("invalid locked_until timestamp: %v", parseErr)
+	}
+
+	s.SetMeta(ctx, metaUnlockLockedUntil, time.Now().Add(1*time.Hour).Format(time.RFC3339))
+
+	err = wrongV.Unlock(ctx)
+	if err == nil {
+		t.Fatal("should be locked")
+	}
+	if !strings.Contains(err.Error(), "locked until") {
+		t.Fatalf("expected 'locked until' in error, got: %v", err)
+	}
+}
+
+func TestRemoveTag_NonExistentTag(t *testing.T) {
+	v := setupTestVault(t)
+	defer v.Close()
+	ctx := context.Background()
+
+	v.SetSecret(ctx, "KEY", []byte("val"), []string{"aws", "prod"})
+
+	err := v.RemoveTag(ctx, "KEY", "nonexistent")
+	if err != nil {
+		t.Fatalf("removing non-existent tag should not error: %v", err)
+	}
+
+	sec, _ := v.GetSecret(ctx, "KEY")
+	if len(sec.Tags) != 2 {
+		t.Fatalf("tags = %v, want 2 tags unchanged", sec.Tags)
+	}
+}
+
+func TestGetSecretsByTags_MultipleOR(t *testing.T) {
+	v := setupTestVault(t)
+	defer v.Close()
+	ctx := context.Background()
+
+	v.SetSecret(ctx, "A", []byte("val_a"), []string{"aws"})
+	v.SetSecret(ctx, "B", []byte("val_b"), []string{"stripe"})
+	v.SetSecret(ctx, "C", []byte("val_c"), []string{"prod"})
+	v.SetSecret(ctx, "D", []byte("val_d"), []string{"gcp"})
+
+	result, err := v.GetSecretsByTags(ctx, []string{"aws", "stripe"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result) != 2 {
+		t.Fatalf("expected 2 results for OR filter, got %d", len(result))
+	}
+
+	names := make(map[string]bool)
+	for _, r := range result {
+		names[r.Name] = true
+	}
+	if !names["A"] || !names["B"] {
+		t.Fatalf("expected A and B, got %v", names)
+	}
+}
+
+func TestGetSecretsByTags_NoMatches(t *testing.T) {
+	v := setupTestVault(t)
+	defer v.Close()
+	ctx := context.Background()
+
+	v.SetSecret(ctx, "A", []byte("val_a"), []string{"aws"})
+	v.SetSecret(ctx, "B", []byte("val_b"), []string{"stripe"})
+
+	result, err := v.GetSecretsByTags(ctx, []string{"nonexistent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result) != 0 {
+		t.Fatalf("expected 0 results, got %d", len(result))
+	}
+}
+
+func TestTagsPreservedAfterRollback(t *testing.T) {
+	v := setupTestVault(t)
+	defer v.Close()
+	ctx := context.Background()
+
+	v.SetSecret(ctx, "KEY", []byte("v1"), []string{"aws", "prod"})
+	v.SetSecret(ctx, "KEY", []byte("v2"), []string{"stripe"})
+
+	err := v.Rollback(ctx, "KEY", 1)
+	if err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+
+	sec, err := v.GetSecret(ctx, "KEY")
+	if err != nil {
+		t.Fatalf("GetSecret: %v", err)
+	}
+	if string(sec.Value) != "v1" {
+		t.Fatalf("value = %q, want %q", string(sec.Value), "v1")
+	}
+	if len(sec.Tags) != 2 {
+		t.Fatalf("tags after rollback = %v, want 2 tags", sec.Tags)
+	}
+	tagSet := make(map[string]bool)
+	for _, tag := range sec.Tags {
+		tagSet[tag] = true
+	}
+	if !tagSet["aws"] || !tagSet["prod"] {
+		t.Fatalf("expected aws+prod tags, got %v", sec.Tags)
 	}
 }
 
