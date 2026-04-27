@@ -416,3 +416,66 @@ func TestMaskSecretsBytes_Empty(t *testing.T) {
 		t.Fatal("empty secrets should not change data")
 	}
 }
+
+func TestMaskSecretsBytes_SubstringOfRedacted(t *testing.T) {
+	secrets := [][]byte{[]byte("secret-value"), []byte("ACT")}
+	data := []byte("key=secret-value")
+	result := MaskSecretsBytes(data, secrets)
+	if string(result) != "key=[REDACTED]" {
+		t.Fatalf("expected clean masking, got: %q", result)
+	}
+}
+
+func TestMaskSecretsBytes_RedactedItself(t *testing.T) {
+	secrets := [][]byte{[]byte("REDACTED")}
+	data := []byte("data=REDACTED")
+	result := MaskSecretsBytes(data, secrets)
+	if string(result) != "data=[REDACTED]" {
+		t.Fatalf("expected clean masking, got: %q", result)
+	}
+}
+
+func TestMaskSecrets_MultipleOverlapping(t *testing.T) {
+	secrets := []string{"sk-long-api-key-123", "sk-long-api-key"}
+	text := "key=sk-long-api-key-123"
+	result := MaskSecrets(text, secrets)
+	if result != "key=[REDACTED]" {
+		t.Fatalf("expected clean masking, got: %q", result)
+	}
+}
+
+func TestBuildEnv_InvalidNames(t *testing.T) {
+	secrets := map[string][]byte{
+		"VALID_KEY":  []byte("good"),
+		"bad=key":    []byte("injected"),
+		"lowercase":  []byte("bad"),
+		"NEW\nLINE":  []byte("injected"),
+		"123START":   []byte("bad"),
+	}
+	env := buildEnv(secrets)
+
+	for _, e := range env {
+		if strings.HasPrefix(e, "bad=") {
+			t.Fatal("name with '=' should be skipped")
+		}
+		if strings.HasPrefix(e, "lowercase=") {
+			t.Fatal("lowercase name should be skipped")
+		}
+		if strings.Contains(e, "NEW") {
+			t.Fatal("name with newline should be skipped")
+		}
+		if strings.HasPrefix(e, "123") {
+			t.Fatal("name starting with digit should be skipped")
+		}
+	}
+
+	hasValid := false
+	for _, e := range env {
+		if strings.HasPrefix(e, "VALID_KEY=good") {
+			hasValid = true
+		}
+	}
+	if !hasValid {
+		t.Fatal("VALID_KEY should be present")
+	}
+}

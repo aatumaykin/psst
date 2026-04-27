@@ -8,12 +8,15 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
 )
 
 const gracefulShutdownDelay = 5 * time.Second
+
+var validEnvName = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 
 type ExecOptions struct {
 	MaskOutput bool
@@ -43,6 +46,10 @@ func (r *Runner) Exec(secrets map[string][]byte, command string, args []string, 
 	env := buildEnv(secrets)
 
 	command = ExpandEnvVars(command, secrets)
+
+	// SECURITY NOTE: expanded args are visible in /proc/PID/cmdline on Linux.
+	// Prefer passing secrets through environment variables ($KEY in subprocess)
+	// rather than expanding them into command arguments.
 
 	expandedArgs := make([]string, len(args))
 	for i, a := range args {
@@ -159,6 +166,9 @@ func streamWithMasking(src io.Reader, dst io.Writer, secrets [][]byte) {
 func buildEnv(secrets map[string][]byte) []string {
 	env := os.Environ()
 	for k, v := range secrets {
+		if !validEnvName.MatchString(k) {
+			continue
+		}
 		env = append(env, fmt.Sprintf("%s=%s", k, string(v)))
 	}
 	var filtered []string
