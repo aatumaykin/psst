@@ -10,3 +10,11 @@ dist/
 *.key
 *.secret
 *.token
+*.exe
+*.dll
+*.so
+coverage.out
+coverage.html
+.idea/
+.vscode/
+*.log
