@@ -49,16 +49,18 @@ func Execute() error {
 
 		if len(commandArgs) > 0 && (len(secretNames) > 0 || len(tags) > 0) {
 			noMask := containsFlag(args, "--no-mask")
+			expandArgs := containsFlag(args, "--expand-args")
 			err := handleExecPatternDirect(
 				context.Background(),
 				secretNames, commandArgs,
 				ExecConfig{
-					JSONOut: jsonOut,
-					Quiet:   quiet,
-					Global:  global,
-					Env:     env,
-					Tags:    tags,
-					NoMask:  noMask,
+					JSONOut:    jsonOut,
+					Quiet:      quiet,
+					Global:     global,
+					Env:        env,
+					Tags:       tags,
+					NoMask:     noMask,
+					ExpandArgs: expandArgs,
 				},
 			)
 			var exitErr *exitError

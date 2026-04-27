@@ -139,9 +139,7 @@ func (f *Formatter) EnvList(secrets map[string]string) {
 		f.PrintJSON(secrets)
 		return
 	}
-	for name, value := range secrets {
-		fmt.Fprintf(f.stdout, "%s=%s\n", name, quoteValue(value))
-	}
+	f.EnvListWriter(secrets, f.stdout)
 }
 
 func (f *Formatter) EnvListWriter(secrets map[string]string, w io.Writer) {

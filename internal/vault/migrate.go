@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"strconv"
 
@@ -12,12 +11,11 @@ import (
 )
 
 func (v *Vault) MigrateKDF(ctx context.Context) error {
-	v.mu.RLock()
-	key := v.key
-	v.mu.RUnlock()
-	if key == nil {
-		return errors.New("vault is locked")
+	key, err := v.copyKey()
+	if err != nil {
+		return err
 	}
+	defer crypto.ZeroBytes(key)
 
 	all, err := v.store.GetAllSecrets(ctx)
 	if err != nil {

@@ -45,6 +45,10 @@ func NewSQLite(dbPath string) (*SQLiteStore, error) {
 		}
 		return nil, fmt.Errorf("vault integrity check failed: %s", integrity)
 	}
+	if _, pragmaErr := db.ExecContext(ctx, "PRAGMA secure_delete = ON"); pragmaErr != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("enable secure_delete: %w", pragmaErr)
+	}
 	return &SQLiteStore{db: db, dbPath: dbPath}, nil
 }
 
@@ -103,17 +107,20 @@ func (s *SQLiteStore) InitSchema() error {
 	if err := initSchema(s.db); err != nil {
 		return err
 	}
-	s.ensureFilePermissions()
-	return nil
+	return s.ensureFilePermissions()
 }
 
-func (s *SQLiteStore) ensureFilePermissions() {
+func (s *SQLiteStore) ensureFilePermissions() error {
 	if s.dbPath == "" {
-		return
+		return nil
 	}
-	_ = os.Chmod(s.dbPath, 0600)
-	_ = os.Chmod(s.dbPath+"-wal", 0600)
-	_ = os.Chmod(s.dbPath+"-shm", 0600)
+	var firstErr error
+	for _, p := range []string{s.dbPath, s.dbPath + "-wal", s.dbPath + "-shm"} {
+		if chErr := os.Chmod(p, 0600); chErr != nil && !os.IsNotExist(chErr) && firstErr == nil {
+			firstErr = fmt.Errorf("chmod %s: %w", p, chErr)
+		}
+	}
+	return firstErr
 }
 
 func (s *SQLiteStore) GetSecret(ctx context.Context, name string) (*StoredSecret, error) {
@@ -301,6 +308,8 @@ func (s *SQLiteStore) PruneHistory(ctx context.Context, name string, keepVersion
 }
 
 func (s *SQLiteStore) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.db.Close()
 }
 
@@ -316,15 +325,16 @@ func (s *SQLiteStore) ExecTx(fn func() error) error {
 	}
 
 	s.currentTx.Store(tx)
-	defer func() {
-		s.currentTx.Store(nil)
-		_ = tx.Rollback()
-	}()
+	defer s.currentTx.Store(nil)
 
 	if fnErr := fn(); fnErr != nil {
+		_ = tx.Rollback()
 		return fnErr
 	}
-	return tx.Commit()
+	if commitErr := tx.Commit(); commitErr != nil {
+		return commitErr
+	}
+	return nil
 }
 
 func (s *SQLiteStore) GetMeta(ctx context.Context, key string) (string, error) {
@@ -354,6 +364,9 @@ func (s *SQLiteStore) IncrementMetaInt(ctx context.Context, key string, incremen
 	if err != nil {
 		return 0, err
 	}
-	n, _ := strconv.Atoi(val)
+	n, atoiErr := strconv.Atoi(val)
+	if atoiErr != nil {
+		return 0, fmt.Errorf("increment meta %q: invalid integer %q: %w", key, val, atoiErr)
+	}
 	return n, nil
 }

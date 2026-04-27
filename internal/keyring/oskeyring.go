@@ -19,6 +19,8 @@ func (o *OSKeyring) GetRawKey(service, account string) (string, error) {
 		return encoded, nil
 	}
 	if pw := os.Getenv("PSST_PASSWORD"); pw != "" {
+		fmt.Fprintln(os.Stderr, "Warning: OS keychain unavailable, falling back to PSST_PASSWORD env var")
+		os.Unsetenv("PSST_PASSWORD")
 		return pw, nil
 	}
 	return "", fmt.Errorf("keychain unavailable and PSST_PASSWORD not set: %w", err)

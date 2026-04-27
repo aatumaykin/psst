@@ -10,49 +10,48 @@ import (
 )
 
 func (v *Vault) SetSecret(ctx context.Context, name string, value []byte, tags []string) error {
-	v.mu.RLock()
-	key := v.key
-	v.mu.RUnlock()
-	if key == nil {
-		return errors.New("vault is locked")
-	}
-
-	if err := ValidateSecretName(name); err != nil {
+	key, err := v.copyKey()
+	if err != nil {
 		return err
+	}
+	defer crypto.ZeroBytes(key)
+
+	if validErr := ValidateSecretName(name); validErr != nil {
+		return validErr
 	}
 	if len(value) > maxSecretValueLen {
 		return fmt.Errorf("secret value too long: max %d bytes", maxSecretValueLen)
 	}
-	if err := ValidateTags(tags); err != nil {
-		return err
+	if tagErr := ValidateTags(tags); tagErr != nil {
+		return tagErr
 	}
 
 	return v.store.ExecTx(func() error {
-		existing, err := v.store.GetSecret(ctx, name)
-		if err != nil {
-			return fmt.Errorf("get existing secret: %w", err)
+		existing, getErr := v.store.GetSecret(ctx, name)
+		if getErr != nil {
+			return fmt.Errorf("get existing secret: %w", getErr)
 		}
 		if existing != nil {
 			var history []store.HistoryEntry
-			history, err = v.store.GetHistory(ctx, name)
-			if err != nil {
-				return fmt.Errorf("get history: %w", err)
+			history, histErr := v.store.GetHistory(ctx, name)
+			if histErr != nil {
+				return fmt.Errorf("get history: %w", histErr)
 			}
 			version := maxVersion(history) + 1
-			if err = v.store.AddHistory(ctx,
+			if addErr := v.store.AddHistory(ctx,
 				name, version,
 				existing.EncryptedValue, existing.IV, existing.Tags,
-			); err != nil {
-				return fmt.Errorf("archive history: %w", err)
+			); addErr != nil {
+				return fmt.Errorf("archive history: %w", addErr)
 			}
-			if err = v.store.PruneHistory(ctx, name, maxHistory); err != nil {
-				return fmt.Errorf("prune history: %w", err)
+			if pruneErr := v.store.PruneHistory(ctx, name, maxHistory); pruneErr != nil {
+				return fmt.Errorf("prune history: %w", pruneErr)
 			}
 		}
 
-		ciphertext, iv, err := v.enc.Encrypt(value, key)
-		if err != nil {
-			return fmt.Errorf("encrypt: %w", err)
+		ciphertext, iv, encErr := v.enc.Encrypt(value, key)
+		if encErr != nil {
+			return fmt.Errorf("encrypt: %w", encErr)
 		}
 
 		return v.store.SetSecret(ctx, name, ciphertext, iv, tags)
@@ -62,11 +61,9 @@ func (v *Vault) SetSecret(ctx context.Context, name string, value []byte, tags [
 var ErrSecretNotFound = errors.New("secret not found")
 
 func (v *Vault) GetSecret(ctx context.Context, name string) (*Secret, error) {
-	v.mu.RLock()
-	key := v.key
-	v.mu.RUnlock()
-	if key == nil {
-		return nil, errors.New("vault is locked")
+	key, err := v.copyKey()
+	if err != nil {
+		return nil, err
 	}
 
 	stored, err := v.store.GetSecret(ctx, name)
@@ -124,11 +121,9 @@ func (v *Vault) DeleteSecret(ctx context.Context, name string) error {
 }
 
 func (v *Vault) GetAllSecrets(ctx context.Context) (map[string][]byte, error) {
-	v.mu.RLock()
-	key := v.key
-	v.mu.RUnlock()
-	if key == nil {
-		return nil, errors.New("vault is locked")
+	key, err := v.copyKey()
+	if err != nil {
+		return nil, err
 	}
 
 	all, err := v.store.GetAllSecrets(ctx)

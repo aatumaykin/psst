@@ -18,6 +18,9 @@ var runCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		_, _, _, _, tags := getGlobalFlags(cmd)
 		noMask, _ := cmd.Flags().GetBool("no-mask")
+		if noMask {
+			fmt.Fprintln(os.Stderr, "Warning: output masking is disabled, secrets may appear in output")
+		}
 
 		return withVault(cmd, func(v vault.Interface, _ *output.Formatter) error {
 			var secrets map[string][]byte

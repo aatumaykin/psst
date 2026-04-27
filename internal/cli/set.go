@@ -46,7 +46,10 @@ var setCmd = &cobra.Command{
 				}
 			} else {
 				reader := bufio.NewReader(os.Stdin)
-				line, _ := reader.ReadString('\n')
+				line, readErr := reader.ReadString('\n')
+				if readErr != nil {
+					return exitWithError(fmt.Sprintf("Failed to read input: %v", readErr))
+				}
 				value = strings.TrimSpace(line)
 			}
 		}

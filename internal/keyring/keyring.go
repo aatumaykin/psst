@@ -7,7 +7,6 @@ import (
 // KeyDeriver derives encryption keys from passwords.
 type KeyDeriver interface {
 	KeyToBuffer(key string) ([]byte, error)
-	KeyToBufferV2(key string) ([]byte, error)
 	GenerateKey() ([]byte, error)
 }
 

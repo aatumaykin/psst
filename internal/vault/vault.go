@@ -56,9 +56,9 @@ func Open(vaultPath string) (*Vault, error) {
 
 func (v *Vault) Close() error {
 	v.mu.Lock()
+	defer v.mu.Unlock()
 	crypto.ZeroBytes(v.key)
 	v.key = nil
-	v.mu.Unlock()
 	return v.store.Close()
 }
 
@@ -70,4 +70,15 @@ func (v *Vault) requireUnlock() error {
 		return errors.New("vault is locked: unlock required")
 	}
 	return nil
+}
+
+func (v *Vault) copyKey() ([]byte, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	if v.key == nil {
+		return nil, errors.New("vault is locked")
+	}
+	key := make([]byte, len(v.key))
+	copy(key, v.key)
+	return key, nil
 }

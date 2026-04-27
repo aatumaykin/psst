@@ -22,8 +22,8 @@ var exportCmd = &cobra.Command{
 			}
 
 			strSecrets := make(map[string]string, len(secrets))
-			for k, v := range secrets {
-				strSecrets[k] = string(v)
+			for name, val := range secrets {
+				strSecrets[name] = string(val)
 			}
 
 			if envFile != "" {

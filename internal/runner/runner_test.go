@@ -444,6 +444,97 @@ func TestMaskSecrets_MultipleOverlapping(t *testing.T) {
 	}
 }
 
+func TestMaskSecretsBytes_NullBytes(t *testing.T) {
+	secrets := [][]byte{[]byte("hello\x00world")}
+	data := []byte("data=hello\x00world")
+	result := MaskSecretsBytes(data, secrets)
+	if bytes.Contains(result, []byte("hello\x00world")) {
+		t.Fatal("secret with null bytes should be masked")
+	}
+	if !bytes.Contains(result, []byte("[REDACTED]")) {
+		t.Fatal("should contain [REDACTED]")
+	}
+}
+
+func TestMaskSecretsBytes_SingleByte(t *testing.T) {
+	secrets := [][]byte{[]byte("X")}
+	data := []byte("XOXO")
+	result := MaskSecretsBytes(data, secrets)
+	if bytes.Contains(result, []byte("X")) {
+		t.Fatal("single-byte secret should be masked")
+	}
+	count := bytes.Count(result, []byte("[REDACTED]"))
+	if count != 2 {
+		t.Fatalf("expected 2 [REDACTED] for XOXO, got %d", count)
+	}
+}
+
+func TestMaskSecretsBytes_NilSecrets(t *testing.T) {
+	data := []byte("hello world")
+	result := MaskSecretsBytes(data, nil)
+	if string(result) != string(data) {
+		t.Fatal("nil secrets should not change data")
+	}
+}
+
+func TestMaskSecretsBytes_EmptySlice(t *testing.T) {
+	data := []byte("hello world")
+	result := MaskSecretsBytes(data, [][]byte{})
+	if string(result) != string(data) {
+		t.Fatal("empty secrets slice should not change data")
+	}
+}
+
+func TestMaskSecretsBytes_OverlappingSecrets(t *testing.T) {
+	secrets := [][]byte{[]byte("ABC"), []byte("AB")}
+	data := []byte("ABC")
+	result := MaskSecretsBytes(data, secrets)
+	if string(result) != "[REDACTED]" {
+		t.Fatalf("expected single [REDACTED] for overlapping, got: %q", result)
+	}
+}
+
+func TestMaskSecretsBytes_SecretEqualsRedacted(t *testing.T) {
+	secrets := [][]byte{[]byte("[REDACTED]")}
+	data := []byte("data=[REDACTED]")
+	result := MaskSecretsBytes(data, secrets)
+	if bytes.Count(result, []byte("[REDACTED]")) != 1 {
+		t.Fatalf("expected exactly 1 [REDACTED], got: %q", result)
+	}
+}
+
+func TestExpandEnvVars_BraceConcatenation(t *testing.T) {
+	env := map[string][]byte{"KEY": []byte("val")}
+	got := ExpandEnvVars("${KEY}text", env)
+	if got != "valtext" {
+		t.Fatalf("expected %q, got %q", "valtext", got)
+	}
+}
+
+func TestExpandEnvVars_WordBoundaryDigits(t *testing.T) {
+	env := map[string][]byte{"KEY": []byte("val")}
+	got := ExpandEnvVars("$KEY123", env)
+	if got != "$KEY123" {
+		t.Fatalf("expected $KEY123 unchanged, got %q", got)
+	}
+}
+
+func TestExpandEnvVars_DollarAtEnd(t *testing.T) {
+	env := map[string][]byte{"KEY": []byte("val")}
+	got := ExpandEnvVars("text$", env)
+	if got != "text$" {
+		t.Fatalf("expected %q, got %q", "text$", got)
+	}
+}
+
+func TestExpandEnvVars_MultipleDollarSigns(t *testing.T) {
+	env := map[string][]byte{"A": []byte("1"), "B": []byte("2")}
+	got := ExpandEnvVars("$$A$$B", env)
+	if got != "$1$2" {
+		t.Fatalf("expected %q, got %q", "$1$2", got)
+	}
+}
+
 func TestBuildEnv_InvalidNames(t *testing.T) {
 	secrets := map[string][]byte{
 		"VALID_KEY": []byte("good"),
