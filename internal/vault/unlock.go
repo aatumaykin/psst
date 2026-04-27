@@ -61,15 +61,11 @@ func (v *Vault) Unlock(ctx context.Context) error {
 		return fmt.Errorf("derive key: %w", err)
 	}
 
-	all, verifyErr := v.store.GetAllSecrets(ctx)
-	if verifyErr != nil {
-		return fmt.Errorf("verify vault: %w", verifyErr)
-	}
+	verified := false
 
 	verifyIV, ivErr := v.store.GetMeta(ctx, "verify_iv")
 	verifyData, dataErr := v.store.GetMeta(ctx, "verify_data")
 
-	verified := false
 	if ivErr == nil && dataErr == nil && verifyIV != "" && verifyData != "" {
 		ivBytes, ivDecodeErr := base64.StdEncoding.DecodeString(verifyIV)
 		if ivDecodeErr != nil {
@@ -83,11 +79,17 @@ func (v *Vault) Unlock(ctx context.Context) error {
 			return v.failUnlock(ctx, key)
 		}
 		verified = true
-	} else if len(all) > 0 {
-		if _, decErr := v.enc.Decrypt(all[0].EncryptedValue, all[0].IV, key); decErr != nil {
-			return v.failUnlock(ctx, key)
+	} else {
+		all, verifyErr := v.store.GetAllSecrets(ctx)
+		if verifyErr != nil {
+			return fmt.Errorf("verify vault: %w", verifyErr)
 		}
-		verified = true
+		if len(all) > 0 {
+			if _, decErr := v.enc.Decrypt(all[0].EncryptedValue, all[0].IV, key); decErr != nil {
+				return v.failUnlock(ctx, key)
+			}
+			verified = true
+		}
 	}
 
 	v.mu.Lock()
@@ -104,7 +106,10 @@ func (v *Vault) Unlock(ctx context.Context) error {
 
 func (v *Vault) failUnlock(ctx context.Context, key []byte) error {
 	crypto.ZeroBytes(key)
-	attempts, _ := v.store.IncrementMetaInt(ctx, metaUnlockAttempts, 1)
+	attempts, incErr := v.store.IncrementMetaInt(ctx, metaUnlockAttempts, 1)
+	if incErr != nil {
+		return fmt.Errorf("authentication failed (rate-limit write error: %w)", incErr)
+	}
 	if attempts >= maxUnlockAttempts {
 		cycle := 0
 		if cycleStr, cycleErr := v.store.GetMeta(ctx, metaUnlockCycle); cycleErr == nil {
@@ -118,7 +123,9 @@ func (v *Vault) failUnlock(ctx context.Context, key []byte) error {
 			maxLockDuration,
 		)
 		lockedUntil := time.Now().Add(lockDuration)
-		_ = v.store.SetMeta(ctx, metaUnlockLockedUntil, lockedUntil.Format(time.RFC3339))
+		if metaErr := v.store.SetMeta(ctx, metaUnlockLockedUntil, lockedUntil.Format(time.RFC3339)); metaErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to persist lock state: %v\n", metaErr)
+		}
 		_ = v.store.SetMeta(ctx, metaUnlockAttempts, "0")
 		_ = v.store.SetMeta(ctx, metaUnlockCycle, strconv.Itoa(cycle+1))
 	}
