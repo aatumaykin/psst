@@ -744,6 +744,107 @@ func TestReadKDFVersion_RejectsUnknownVersion(t *testing.T) {
 	}
 }
 
+func TestRollback_AtomicOperation(t *testing.T) {
+	v := setupTestVault(t)
+	defer v.Close()
+	ctx := context.Background()
+
+	v.SetSecret(ctx, "KEY", []byte("v1"), nil)
+	v.SetSecret(ctx, "KEY", []byte("v2"), nil)
+
+	err := v.Rollback(ctx, "KEY", 1)
+	if err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+
+	sec, err := v.GetSecret(ctx, "KEY")
+	if err != nil {
+		t.Fatalf("GetSecret: %v", err)
+	}
+	if string(sec.Value) != "v1" {
+		t.Fatalf("after rollback value = %q, want %q", string(sec.Value), "v1")
+	}
+}
+
+func TestExponentialLockout(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "vault.db")
+	s, err := store.NewSQLite(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.InitSchema()
+	ctx := context.Background()
+
+	enc := crypto.NewAESGCM()
+	rightKey, _ := enc.GenerateKey()
+	rightKp := &testKeyProvider{enc: enc, key: rightKey}
+
+	v := New(enc, rightKp, s)
+	v.key = rightKey
+	v.SetSecret(ctx, "TEST", []byte("verify"), nil)
+	v.key = nil
+
+	wrongKey, _ := enc.GenerateKey()
+	wrongKey[0] ^= 0xFF
+	wrongKp := &testKeyProvider{enc: enc, key: wrongKey}
+
+	wrongV := New(enc, wrongKp, s)
+	defer wrongV.Close()
+
+	for range maxUnlockAttempts {
+		wrongV.Unlock(ctx)
+	}
+
+	err = wrongV.Unlock(ctx)
+	if err == nil {
+		t.Fatal("should be locked after max failed attempts")
+	}
+
+	cycleStr, err := s.GetMeta(ctx, metaUnlockCycle)
+	if err != nil {
+		t.Fatalf("GetMeta unlock_cycle: %v", err)
+	}
+	if cycleStr != "1" {
+		t.Fatalf("unlock_cycle = %q, want %q", cycleStr, "1")
+	}
+}
+
+func TestAddTag_IsTransactional(t *testing.T) {
+	v := setupTestVault(t)
+	defer v.Close()
+	ctx := context.Background()
+
+	v.SetSecret(ctx, "KEY", []byte("val"), nil)
+
+	if err := v.AddTag(ctx, "KEY", "aws"); err != nil {
+		t.Fatalf("AddTag: %v", err)
+	}
+	if err := v.AddTag(ctx, "KEY", "prod"); err != nil {
+		t.Fatalf("AddTag: %v", err)
+	}
+
+	sec, err := v.GetSecret(ctx, "KEY")
+	if err != nil {
+		t.Fatalf("GetSecret: %v", err)
+	}
+	if len(sec.Tags) != 2 {
+		t.Fatalf("tags = %v, want 2 tags", sec.Tags)
+	}
+	if string(sec.Value) != "val" {
+		t.Fatalf("value changed after AddTag: %q", string(sec.Value))
+	}
+
+	if err := v.AddTag(ctx, "KEY", "aws"); err != nil {
+		t.Fatalf("duplicate AddTag: %v", err)
+	}
+
+	sec, _ = v.GetSecret(ctx, "KEY")
+	if len(sec.Tags) != 2 {
+		t.Fatalf("duplicate AddTag should be idempotent, tags = %v", sec.Tags)
+	}
+}
+
 func TestReadKDFVersion_RejectsCorruptedVersion(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "vault.db")

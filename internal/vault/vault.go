@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/aatumaykin/psst/internal/crypto"
@@ -20,6 +21,7 @@ import (
 )
 
 type Vault struct {
+	mu    sync.RWMutex
 	enc   crypto.Encryptor
 	kp    keyring.KeyProvider
 	store store.SecretStore
@@ -36,8 +38,10 @@ const (
 
 	maxUnlockAttempts     = 10
 	unlockDelayBaseMs     = 500
+	maxLockDuration       = 5 * time.Minute
 	metaUnlockAttempts    = "unlock_attempts"
 	metaUnlockLockedUntil = "unlock_locked_until"
+	metaUnlockCycle       = "unlock_cycle"
 )
 
 var secretNameRegex = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
@@ -178,12 +182,16 @@ func (v *Vault) Unlock(ctx context.Context) error {
 		return fmt.Errorf("derive key: %w", err)
 	}
 
+	v.mu.Lock()
 	v.key = key
+	v.mu.Unlock()
 
 	all, verifyErr := v.store.GetAllSecrets(ctx)
 	if verifyErr != nil {
+		v.mu.Lock()
 		crypto.ZeroBytes(v.key)
 		v.key = nil
+		v.mu.Unlock()
 		return fmt.Errorf("verify vault: %w", verifyErr)
 	}
 
@@ -193,37 +201,66 @@ func (v *Vault) Unlock(ctx context.Context) error {
 	if ivErr == nil && dataErr == nil && verifyIV != "" && verifyData != "" {
 		ivBytes, _ := base64.StdEncoding.DecodeString(verifyIV)
 		dataBytes, _ := base64.StdEncoding.DecodeString(verifyData)
-		_, decErr := v.enc.Decrypt(dataBytes, ivBytes, v.key)
+		_, decErr := v.enc.Decrypt(dataBytes, ivBytes, key)
 		if decErr != nil {
 			attempts, _ := v.store.IncrementMetaInt(ctx, metaUnlockAttempts, 1)
 			if attempts >= maxUnlockAttempts {
-				lockDuration := time.Duration(attempts*unlockDelayBaseMs) * time.Millisecond
+				cycle := 0
+				cycleStr, cycleErr := v.store.GetMeta(ctx, metaUnlockCycle)
+				if cycleErr == nil {
+					if n, e := strconv.Atoi(cycleStr); e == nil {
+						cycle = n
+					}
+				}
+
+				lockDuration := time.Duration(unlockDelayBaseMs) * time.Millisecond * time.Duration(1<<uint(cycle))
+				if lockDuration > maxLockDuration {
+					lockDuration = maxLockDuration
+				}
 				lockedUntil := time.Now().Add(lockDuration)
 				_ = v.store.SetMeta(ctx, metaUnlockLockedUntil, lockedUntil.Format(time.RFC3339))
 				_ = v.store.SetMeta(ctx, metaUnlockAttempts, "0")
+				_ = v.store.SetMeta(ctx, metaUnlockCycle, strconv.Itoa(cycle+1))
 			}
+			v.mu.Lock()
 			crypto.ZeroBytes(v.key)
 			v.key = nil
+			v.mu.Unlock()
 			return errors.New("authentication failed")
 		}
 	} else if len(all) > 0 {
-		_, decErr := v.enc.Decrypt(all[0].EncryptedValue, all[0].IV, v.key)
+		_, decErr := v.enc.Decrypt(all[0].EncryptedValue, all[0].IV, key)
 		if decErr != nil {
 			attempts, _ := v.store.IncrementMetaInt(ctx, metaUnlockAttempts, 1)
 			if attempts >= maxUnlockAttempts {
-				lockDuration := time.Duration(attempts*unlockDelayBaseMs) * time.Millisecond
+				cycle := 0
+				cycleStr, cycleErr := v.store.GetMeta(ctx, metaUnlockCycle)
+				if cycleErr == nil {
+					if n, e := strconv.Atoi(cycleStr); e == nil {
+						cycle = n
+					}
+				}
+
+				lockDuration := time.Duration(unlockDelayBaseMs) * time.Millisecond * time.Duration(1<<uint(cycle))
+				if lockDuration > maxLockDuration {
+					lockDuration = maxLockDuration
+				}
 				lockedUntil := time.Now().Add(lockDuration)
 				_ = v.store.SetMeta(ctx, metaUnlockLockedUntil, lockedUntil.Format(time.RFC3339))
 				_ = v.store.SetMeta(ctx, metaUnlockAttempts, "0")
+				_ = v.store.SetMeta(ctx, metaUnlockCycle, strconv.Itoa(cycle+1))
 			}
+			v.mu.Lock()
 			crypto.ZeroBytes(v.key)
 			v.key = nil
+			v.mu.Unlock()
 			return errors.New("authentication failed")
 		}
 	}
 
 	_ = v.store.SetMeta(ctx, metaUnlockAttempts, "0")
 	_ = v.store.SetMeta(ctx, metaUnlockLockedUntil, "")
+	_ = v.store.SetMeta(ctx, metaUnlockCycle, "0")
 	return nil
 }
 
@@ -246,7 +283,10 @@ func (v *Vault) readKDFVersion(ctx context.Context) (int, error) {
 }
 
 func (v *Vault) SetSecret(ctx context.Context, name string, value []byte, tags []string) error {
-	if v.key == nil {
+	v.mu.RLock()
+	key := v.key
+	v.mu.RUnlock()
+	if key == nil {
 		return errors.New("vault is locked")
 	}
 
@@ -289,7 +329,7 @@ func (v *Vault) SetSecret(ctx context.Context, name string, value []byte, tags [
 			}
 		}
 
-		ciphertext, iv, err := v.enc.Encrypt(value, v.key)
+		ciphertext, iv, err := v.enc.Encrypt(value, key)
 		if err != nil {
 			return fmt.Errorf("encrypt: %w", err)
 		}
@@ -301,7 +341,10 @@ func (v *Vault) SetSecret(ctx context.Context, name string, value []byte, tags [
 var ErrSecretNotFound = errors.New("secret not found")
 
 func (v *Vault) GetSecret(ctx context.Context, name string) (*Secret, error) {
-	if v.key == nil {
+	v.mu.RLock()
+	key := v.key
+	v.mu.RUnlock()
+	if key == nil {
 		return nil, errors.New("vault is locked")
 	}
 
@@ -313,7 +356,7 @@ func (v *Vault) GetSecret(ctx context.Context, name string) (*Secret, error) {
 		return nil, ErrSecretNotFound
 	}
 
-	plaintext, err := v.enc.Decrypt(stored.EncryptedValue, stored.IV, v.key)
+	plaintext, err := v.enc.Decrypt(stored.EncryptedValue, stored.IV, key)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt: %w", err)
 	}
@@ -379,35 +422,35 @@ func (v *Vault) GetHistory(ctx context.Context, name string) ([]SecretHistoryEnt
 }
 
 func (v *Vault) Rollback(ctx context.Context, name string, version int) error {
-	if v.key == nil {
-		return errors.New("vault is locked")
-	}
-
-	current, err := v.store.GetSecret(ctx, name)
-	if err != nil {
+	if err := v.requireUnlock(); err != nil {
 		return err
-	}
-	if current == nil {
-		return fmt.Errorf("secret %q not found", name)
-	}
-
-	history, err := v.store.GetHistory(ctx, name)
-	if err != nil {
-		return err
-	}
-
-	var target *store.HistoryEntry
-	for i := range history {
-		if history[i].Version == version {
-			target = &history[i]
-			break
-		}
-	}
-	if target == nil {
-		return fmt.Errorf("version %d not found", version)
 	}
 
 	return v.store.ExecTx(func() error {
+		current, err := v.store.GetSecret(ctx, name)
+		if err != nil {
+			return err
+		}
+		if current == nil {
+			return fmt.Errorf("secret %q not found", name)
+		}
+
+		history, err := v.store.GetHistory(ctx, name)
+		if err != nil {
+			return err
+		}
+
+		var target *store.HistoryEntry
+		for i := range history {
+			if history[i].Version == version {
+				target = &history[i]
+				break
+			}
+		}
+		if target == nil {
+			return fmt.Errorf("version %d not found", version)
+		}
+
 		maxVersion := 0
 		for _, h := range history {
 			if h.Version > maxVersion {
@@ -436,41 +479,47 @@ func (v *Vault) AddTag(ctx context.Context, name string, tag string) error {
 	if err := v.requireUnlock(); err != nil {
 		return err
 	}
-	sec, err := v.store.GetSecret(ctx, name)
-	if err != nil {
-		return err
-	}
-	if sec == nil {
-		return fmt.Errorf("secret %q not found", name)
-	}
 
-	if slices.Contains(sec.Tags, tag) {
-		return nil
-	}
-	sec.Tags = append(sec.Tags, tag)
-	return v.store.SetSecret(ctx, name, sec.EncryptedValue, sec.IV, sec.Tags)
+	return v.store.ExecTx(func() error {
+		sec, err := v.store.GetSecret(ctx, name)
+		if err != nil {
+			return err
+		}
+		if sec == nil {
+			return fmt.Errorf("secret %q not found", name)
+		}
+
+		if slices.Contains(sec.Tags, tag) {
+			return nil
+		}
+		sec.Tags = append(sec.Tags, tag)
+		return v.store.SetSecret(ctx, name, sec.EncryptedValue, sec.IV, sec.Tags)
+	})
 }
 
 func (v *Vault) RemoveTag(ctx context.Context, name string, tag string) error {
 	if err := v.requireUnlock(); err != nil {
 		return err
 	}
-	sec, err := v.store.GetSecret(ctx, name)
-	if err != nil {
-		return err
-	}
-	if sec == nil {
-		return fmt.Errorf("secret %q not found", name)
-	}
 
-	filtered := make([]string, 0, len(sec.Tags))
-	for _, t := range sec.Tags {
-		if t != tag {
-			filtered = append(filtered, t)
+	return v.store.ExecTx(func() error {
+		sec, err := v.store.GetSecret(ctx, name)
+		if err != nil {
+			return err
 		}
-	}
-	sec.Tags = filtered
-	return v.store.SetSecret(ctx, name, sec.EncryptedValue, sec.IV, sec.Tags)
+		if sec == nil {
+			return fmt.Errorf("secret %q not found", name)
+		}
+
+		filtered := make([]string, 0, len(sec.Tags))
+		for _, t := range sec.Tags {
+			if t != tag {
+				filtered = append(filtered, t)
+			}
+		}
+		sec.Tags = filtered
+		return v.store.SetSecret(ctx, name, sec.EncryptedValue, sec.IV, sec.Tags)
+	})
 }
 
 func (v *Vault) GetSecretsByTags(ctx context.Context, tags []string) ([]SecretMeta, error) {
@@ -496,7 +545,10 @@ func (v *Vault) GetSecretsByTags(ctx context.Context, tags []string) ([]SecretMe
 }
 
 func (v *Vault) GetAllSecrets(ctx context.Context) (map[string][]byte, error) {
-	if v.key == nil {
+	v.mu.RLock()
+	key := v.key
+	v.mu.RUnlock()
+	if key == nil {
 		return nil, errors.New("vault is locked")
 	}
 
@@ -508,7 +560,7 @@ func (v *Vault) GetAllSecrets(ctx context.Context) (map[string][]byte, error) {
 	result := make(map[string][]byte, len(all))
 	for _, s := range all {
 		var plaintext []byte
-		plaintext, err = v.enc.Decrypt(s.EncryptedValue, s.IV, v.key)
+		plaintext, err = v.enc.Decrypt(s.EncryptedValue, s.IV, key)
 		if err != nil {
 			for k, v := range result {
 				crypto.ZeroBytes(v)
@@ -550,22 +602,28 @@ func (v *Vault) GetSecretsByTagValues(ctx context.Context, tags []string) (map[s
 }
 
 func (v *Vault) Close() error {
-	for i := range v.key {
-		v.key[i] = 0
-	}
+	v.mu.Lock()
+	crypto.ZeroBytes(v.key)
 	v.key = nil
+	v.mu.Unlock()
 	return v.store.Close()
 }
 
 func (v *Vault) requireUnlock() error {
-	if v.key == nil {
+	v.mu.RLock()
+	unlocked := v.key != nil
+	v.mu.RUnlock()
+	if !unlocked {
 		return fmt.Errorf("vault is locked: unlock required")
 	}
 	return nil
 }
 
 func (v *Vault) MigrateKDF(ctx context.Context) error {
-	if v.key == nil {
+	v.mu.RLock()
+	key := v.key
+	v.mu.RUnlock()
+	if key == nil {
 		return errors.New("vault is locked")
 	}
 
@@ -602,7 +660,7 @@ func (v *Vault) MigrateKDF(ctx context.Context) error {
 	if txErr := v.store.ExecTx(func() error {
 		for _, s := range all {
 			var plaintext []byte
-			plaintext, err = v.enc.Decrypt(s.EncryptedValue, s.IV, v.key)
+			plaintext, err = v.enc.Decrypt(s.EncryptedValue, s.IV, key)
 			if err != nil {
 				return fmt.Errorf("decrypt secret: %w", err)
 			}
@@ -627,9 +685,9 @@ func (v *Vault) MigrateKDF(ctx context.Context) error {
 		crypto.ZeroBytes(newKey)
 		return txErr
 	}
-	for i := range v.key {
-		v.key[i] = 0
-	}
+	v.mu.Lock()
+	crypto.ZeroBytes(v.key)
 	v.key = newKey
+	v.mu.Unlock()
 	return nil
 }
