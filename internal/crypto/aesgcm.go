@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -114,6 +115,7 @@ func ZeroBytes(b []byte) {
 	for i := range b {
 		b[i] = 0
 	}
+	runtime.KeepAlive(b)
 }
 
 // GenerateKey creates a cryptographically random 32-byte key.

@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
 
 	keyring "github.com/zalando/go-keyring"
 )
@@ -14,10 +15,13 @@ type OSKeyring struct {
 
 func (o *OSKeyring) GetRawKey(service, account string) (string, error) {
 	encoded, err := keyring.Get(service, account)
-	if err != nil {
-		return "", fmt.Errorf("get from keychain: %w", err)
+	if err == nil {
+		return encoded, nil
 	}
-	return encoded, nil
+	if pw := os.Getenv("PSST_PASSWORD"); pw != "" {
+		return pw, nil
+	}
+	return "", fmt.Errorf("keychain unavailable and PSST_PASSWORD not set: %w", err)
 }
 
 func (o *OSKeyring) SetKey(service, account string, key []byte) error {

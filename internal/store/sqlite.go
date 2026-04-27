@@ -36,6 +36,14 @@ func NewSQLite(dbPath string) (*SQLiteStore, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("verify database connection: %w", err)
 	}
+	var integrity string
+	if intErr := db.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&integrity); intErr != nil || integrity != "ok" {
+		_ = db.Close()
+		if intErr != nil {
+			return nil, fmt.Errorf("vault integrity check failed: %w", intErr)
+		}
+		return nil, fmt.Errorf("vault integrity check failed: %s", integrity)
+	}
 	return &SQLiteStore{db: db, dbPath: dbPath}, nil
 }
 
@@ -295,6 +303,8 @@ func (s *SQLiteStore) Close() error {
 	return s.db.Close()
 }
 
+// ExecTx executes fn within a database transaction.
+// fn MUST NOT call ExecTx recursively — the mutex is not reentrant.
 func (s *SQLiteStore) ExecTx(fn func() error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
