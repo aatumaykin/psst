@@ -3,6 +3,7 @@ package cli
 import (
 	"github.com/spf13/cobra"
 
+	"github.com/aatumaykin/psst/internal/crypto"
 	"github.com/aatumaykin/psst/internal/keyring"
 	"github.com/aatumaykin/psst/internal/vault"
 )
@@ -29,7 +30,8 @@ var initCmd = &cobra.Command{
 					"  psst init")
 		}
 
-		enc, kp := createDependencies()
+		enc := crypto.NewAESGCM()
+		kp := keyring.NewProvider(enc)
 
 		opts := vault.InitOptions{
 			Global: global,

@@ -2,6 +2,7 @@ package vault
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -34,6 +35,23 @@ const (
 
 func New(enc crypto.Encryptor, kp keyring.KeyProvider, s store.SecretStore) *Vault {
 	return &Vault{enc: enc, kp: kp, store: s}
+}
+
+func Open(vaultPath string) (*Vault, error) {
+	enc := crypto.NewAESGCM()
+	kp := keyring.NewProvider(enc)
+
+	s, err := store.NewSQLite(vaultPath)
+	if err != nil {
+		return nil, fmt.Errorf("open store: %w", err)
+	}
+
+	if err = s.InitSchema(); err != nil {
+		_ = s.Close()
+		return nil, fmt.Errorf("init schema: %w", err)
+	}
+
+	return New(enc, kp, s), nil
 }
 
 func (v *Vault) Close() error {

@@ -8,11 +8,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/aatumaykin/psst/internal/crypto"
 	"github.com/aatumaykin/psst/internal/keyring"
 	"github.com/aatumaykin/psst/internal/output"
 	"github.com/aatumaykin/psst/internal/runner"
-	"github.com/aatumaykin/psst/internal/store"
 	"github.com/aatumaykin/psst/internal/vault"
 )
 
@@ -109,43 +107,31 @@ func getRunner() *runner.Runner {
 	return runner.New()
 }
 
-func createDependencies() (crypto.Encryptor, keyring.KeyProvider) {
-	enc := crypto.NewAESGCM()
-	kp := keyring.NewProvider(enc)
-	return enc, kp
-}
+const (
+	ExitNoVault    = 3
+	ExitAuthFailed = 5
+)
 
-func getUnlockedVault(ctx context.Context, jsonOut, quiet, global bool, env string) (*vault.Vault, error) {
+func getUnlockedVault(ctx context.Context, jsonOut, quiet, global bool, env string) (vault.VaultInterface, error) {
 	vaultPath, err := vault.FindVaultPath(global, env)
 	if err != nil {
 		return nil, err
 	}
 
-	//nolint:gosec // user-provided path is intentional for CLI tool
 	if _, statErr := os.Stat(vaultPath); os.IsNotExist(statErr) {
 		printNoVault(jsonOut, quiet)
-		//nolint:mnd // exit code for missing vault
-		return nil, &exitError{code: 3}
+		return nil, &exitError{code: ExitNoVault}
 	}
 
-	enc, kp := createDependencies()
-
-	s, err := store.NewSQLite(vaultPath)
+	v, err := vault.Open(vaultPath)
 	if err != nil {
 		return nil, fmt.Errorf("open vault: %w", err)
 	}
 
-	if schemaErr := s.InitSchema(); schemaErr != nil {
-		_ = s.Close()
-		return nil, fmt.Errorf("init schema: %w", schemaErr)
-	}
-
-	v := vault.New(enc, kp, s)
 	if unlockErr := v.Unlock(ctx); unlockErr != nil {
-		_ = s.Close()
+		_ = v.Close()
 		printAuthFailed(jsonOut, quiet)
-		//nolint:mnd // exit code for auth failure
-		return nil, &exitError{code: 5}
+		return nil, &exitError{code: ExitAuthFailed}
 	}
 	return v, nil
 }
