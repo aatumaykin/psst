@@ -536,7 +536,8 @@ func TestPerVaultSalt(t *testing.T) {
 	ctx := context.Background()
 
 	path1 := filepath.Join(dir, "vault1.db")
-	kp1 := &testKeyProvider{enc: enc, key: nil}
+	kp1Key, _ := enc.GenerateKey()
+	kp1 := &testKeyProvider{enc: enc, key: kp1Key}
 	if err := InitVault(ctx, path1, enc, kp1, InitOptions{SkipKeychain: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -552,7 +553,8 @@ func TestPerVaultSalt(t *testing.T) {
 	}
 
 	path2 := filepath.Join(dir, "vault2.db")
-	kp2 := &testKeyProvider{enc: enc, key: nil}
+	kp2Key, _ := enc.GenerateKey()
+	kp2 := &testKeyProvider{enc: enc, key: kp2Key}
 	if initErr := InitVault(ctx, path2, enc, kp2, InitOptions{SkipKeychain: true}); initErr != nil {
 		t.Fatal(initErr)
 	}
@@ -904,6 +906,20 @@ func TestUnlock_DoesNotExposeUnverifiedKey(t *testing.T) {
 
 	if v.key != nil {
 		t.Fatal("v.key must be nil after failed unlock — unverified key was exposed")
+	}
+}
+
+func TestInitVault_ReturnsErrorWithoutKey(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "vault.db")
+	enc := crypto.NewAESGCM()
+
+	kp := &testKeyProvider{enc: enc, key: nil}
+
+	ctx := context.Background()
+	err := InitVault(ctx, dbPath, enc, kp, InitOptions{SkipKeychain: true})
+	if err == nil {
+		t.Fatal("InitVault should return error when no key is available")
 	}
 }
 

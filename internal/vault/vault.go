@@ -125,7 +125,7 @@ func InitVault(
 	} else {
 		rawKey, err = kp.GetRawKey(serviceName, accountName)
 		if err != nil {
-			return nil
+			return fmt.Errorf("no key available: set PSST_PASSWORD or ensure keychain is accessible: %w", err)
 		}
 	}
 
