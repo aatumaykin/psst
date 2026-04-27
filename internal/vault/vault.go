@@ -47,6 +47,8 @@ const (
 
 var secretNameRegex = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 
+var envNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+
 // New creates a Vault with the given encryptor, key provider, and store.
 func New(enc crypto.Encryptor, kp keyring.KeyProvider, s store.SecretStore) *Vault {
 	return &Vault{enc: enc, kp: kp, store: s}
@@ -54,6 +56,10 @@ func New(enc crypto.Encryptor, kp keyring.KeyProvider, s store.SecretStore) *Vau
 
 // FindVaultPath returns the path to the vault database file based on global/env flags.
 func FindVaultPath(global bool, env string) (string, error) {
+	if env != "" && !envNameRegex.MatchString(env) {
+		return "", fmt.Errorf("invalid env name %q: must match %s", env, envNameRegex.String())
+	}
+
 	baseDir := ".psst"
 	if global {
 		home, err := os.UserHomeDir()

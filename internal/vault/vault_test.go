@@ -656,6 +656,28 @@ func TestRequireUnlock_ReturnsErrorWhenLocked(t *testing.T) {
 	}
 }
 
+func TestFindVaultPath_RejectsTraversal(t *testing.T) {
+	for _, env := range []string{"../etc", "..", "a/b", "a..b"} {
+		t.Run(env, func(t *testing.T) {
+			_, err := FindVaultPath(false, env)
+			if err == nil {
+				t.Fatalf("FindVaultPath(%q) should reject", env)
+			}
+		})
+	}
+}
+
+func TestFindVaultPath_AcceptsValidEnv(t *testing.T) {
+	for _, env := range []string{"prod", "staging-1", "test_env", "v2"} {
+		t.Run(env, func(t *testing.T) {
+			_, err := FindVaultPath(false, env)
+			if err != nil {
+				t.Fatalf("FindVaultPath(%q) should accept: %v", env, err)
+			}
+		})
+	}
+}
+
 func TestSetSecret_RejectsInvalidName(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()
