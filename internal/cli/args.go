@@ -54,6 +54,7 @@ func filterSecretNames(args []string) []string {
 	skip := map[string]bool{
 		"--json": true, "--quiet": true, "-q": true,
 		"--global": true, "-g": true, "--no-mask": true,
+		"--expand-args": true,
 	}
 	valueArgs := map[int]bool{}
 	for i := 0; i < len(args); i++ {

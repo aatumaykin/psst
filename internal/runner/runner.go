@@ -21,6 +21,7 @@ var validEnvName = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 // ExecOptions controls subprocess execution behavior.
 type ExecOptions struct {
 	MaskOutput bool
+	ExpandArgs bool
 }
 
 // Runner executes commands with secrets injected into the environment.
@@ -51,16 +52,15 @@ func (r *Runner) Exec(secrets map[string][]byte, command string, args []string, 
 
 	command = ExpandEnvVars(command, secrets)
 
-	// SECURITY NOTE: expanded args are visible in /proc/PID/cmdline on Linux.
-	// Prefer passing secrets through environment variables ($KEY in subprocess)
-	// rather than expanding them into command arguments.
-
-	expandedArgs := make([]string, len(args))
-	for i, a := range args {
-		expandedArgs[i] = ExpandEnvVars(a, secrets)
+	if opts.ExpandArgs {
+		expandedArgs := make([]string, len(args))
+		for i, a := range args {
+			expandedArgs[i] = ExpandEnvVars(a, secrets)
+		}
+		args = expandedArgs
 	}
 
-	cmd := exec.CommandContext(ctx, command, expandedArgs...)
+	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Env = env
 	cmd.Cancel = func() error {
 		return cmd.Process.Signal(syscall.SIGTERM)

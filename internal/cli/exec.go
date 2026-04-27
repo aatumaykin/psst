@@ -10,12 +10,13 @@ import (
 )
 
 type ExecConfig struct {
-	JSONOut bool
-	Quiet   bool
-	Global  bool
-	Env     string
-	Tags    []string
-	NoMask  bool
+	JSONOut    bool
+	Quiet      bool
+	Global     bool
+	Env        string
+	Tags       []string
+	NoMask     bool
+	ExpandArgs bool
 }
 
 func handleExecPatternDirect(
@@ -56,7 +57,14 @@ func handleExecPatternDirect(
 
 	r := getRunner()
 	maskOutput := !cfg.NoMask
-	code, execErr := r.Exec(secrets, commandArgs[0], commandArgs[1:], runner.ExecOptions{MaskOutput: maskOutput})
+	if cfg.NoMask {
+		fmt.Fprintln(os.Stderr, "Warning: output masking is disabled, secrets may appear in output")
+	}
+	expandArgs := cfg.ExpandArgs
+	if expandArgs {
+		fmt.Fprintln(os.Stderr, "Warning: secret expansion in arguments is enabled, values may be visible in /proc/PID/cmdline")
+	}
+	code, execErr := r.Exec(secrets, commandArgs[0], commandArgs[1:], runner.ExecOptions{MaskOutput: maskOutput, ExpandArgs: expandArgs})
 	if execErr != nil {
 		fmt.Fprintf(os.Stderr, "Command failed: %v\n", execErr)
 	}

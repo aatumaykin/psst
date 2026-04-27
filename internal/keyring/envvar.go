@@ -14,6 +14,7 @@ func (e *EnvVarProvider) GetRawKey(_, _ string) (string, error) {
 	if password == "" {
 		return "", errors.New("PSST_PASSWORD not set and OS keychain unavailable")
 	}
+	os.Unsetenv("PSST_PASSWORD")
 	return password, nil
 }
 
