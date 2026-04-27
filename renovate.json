@@ -1,3 +1,22 @@
 {
-  "$schema": "https://docs.renovatebot.com/renovate-schema.json"
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "postUpdateOptions": ["gomodTidy"],
+  "packageRules": [
+    {
+      "matchManagers": ["github-actions"],
+      "pinDigests": true
+    },
+    {
+      "matchUpdateTypes": ["minor", "patch"],
+      "matchDepTypes": ["indirect"],
+      "automerge": true
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "enabled": true
+  },
+  "osvVulnerabilityAlerts": true
 }

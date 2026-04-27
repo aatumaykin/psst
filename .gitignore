@@ -5,3 +5,8 @@
 dist/
 .env
 .env.*
+.psst/
+*.pem
+*.key
+*.secret
+*.token
