@@ -4,26 +4,23 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
-)
 
-var validName = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
+	"github.com/aatumaykin/psst/internal/output"
+	"github.com/aatumaykin/psst/internal/vault"
+)
 
 var setCmd = &cobra.Command{
 	Use:   "set <name>",
 	Short: "Set a secret",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
-		f := getFormatter(jsonOut, quiet)
 		name := args[0]
-
-		if !validName.MatchString(name) {
-			return exitWithError(fmt.Sprintf("Invalid secret name %q. Must match [A-Z][A-Z0-9_]*", name))
+		if err := vault.ValidateSecretName(name); err != nil {
+			return exitWithError(fmt.Sprintf("Invalid secret name %q", name))
 		}
 
 		tags, _ := cmd.Flags().GetStringArray("tag")
@@ -58,24 +55,19 @@ var setCmd = &cobra.Command{
 			return exitWithError("Value cannot be empty")
 		}
 
-		v, err := getUnlockedVault(cmd.Context(), jsonOut, quiet, global, env)
-		if err != nil {
-			return err
-		}
-		defer v.Close()
-
-		valueBytes := []byte(value)
-		defer func() {
-			for i := range valueBytes {
-				valueBytes[i] = 0
+		return withVault(cmd, func(v vault.VaultInterface, f *output.Formatter) error {
+			valueBytes := []byte(value)
+			defer func() {
+				for i := range valueBytes {
+					valueBytes[i] = 0
+				}
+			}()
+			if setErr := v.SetSecret(cmd.Context(), name, valueBytes, tags); setErr != nil {
+				return exitWithError(setErr.Error())
 			}
-		}()
-		if setErr := v.SetSecret(cmd.Context(), name, valueBytes, tags); setErr != nil {
-			return exitWithError(setErr.Error())
-		}
-
-		f.Success(fmt.Sprintf("Secret %s set", name))
-		return nil
+			f.Success(fmt.Sprintf("Secret %s set", name))
+			return nil
+		})
 	},
 }
 

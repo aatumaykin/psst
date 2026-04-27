@@ -12,52 +12,47 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/aatumaykin/psst/internal/output"
+	"github.com/aatumaykin/psst/internal/vault"
 )
 
 var scanCmd = &cobra.Command{
 	Use:   "scan",
 	Short: "Scan files for leaked secrets",
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
-		f := getFormatter(jsonOut, quiet)
 		staged, _ := cmd.Flags().GetBool("staged")
 		scanPath, _ := cmd.Flags().GetString("path")
 
-		v, err := getUnlockedVault(cmd.Context(), jsonOut, quiet, global, env)
-		if err != nil {
-			return err
-		}
-		defer v.Close()
+		return withVault(cmd, func(v vault.VaultInterface, f *output.Formatter) error {
+			secrets, err := v.GetAllSecrets(cmd.Context())
+			if err != nil {
+				return exitWithError(err.Error())
+			}
 
-		secrets, err := v.GetAllSecrets(cmd.Context())
-		if err != nil {
-			return exitWithError(err.Error())
-		}
+			if len(secrets) == 0 {
+				f.Success("No secrets in vault to scan for.")
+				return nil
+			}
 
-		if len(secrets) == 0 {
-			f.Success("No secrets in vault to scan for.")
+			byteSecrets := make(map[string][]byte, len(secrets))
+			maps.Copy(byteSecrets, secrets)
+
+			files, err := getScanFiles(staged, scanPath)
+			if err != nil {
+				return exitWithError(err.Error())
+			}
+
+			var results []output.ScanMatch
+			for _, file := range files {
+				matches := scanFile(file, byteSecrets)
+				results = append(results, matches...)
+			}
+
+			f.ScanResults(results)
+			if len(results) > 0 {
+				return &exitError{code: 1}
+			}
 			return nil
-		}
-
-		byteSecrets := make(map[string][]byte, len(secrets))
-		maps.Copy(byteSecrets, secrets)
-
-		files, err := getScanFiles(staged, scanPath)
-		if err != nil {
-			return exitWithError(err.Error())
-		}
-
-		var results []output.ScanMatch
-		for _, file := range files {
-			matches := scanFile(file, byteSecrets)
-			results = append(results, matches...)
-		}
-
-		f.ScanResults(results)
-		if len(results) > 0 {
-			return &exitError{code: 1}
-		}
-		return nil
+		})
 	},
 }
 

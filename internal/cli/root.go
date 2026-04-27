@@ -43,7 +43,7 @@ func Execute() error {
 
 	if dashDashIdx >= 0 {
 		jsonOut, quiet, global, env, tags := parseGlobalFlagsFromArgs(args[:dashDashIdx])
-		secretNames := filterSecretNames(args[:dashDashIdx], jsonOut, quiet, global, env, tags)
+		secretNames := filterSecretNames(args[:dashDashIdx])
 		secretNames = filterSubcommandNames(secretNames)
 		commandArgs := args[dashDashIdx+1:]
 
@@ -52,7 +52,14 @@ func Execute() error {
 			err := handleExecPatternDirect(
 				context.Background(),
 				secretNames, commandArgs,
-				jsonOut, quiet, global, env, tags, noMask,
+				ExecConfig{
+					JSONOut: jsonOut,
+					Quiet:   quiet,
+					Global:  global,
+					Env:     env,
+					Tags:    tags,
+					NoMask:  noMask,
+				},
 			)
 			var exitErr *exitError
 			if err != nil && errors.As(err, &exitErr) {
@@ -152,6 +159,17 @@ func printAuthFailed(jsonOut, quiet bool) {
 				"  Note: PSST_PASSWORD is visible to other users via /proc on shared systems",
 		)
 	}
+}
+
+func withVault(cmd *cobra.Command, fn func(v vault.VaultInterface, f *output.Formatter) error) error {
+	jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
+	v, err := getUnlockedVault(cmd.Context(), jsonOut, quiet, global, env)
+	if err != nil {
+		return err
+	}
+	defer v.Close()
+	f := getFormatter(jsonOut, quiet)
+	return fn(v, f)
 }
 
 func exitWithError(msg string) error {

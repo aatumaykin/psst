@@ -50,12 +50,7 @@ func parseGlobalFlagsFromArgs(args []string) (bool, bool, bool, string, []string
 	return jsonOut, quiet, global, env, tags
 }
 
-func filterSecretNames(
-	args []string,
-	_, _, _ bool,
-	_ string,
-	_ []string,
-) []string {
+func filterSecretNames(args []string) []string {
 	skip := map[string]bool{
 		"--json": true, "--quiet": true, "-q": true,
 		"--global": true, "-g": true, "--no-mask": true,

@@ -15,34 +15,26 @@ var historyCmd = &cobra.Command{
 	Short: "View secret version history",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
-		f := getFormatter(jsonOut, quiet)
 		name := args[0]
-
-		if !validName.MatchString(name) {
-			return exitWithError(fmt.Sprintf("Invalid secret name %q. Must match [A-Z][A-Z0-9_]*", name))
+		if err := vault.ValidateSecretName(name); err != nil {
+			return exitWithError(fmt.Sprintf("Invalid secret name %q", name))
 		}
-
-		v, err := getUnlockedVault(cmd.Context(), jsonOut, quiet, global, env)
-		if err != nil {
-			return err
-		}
-		defer v.Close()
-
-		entries, err := v.GetHistory(cmd.Context(), name)
-		if err != nil {
-			return exitWithError(err.Error())
-		}
-
-		if len(entries) == 0 {
-			if !quiet {
-				fmt.Fprintf(os.Stdout, "No history for %s\n", name)
+		return withVault(cmd, func(v vault.VaultInterface, f *output.Formatter) error {
+			entries, err := v.GetHistory(cmd.Context(), name)
+			if err != nil {
+				return exitWithError(err.Error())
 			}
-			return nil
-		}
 
-		f.HistoryEntries(name, toHistoryItems(entries))
-		return nil
+			if len(entries) == 0 {
+				if !f.IsQuiet() {
+					fmt.Fprintf(os.Stdout, "No history for %s\n", name)
+				}
+				return nil
+			}
+
+			f.HistoryEntries(name, toHistoryItems(entries))
+			return nil
+		})
 	},
 }
 

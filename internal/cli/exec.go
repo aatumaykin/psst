@@ -6,18 +6,25 @@ import (
 	"os"
 
 	"github.com/aatumaykin/psst/internal/runner"
+	"github.com/aatumaykin/psst/internal/vault"
 )
+
+type ExecConfig struct {
+	JSONOut bool
+	Quiet   bool
+	Global  bool
+	Env     string
+	Tags    []string
+	NoMask  bool
+}
 
 func handleExecPatternDirect(
 	ctx context.Context,
 	secretNames []string,
 	commandArgs []string,
-	jsonOut, quiet, global bool,
-	env string,
-	tags []string,
-	noMask bool,
+	cfg ExecConfig,
 ) error {
-	v, err := getUnlockedVault(ctx, jsonOut, quiet, global, env)
+	v, err := getUnlockedVault(ctx, cfg.JSONOut, cfg.Quiet, cfg.Global, cfg.Env)
 	if err != nil {
 		return err
 	}
@@ -25,8 +32,8 @@ func handleExecPatternDirect(
 
 	secrets := make(map[string][]byte)
 
-	if len(tags) > 0 {
-		names, tagErr := v.GetSecretNamesByTags(ctx, tags)
+	if len(cfg.Tags) > 0 {
+		names, tagErr := v.GetSecretNamesByTags(ctx, cfg.Tags)
 		if tagErr != nil {
 			return exitWithError(tagErr.Error())
 		}
@@ -34,8 +41,8 @@ func handleExecPatternDirect(
 	}
 
 	for _, name := range secretNames {
-		if !validName.MatchString(name) {
-			return exitWithError(fmt.Sprintf("Invalid secret name %q. Must match [A-Z][A-Z0-9_]*", name))
+		if err := vault.ValidateSecretName(name); err != nil {
+			return exitWithError(fmt.Sprintf("Invalid secret name %q", name))
 		}
 	}
 
@@ -48,7 +55,7 @@ func handleExecPatternDirect(
 	}
 
 	r := getRunner()
-	maskOutput := !noMask
+	maskOutput := !cfg.NoMask
 	code, execErr := r.Exec(secrets, commandArgs[0], commandArgs[1:], runner.ExecOptions{MaskOutput: maskOutput})
 	if execErr != nil {
 		fmt.Fprintf(os.Stderr, "Command failed: %v\n", execErr)

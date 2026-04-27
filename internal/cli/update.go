@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"strconv"
 
 	"github.com/spf13/cobra"
@@ -39,18 +38,18 @@ var updateCheckCmd = &cobra.Command{
 
 		if quiet {
 			if info.IsNewer() {
-				fmt.Fprintln(os.Stdout, info.LatestVersion)
+				f.Print(info.LatestVersion)
 			}
 			return nil
 		}
 
-		fmt.Fprintf(os.Stdout, "Current: v%s\n", info.CurrentVersion)
-		fmt.Fprintf(os.Stdout, "Latest:  v%s\n", info.LatestVersion)
+		f.Print(fmt.Sprintf("Current: v%s", info.CurrentVersion))
+		f.Print(fmt.Sprintf("Latest:  v%s", info.LatestVersion))
 
 		if info.IsNewer() {
-			fmt.Fprintf(os.Stdout, "\nUpdate available! Run: psst update install\n")
+			f.Print("\nUpdate available! Run: psst update install")
 		} else {
-			fmt.Fprintf(os.Stdout, "\nAlready up to date.\n")
+			f.Print("\nAlready up to date.")
 		}
 		return nil
 	},
@@ -61,6 +60,7 @@ var updateInstallCmd = &cobra.Command{
 	Short: "Download and install the latest version",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		_, quiet, _, _, _ := getGlobalFlags(cmd)
+		f := getFormatter(false, quiet)
 		force, _ := cmd.Flags().GetBool("force")
 
 		info, err := updater.CheckForUpdate()
@@ -70,13 +70,13 @@ var updateInstallCmd = &cobra.Command{
 
 		if !force && !info.IsNewer() {
 			if !quiet {
-				fmt.Fprintf(os.Stdout, "Already up to date (v%s). Use --force to reinstall.\n", info.CurrentVersion)
+				f.Print(fmt.Sprintf("Already up to date (v%s). Use --force to reinstall.", info.CurrentVersion))
 			}
 			return nil
 		}
 
 		if !quiet {
-			fmt.Fprintf(os.Stdout, "Updating from v%s to v%s...\n", info.CurrentVersion, info.LatestVersion)
+			f.Print(fmt.Sprintf("Updating from v%s to v%s...", info.CurrentVersion, info.LatestVersion))
 		}
 
 		if updateErr := updater.PerformUpdate(info, force); updateErr != nil {
@@ -84,7 +84,7 @@ var updateInstallCmd = &cobra.Command{
 		}
 
 		if !quiet {
-			fmt.Fprintf(os.Stdout, "Successfully updated to v%s!\n", info.LatestVersion)
+			f.Print(fmt.Sprintf("Successfully updated to v%s!", info.LatestVersion))
 		}
 		return nil
 	},

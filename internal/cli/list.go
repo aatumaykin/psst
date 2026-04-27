@@ -11,30 +11,24 @@ var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all secrets",
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		jsonOut, quiet, global, env, tags := getGlobalFlags(cmd)
-		f := getFormatter(jsonOut, quiet)
-
-		v, err := getUnlockedVault(cmd.Context(), jsonOut, quiet, global, env)
-		if err != nil {
-			return err
-		}
-		defer v.Close()
-
-		if len(tags) > 0 {
-			filtered, tagErr := v.GetSecretsByTags(cmd.Context(), tags)
-			if tagErr != nil {
-				return exitWithError(tagErr.Error())
+		_, _, _, _, tags := getGlobalFlags(cmd)
+		return withVault(cmd, func(v vault.VaultInterface, f *output.Formatter) error {
+			if len(tags) > 0 {
+				filtered, tagErr := v.GetSecretsByTags(cmd.Context(), tags)
+				if tagErr != nil {
+					return exitWithError(tagErr.Error())
+				}
+				f.SecretList(toSecretItems(filtered))
+				return nil
 			}
-			f.SecretList(toSecretItems(filtered))
-			return nil
-		}
 
-		secrets, err := v.ListSecrets(cmd.Context())
-		if err != nil {
-			return exitWithError(err.Error())
-		}
-		f.SecretList(toSecretItems(secrets))
-		return nil
+			secrets, err := v.ListSecrets(cmd.Context())
+			if err != nil {
+				return exitWithError(err.Error())
+			}
+			f.SecretList(toSecretItems(secrets))
+			return nil
+		})
 	},
 }
 

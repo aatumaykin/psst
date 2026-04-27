@@ -159,7 +159,7 @@ func TestFilterSecretNames_EqualsSyntax(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := filterSecretNames(tt.args, false, false, false, "", nil)
+			got := filterSecretNames(tt.args)
 			if len(got) != len(tt.want) {
 				t.Fatalf("filterSecretNames(%v) = %v, want %v", tt.args, got, tt.want)
 			}

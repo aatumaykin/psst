@@ -4,6 +4,9 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+
+	"github.com/aatumaykin/psst/internal/output"
+	"github.com/aatumaykin/psst/internal/vault"
 )
 
 var rmCmd = &cobra.Command{
@@ -12,26 +15,17 @@ var rmCmd = &cobra.Command{
 	Args:    cobra.ExactArgs(1),
 	Aliases: []string{"remove", "delete"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
-		f := getFormatter(jsonOut, quiet)
 		name := args[0]
-
-		if !validName.MatchString(name) {
-			return exitWithError(fmt.Sprintf("Invalid secret name %q. Must match [A-Z][A-Z0-9_]*", name))
+		if err := vault.ValidateSecretName(name); err != nil {
+			return exitWithError(fmt.Sprintf("Invalid secret name %q", name))
 		}
-
-		v, err := getUnlockedVault(cmd.Context(), jsonOut, quiet, global, env)
-		if err != nil {
-			return err
-		}
-		defer v.Close()
-
-		if delErr := v.DeleteSecret(cmd.Context(), name); delErr != nil {
-			return exitWithError(delErr.Error())
-		}
-
-		f.Success(fmt.Sprintf("Secret %s removed", name))
-		return nil
+		return withVault(cmd, func(v vault.VaultInterface, f *output.Formatter) error {
+			if delErr := v.DeleteSecret(cmd.Context(), name); delErr != nil {
+				return exitWithError(delErr.Error())
+			}
+			f.Success(fmt.Sprintf("Secret %s removed", name))
+			return nil
+		})
 	},
 }
 

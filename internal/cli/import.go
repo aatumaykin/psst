@@ -8,36 +8,24 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/aatumaykin/psst/internal/output"
+	"github.com/aatumaykin/psst/internal/vault"
 )
 
 var importCmd = &cobra.Command{
 	Use:   "import [file]",
 	Short: "Import secrets from .env file, stdin, or environment",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
-		f := getFormatter(jsonOut, quiet)
 		useStdin, _ := cmd.Flags().GetBool("stdin")
 		fromEnv, _ := cmd.Flags().GetBool("from-env")
 
-		v, err := getUnlockedVault(cmd.Context(), jsonOut, quiet, global, env)
-		if err != nil {
-			return err
-		}
-		defer v.Close()
-
 		var entries map[string]string
+		var err error
 
 		switch {
 		case fromEnv:
 			prefix, _ := cmd.Flags().GetString("prefix")
-			if prefix == "" {
-				if !quiet {
-					fmt.Fprintf(
-						os.Stderr,
-						"Warning: importing all matching env vars. Use --prefix to filter (e.g. --prefix MYAPP_)\n",
-					)
-				}
-			}
 			entries = readFromEnv(prefix)
 		case useStdin:
 			entries, err = parseEnvFromReader(os.Stdin)
@@ -60,22 +48,24 @@ var importCmd = &cobra.Command{
 			}
 		}
 
-		count := 0
-		for name, value := range entries {
-			if !validName.MatchString(name) {
-				if !quiet {
-					fmt.Fprintf(os.Stderr, "Skipping invalid name: %s\n", name)
+		return withVault(cmd, func(v vault.VaultInterface, f *output.Formatter) error {
+			count := 0
+			for name, value := range entries {
+				if err := vault.ValidateSecretName(name); err != nil {
+					if !f.IsQuiet() {
+						fmt.Fprintf(os.Stderr, "Skipping invalid name: %s\n", name)
+					}
+					continue
 				}
-				continue
+				if setErr := v.SetSecret(cmd.Context(), name, []byte(value), nil); setErr != nil {
+					return exitWithError(fmt.Sprintf("Failed to set %s: %v", name, setErr))
+				}
+				count++
 			}
-			if setErr := v.SetSecret(cmd.Context(), name, []byte(value), nil); setErr != nil {
-				return exitWithError(fmt.Sprintf("Failed to set %s: %v", name, setErr))
-			}
-			count++
-		}
 
-		f.Success(fmt.Sprintf("Imported %d secret(s)", count))
-		return nil
+			f.Success(fmt.Sprintf("Imported %d secret(s)", count))
+			return nil
+		})
 	},
 }
 
@@ -130,7 +120,7 @@ func readFromEnv(prefix string) map[string]string {
 		if prefix != "" && !strings.HasPrefix(name, prefix) {
 			continue
 		}
-		if validName.MatchString(name) {
+		if vault.ValidateSecretName(name) == nil {
 			entries[name] = value
 		}
 	}
