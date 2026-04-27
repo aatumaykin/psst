@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"time"
 
@@ -32,6 +33,11 @@ func (v *Vault) Unlock(ctx context.Context) error {
 	switch kdfVersion {
 	case 1:
 		key, err = v.enc.KeyToBuffer(rawKey)
+		defer func() {
+			if err == nil {
+				fmt.Fprintln(os.Stderr, "Warning: vault uses legacy KDF (SHA-256). Run 'psst migrate' to upgrade to Argon2id.")
+			}
+		}()
 	case crypto.KDFVersion2:
 		var saltB64 string
 		saltB64, metaErr := v.store.GetMeta(ctx, "kdf_salt")

@@ -10,12 +10,11 @@ import (
 )
 
 func (v *Vault) SetSecret(ctx context.Context, name string, value []byte, tags []string) error {
-	v.mu.RLock()
-	key := v.key
-	v.mu.RUnlock()
-	if key == nil {
-		return errors.New("vault is locked")
+	key, err := v.copyKey()
+	if err != nil {
+		return err
 	}
+	defer crypto.ZeroBytes(key)
 
 	if err := ValidateSecretName(name); err != nil {
 		return err
@@ -62,11 +61,9 @@ func (v *Vault) SetSecret(ctx context.Context, name string, value []byte, tags [
 var ErrSecretNotFound = errors.New("secret not found")
 
 func (v *Vault) GetSecret(ctx context.Context, name string) (*Secret, error) {
-	v.mu.RLock()
-	key := v.key
-	v.mu.RUnlock()
-	if key == nil {
-		return nil, errors.New("vault is locked")
+	key, err := v.copyKey()
+	if err != nil {
+		return nil, err
 	}
 
 	stored, err := v.store.GetSecret(ctx, name)
@@ -124,11 +121,9 @@ func (v *Vault) DeleteSecret(ctx context.Context, name string) error {
 }
 
 func (v *Vault) GetAllSecrets(ctx context.Context) (map[string][]byte, error) {
-	v.mu.RLock()
-	key := v.key
-	v.mu.RUnlock()
-	if key == nil {
-		return nil, errors.New("vault is locked")
+	key, err := v.copyKey()
+	if err != nil {
+		return nil, err
 	}
 
 	all, err := v.store.GetAllSecrets(ctx)
