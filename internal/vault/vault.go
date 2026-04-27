@@ -30,12 +30,10 @@ type Vault struct {
 }
 
 const (
-	serviceName       = "psst"
-	accountName       = "vault-key"
-	maxHistory        = 10
-	saltSize          = 16
-	maxSecretNameLen  = 256
-	maxSecretValueLen = 4096
+	serviceName   = "psst"
+	accountName   = "vault-key"
+	maxHistory    = 10
+	saltSize      = 16
 
 	maxUnlockAttempts     = 10
 	unlockDelayBaseMs     = 500
@@ -44,8 +42,6 @@ const (
 	metaUnlockLockedUntil = "unlock_locked_until"
 	metaUnlockCycle       = "unlock_cycle"
 )
-
-var secretNameRegex = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 
 var envNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 
@@ -284,14 +280,14 @@ func (v *Vault) SetSecret(ctx context.Context, name string, value []byte, tags [
 		return errors.New("vault is locked")
 	}
 
-	if len(name) > maxSecretNameLen {
-		return fmt.Errorf("secret name too long: max %d bytes", maxSecretNameLen)
-	}
-	if !secretNameRegex.MatchString(name) {
-		return fmt.Errorf("invalid secret name %q: must match ^[A-Z][A-Z0-9_]*$", name)
+	if err := ValidateSecretName(name); err != nil {
+		return err
 	}
 	if len(value) > maxSecretValueLen {
 		return fmt.Errorf("secret value too long: max %d bytes", maxSecretValueLen)
+	}
+	if err := ValidateTags(tags); err != nil {
+		return err
 	}
 
 	return v.store.ExecTx(func() error {
