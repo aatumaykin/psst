@@ -12,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/aatumaykin/psst/internal/crypto"
 )
 
 const gracefulShutdownDelay = 5 * time.Second
@@ -111,7 +113,7 @@ func (r *Runner) runWithMasking(cmd *exec.Cmd, secrets map[string][]byte) (int, 
 	<-doneStderr
 
 	for i := range secretValues {
-		zeroBytes(secretValues[i])
+		crypto.ZeroBytes(secretValues[i])
 	}
 
 	waitErr := cmd.Wait()
@@ -140,18 +142,18 @@ func streamWithMasking(src io.Reader, dst io.Writer, secrets [][]byte) {
 		data := make([]byte, 0, len(tail)+n)
 		data = append(data, tail...)
 		data = append(data, buf[:n]...)
-		zeroBytes(tail)
+		crypto.ZeroBytes(tail)
 
 		if len(data) == 0 {
 			break
 		}
 
 		masked := MaskSecretsBytes(data, secrets)
-		zeroBytes(data)
+		crypto.ZeroBytes(data)
 
 		if readErr != nil {
 			_, _ = dst.Write(masked)
-			zeroBytes(masked)
+			crypto.ZeroBytes(masked)
 			break
 		}
 
@@ -160,7 +162,7 @@ func streamWithMasking(src io.Reader, dst io.Writer, secrets [][]byte) {
 			_, _ = dst.Write(masked[:writeEnd])
 			tail = make([]byte, maxSecretLen)
 			copy(tail, masked[writeEnd:])
-			zeroBytes(masked)
+			crypto.ZeroBytes(masked)
 		} else {
 			tail = masked
 		}
@@ -194,12 +196,6 @@ func filterEmpty(secrets map[string][]byte) [][]byte {
 		}
 	}
 	return result
-}
-
-func zeroBytes(b []byte) {
-	for i := range b {
-		b[i] = 0
-	}
 }
 
 func exitCode(err error) int {

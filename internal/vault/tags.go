@@ -92,13 +92,25 @@ func (v *Vault) GetSecretsByTagValues(ctx context.Context, tags []string) (map[s
 	if err != nil {
 		return nil, err
 	}
+	if len(names) == 0 {
+		return map[string][]byte{}, nil
+	}
+
+	all, err := v.GetAllSecrets(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get secrets: %w", err)
+	}
+
+	nameSet := make(map[string]bool, len(names))
+	for _, n := range names {
+		nameSet[n] = true
+	}
+
 	result := make(map[string][]byte, len(names))
-	for _, name := range names {
-		sec, secErr := v.GetSecret(ctx, name)
-		if secErr != nil {
-			return nil, fmt.Errorf("get secret: %w", secErr)
+	for name, val := range all {
+		if nameSet[name] {
+			result[name] = val
 		}
-		result[name] = sec.Value
 	}
 	return result, nil
 }
