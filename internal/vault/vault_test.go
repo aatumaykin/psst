@@ -868,6 +868,45 @@ func TestAddTag_IsTransactional(t *testing.T) {
 	}
 }
 
+func TestUnlock_DoesNotExposeUnverifiedKey(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "vault.db")
+	enc := crypto.NewAESGCM()
+
+	rightKey, err := enc.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	kp := &testKeyProvider{enc: enc, key: rightKey}
+
+	ctx := context.Background()
+	if err = InitVault(ctx, dbPath, enc, kp, InitOptions{SkipKeychain: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := store.NewSQLite(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	wrongKey, _ := enc.GenerateKey()
+	wrongKey[0] ^= 0xFF
+	wrongKp := &testKeyProvider{enc: enc, key: wrongKey}
+
+	v := New(enc, wrongKp, s)
+	defer v.Close()
+
+	unlockErr := v.Unlock(ctx)
+	if unlockErr == nil {
+		t.Fatal("wrong key should fail unlock")
+	}
+
+	if v.key != nil {
+		t.Fatal("v.key must be nil after failed unlock — unverified key was exposed")
+	}
+}
+
 func TestReadKDFVersion_RejectsCorruptedVersion(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "vault.db")

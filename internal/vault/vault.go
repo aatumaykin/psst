@@ -193,41 +193,49 @@ func (v *Vault) Unlock(ctx context.Context) error {
 		return fmt.Errorf("derive key: %w", err)
 	}
 
-	v.mu.Lock()
-	v.key = key
-	v.mu.Unlock()
-
 	all, verifyErr := v.store.GetAllSecrets(ctx)
 	if verifyErr != nil {
-		v.mu.Lock()
-		crypto.ZeroBytes(v.key)
-		v.key = nil
-		v.mu.Unlock()
 		return fmt.Errorf("verify vault: %w", verifyErr)
 	}
 
 	verifyIV, ivErr := v.store.GetMeta(ctx, "verify_iv")
 	verifyData, dataErr := v.store.GetMeta(ctx, "verify_data")
 
+	verified := false
 	if ivErr == nil && dataErr == nil && verifyIV != "" && verifyData != "" {
-		ivBytes, _ := base64.StdEncoding.DecodeString(verifyIV)
-		dataBytes, _ := base64.StdEncoding.DecodeString(verifyData)
-		if _, decErr := v.enc.Decrypt(dataBytes, ivBytes, key); decErr != nil {
-			return v.failUnlock(ctx)
+		ivBytes, ivDecodeErr := base64.StdEncoding.DecodeString(verifyIV)
+		if ivDecodeErr != nil {
+			return fmt.Errorf("decode verify_iv: %w", ivDecodeErr)
 		}
+		dataBytes, dataDecodeErr := base64.StdEncoding.DecodeString(verifyData)
+		if dataDecodeErr != nil {
+			return fmt.Errorf("decode verify_data: %w", dataDecodeErr)
+		}
+		if _, decErr := v.enc.Decrypt(dataBytes, ivBytes, key); decErr != nil {
+			return v.failUnlock(ctx, key)
+		}
+		verified = true
 	} else if len(all) > 0 {
 		if _, decErr := v.enc.Decrypt(all[0].EncryptedValue, all[0].IV, key); decErr != nil {
-			return v.failUnlock(ctx)
+			return v.failUnlock(ctx, key)
 		}
+		verified = true
 	}
 
-	_ = v.store.SetMeta(ctx, metaUnlockAttempts, "0")
-	_ = v.store.SetMeta(ctx, metaUnlockLockedUntil, "")
-	_ = v.store.SetMeta(ctx, metaUnlockCycle, "0")
+	v.mu.Lock()
+	v.key = key
+	v.mu.Unlock()
+
+	if verified {
+		_ = v.store.SetMeta(ctx, metaUnlockAttempts, "0")
+		_ = v.store.SetMeta(ctx, metaUnlockLockedUntil, "")
+		_ = v.store.SetMeta(ctx, metaUnlockCycle, "0")
+	}
 	return nil
 }
 
-func (v *Vault) failUnlock(ctx context.Context) error {
+func (v *Vault) failUnlock(ctx context.Context, key []byte) error {
+	crypto.ZeroBytes(key)
 	attempts, _ := v.store.IncrementMetaInt(ctx, metaUnlockAttempts, 1)
 	if attempts >= maxUnlockAttempts {
 		cycle := 0
@@ -246,10 +254,6 @@ func (v *Vault) failUnlock(ctx context.Context) error {
 		_ = v.store.SetMeta(ctx, metaUnlockAttempts, "0")
 		_ = v.store.SetMeta(ctx, metaUnlockCycle, strconv.Itoa(cycle+1))
 	}
-	v.mu.Lock()
-	crypto.ZeroBytes(v.key)
-	v.key = nil
-	v.mu.Unlock()
 	return errors.New("authentication failed")
 }
 
