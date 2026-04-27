@@ -354,7 +354,7 @@ func TestMigrateKDF(t *testing.T) {
 		if !ok {
 			t.Fatal("expected *crypto.AESGCM for legacy KeyToBufferV2")
 		}
-		v2Key, deriveErr = aesgcm.KeyToBufferV2(rawKeyHex)
+		v2Key, deriveErr = aesgcm.KeyToBufferV2(rawKeyHex) //nolint:staticcheck // testing legacy V2 KDF path
 	}
 	if deriveErr != nil {
 		t.Fatal(deriveErr)

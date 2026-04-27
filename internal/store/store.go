@@ -34,7 +34,7 @@ type HistoryEntry struct {
 	ArchivedAt     time.Time
 }
 
-// SecretStore is the persistence interface for encrypted secrets.
+// SecretReader provides read-only access to encrypted secrets.
 type SecretReader interface {
 	GetSecret(ctx context.Context, name string) (*StoredSecret, error)
 	GetAllSecrets(ctx context.Context) ([]StoredSecret, error)

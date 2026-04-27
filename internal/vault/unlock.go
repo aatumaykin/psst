@@ -35,7 +35,8 @@ func (v *Vault) Unlock(ctx context.Context) error {
 		key, err = v.enc.KeyToBuffer(rawKey)
 		defer func() {
 			if err == nil {
-				fmt.Fprintln(os.Stderr, "Warning: vault uses legacy KDF (SHA-256). Run 'psst migrate' to upgrade to Argon2id.")
+				fmt.Fprintln(os.Stderr,
+					"Warning: vault uses legacy KDF (SHA-256). Run 'psst migrate' to upgrade to Argon2id.")
 			}
 		}()
 	case crypto.KDFVersion2:

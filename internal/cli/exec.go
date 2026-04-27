@@ -62,9 +62,11 @@ func handleExecPatternDirect(
 	}
 	expandArgs := cfg.ExpandArgs
 	if expandArgs {
-		fmt.Fprintln(os.Stderr, "Warning: secret expansion in arguments is enabled, values may be visible in /proc/PID/cmdline")
+		fmt.Fprintln(os.Stderr,
+			"Warning: secret expansion in arguments is enabled, values may be visible in /proc/PID/cmdline")
 	}
-	code, execErr := r.Exec(secrets, commandArgs[0], commandArgs[1:], runner.ExecOptions{MaskOutput: maskOutput, ExpandArgs: expandArgs})
+	code, execErr := r.Exec(secrets, commandArgs[0], commandArgs[1:],
+		runner.ExecOptions{MaskOutput: maskOutput, ExpandArgs: expandArgs})
 	if execErr != nil {
 		fmt.Fprintf(os.Stderr, "Command failed: %v\n", execErr)
 	}
