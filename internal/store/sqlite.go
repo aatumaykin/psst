@@ -22,6 +22,7 @@ type SQLiteStore struct {
 	dbPath    string
 }
 
+// NewSQLite opens or creates a SQLite-backed secret store.
 func NewSQLite(dbPath string) (*SQLiteStore, error) {
 	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
@@ -93,14 +94,17 @@ func (s *SQLiteStore) InitSchema() error {
 	if err := initSchema(s.db); err != nil {
 		return err
 	}
-	if s.dbPath != "" {
-		if chmodErr := os.Chmod(s.dbPath, 0600); chmodErr != nil {
-			return chmodErr
-		}
-		_ = os.Chmod(s.dbPath+"-wal", 0600)
-		_ = os.Chmod(s.dbPath+"-shm", 0600)
-	}
+	s.ensureFilePermissions()
 	return nil
+}
+
+func (s *SQLiteStore) ensureFilePermissions() {
+	if s.dbPath == "" {
+		return
+	}
+	_ = os.Chmod(s.dbPath, 0600)
+	_ = os.Chmod(s.dbPath+"-wal", 0600)
+	_ = os.Chmod(s.dbPath+"-shm", 0600)
 }
 
 func (s *SQLiteStore) GetSecret(ctx context.Context, name string) (*StoredSecret, error) {

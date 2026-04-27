@@ -9,12 +9,14 @@ import (
 	"time"
 )
 
+// ScanMatch represents a secret leak found in a file.
 type ScanMatch struct {
 	File       string `json:"file"`
 	Line       int    `json:"line"`
 	SecretName string `json:"secret_name"`
 }
 
+// SecretItem is a secret entry for display output.
 type SecretItem struct {
 	Name      string    `json:"name"`
 	Tags      []string  `json:"tags"`
@@ -22,12 +24,14 @@ type SecretItem struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// HistoryItem is a version history entry for display output.
 type HistoryItem struct {
 	Version    int       `json:"version"`
 	Tags       []string  `json:"tags"`
 	ArchivedAt time.Time `json:"archived_at"`
 }
 
+// Formatter handles CLI output in plain-text or JSON mode.
 type Formatter struct {
 	jsonMode bool
 	quiet    bool
@@ -35,6 +39,7 @@ type Formatter struct {
 	stderr   io.Writer
 }
 
+// NewFormatter creates a Formatter with the given output mode flags.
 func NewFormatter(jsonMode, quiet bool) *Formatter {
 	return &Formatter{
 		jsonMode: jsonMode,
@@ -173,6 +178,7 @@ func (f *Formatter) IsQuiet() bool {
 	return f.quiet
 }
 
+// VersionData holds version information for display.
 type VersionData struct {
 	Version   string `json:"version"`
 	Commit    string `json:"commit"`

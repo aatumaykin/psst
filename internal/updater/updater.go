@@ -9,6 +9,7 @@ import (
 	"github.com/aatumaykin/psst/internal/version"
 )
 
+// UpdateInfo holds information about an available update.
 type UpdateInfo struct {
 	CurrentVersion string
 	LatestVersion  string
@@ -17,6 +18,7 @@ type UpdateInfo struct {
 	AssetName      string
 }
 
+// ReleaseInfo represents a GitHub release.
 type ReleaseInfo struct {
 	TagName string `json:"tag_name"`
 	Assets  []struct {
@@ -25,6 +27,7 @@ type ReleaseInfo struct {
 	} `json:"assets"`
 }
 
+// CheckForUpdate checks GitHub for the latest release and returns update info.
 func CheckForUpdate() (*UpdateInfo, error) {
 	release, err := fetchLatestRelease()
 	if err != nil {
@@ -59,6 +62,7 @@ func CheckForUpdate() (*UpdateInfo, error) {
 	}, nil
 }
 
+// IsNewer reports whether the latest version is newer than the current version.
 func (u *UpdateInfo) IsNewer() bool {
 	return compareVersions(u.LatestVersion, u.CurrentVersion) > 0
 }

@@ -14,7 +14,9 @@ const defaultGitHubAPIURL = "https://api.github.com/repos/aatumaykin/psst/releas
 
 const httpTimeoutSec = 15
 
-var httpClient = &http.Client{Timeout: httpTimeoutSec * time.Second}
+func newHTTPClient() *http.Client {
+	return &http.Client{Timeout: httpTimeoutSec * time.Second}
+}
 
 func fetchLatestRelease() (*ReleaseInfo, error) {
 	return fetchLatestReleaseWithURL(defaultGitHubAPIURL)
@@ -26,7 +28,8 @@ func fetchLatestReleaseWithURL(apiURL string) (*ReleaseInfo, error) {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	resp, err := httpClient.Do(req)
+	client := newHTTPClient()
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch release: %w", err)
 	}
@@ -60,7 +63,8 @@ func downloadFile(url string) ([]byte, error) {
 		return nil, fmt.Errorf("create download request: %w", err)
 	}
 
-	resp, err := httpClient.Do(req)
+	client := newHTTPClient()
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("download %s: %w", url, err)
 	}
