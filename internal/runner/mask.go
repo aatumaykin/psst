@@ -61,7 +61,7 @@ func MaskSecretsBytes(data []byte, secrets [][]byte) []byte {
 
 	markers := make([][]byte, len(sorted))
 	for i := range sorted {
-		markers[i] = []byte(fmt.Sprintf("\x00PSST_MASK_%d\x00", i))
+		markers[i] = fmt.Appendf(nil, "\x00PSST_MASK_%d\x00", i)
 	}
 
 	result := make([]byte, len(data))

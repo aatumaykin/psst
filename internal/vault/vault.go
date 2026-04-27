@@ -206,60 +206,12 @@ func (v *Vault) Unlock(ctx context.Context) error {
 	if ivErr == nil && dataErr == nil && verifyIV != "" && verifyData != "" {
 		ivBytes, _ := base64.StdEncoding.DecodeString(verifyIV)
 		dataBytes, _ := base64.StdEncoding.DecodeString(verifyData)
-		_, decErr := v.enc.Decrypt(dataBytes, ivBytes, key)
-		if decErr != nil {
-			attempts, _ := v.store.IncrementMetaInt(ctx, metaUnlockAttempts, 1)
-			if attempts >= maxUnlockAttempts {
-				cycle := 0
-				cycleStr, cycleErr := v.store.GetMeta(ctx, metaUnlockCycle)
-				if cycleErr == nil {
-					if n, e := strconv.Atoi(cycleStr); e == nil {
-						cycle = n
-					}
-				}
-
-				lockDuration := time.Duration(unlockDelayBaseMs) * time.Millisecond * time.Duration(1<<uint(cycle))
-				if lockDuration > maxLockDuration {
-					lockDuration = maxLockDuration
-				}
-				lockedUntil := time.Now().Add(lockDuration)
-				_ = v.store.SetMeta(ctx, metaUnlockLockedUntil, lockedUntil.Format(time.RFC3339))
-				_ = v.store.SetMeta(ctx, metaUnlockAttempts, "0")
-				_ = v.store.SetMeta(ctx, metaUnlockCycle, strconv.Itoa(cycle+1))
-			}
-			v.mu.Lock()
-			crypto.ZeroBytes(v.key)
-			v.key = nil
-			v.mu.Unlock()
-			return errors.New("authentication failed")
+		if _, decErr := v.enc.Decrypt(dataBytes, ivBytes, key); decErr != nil {
+			return v.failUnlock(ctx)
 		}
 	} else if len(all) > 0 {
-		_, decErr := v.enc.Decrypt(all[0].EncryptedValue, all[0].IV, key)
-		if decErr != nil {
-			attempts, _ := v.store.IncrementMetaInt(ctx, metaUnlockAttempts, 1)
-			if attempts >= maxUnlockAttempts {
-				cycle := 0
-				cycleStr, cycleErr := v.store.GetMeta(ctx, metaUnlockCycle)
-				if cycleErr == nil {
-					if n, e := strconv.Atoi(cycleStr); e == nil {
-						cycle = n
-					}
-				}
-
-				lockDuration := time.Duration(unlockDelayBaseMs) * time.Millisecond * time.Duration(1<<uint(cycle))
-				if lockDuration > maxLockDuration {
-					lockDuration = maxLockDuration
-				}
-				lockedUntil := time.Now().Add(lockDuration)
-				_ = v.store.SetMeta(ctx, metaUnlockLockedUntil, lockedUntil.Format(time.RFC3339))
-				_ = v.store.SetMeta(ctx, metaUnlockAttempts, "0")
-				_ = v.store.SetMeta(ctx, metaUnlockCycle, strconv.Itoa(cycle+1))
-			}
-			v.mu.Lock()
-			crypto.ZeroBytes(v.key)
-			v.key = nil
-			v.mu.Unlock()
-			return errors.New("authentication failed")
+		if _, decErr := v.enc.Decrypt(all[0].EncryptedValue, all[0].IV, key); decErr != nil {
+			return v.failUnlock(ctx)
 		}
 	}
 
@@ -267,6 +219,32 @@ func (v *Vault) Unlock(ctx context.Context) error {
 	_ = v.store.SetMeta(ctx, metaUnlockLockedUntil, "")
 	_ = v.store.SetMeta(ctx, metaUnlockCycle, "0")
 	return nil
+}
+
+func (v *Vault) failUnlock(ctx context.Context) error {
+	attempts, _ := v.store.IncrementMetaInt(ctx, metaUnlockAttempts, 1)
+	if attempts >= maxUnlockAttempts {
+		cycle := 0
+		if cycleStr, cycleErr := v.store.GetMeta(ctx, metaUnlockCycle); cycleErr == nil {
+			if n, e := strconv.Atoi(cycleStr); e == nil {
+				cycle = n
+			}
+		}
+
+		lockDuration := min(
+			time.Duration(unlockDelayBaseMs)*time.Millisecond*time.Duration(1<<uint(cycle)),
+			maxLockDuration,
+		)
+		lockedUntil := time.Now().Add(lockDuration)
+		_ = v.store.SetMeta(ctx, metaUnlockLockedUntil, lockedUntil.Format(time.RFC3339))
+		_ = v.store.SetMeta(ctx, metaUnlockAttempts, "0")
+		_ = v.store.SetMeta(ctx, metaUnlockCycle, strconv.Itoa(cycle+1))
+	}
+	v.mu.Lock()
+	crypto.ZeroBytes(v.key)
+	v.key = nil
+	v.mu.Unlock()
+	return errors.New("authentication failed")
 }
 
 func (v *Vault) readKDFVersion(ctx context.Context) (int, error) {
@@ -633,7 +611,7 @@ func (v *Vault) requireUnlock() error {
 	unlocked := v.key != nil
 	v.mu.RUnlock()
 	if !unlocked {
-		return fmt.Errorf("vault is locked: unlock required")
+		return errors.New("vault is locked: unlock required")
 	}
 	return nil
 }

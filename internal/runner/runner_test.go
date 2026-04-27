@@ -446,11 +446,11 @@ func TestMaskSecrets_MultipleOverlapping(t *testing.T) {
 
 func TestBuildEnv_InvalidNames(t *testing.T) {
 	secrets := map[string][]byte{
-		"VALID_KEY":  []byte("good"),
-		"bad=key":    []byte("injected"),
-		"lowercase":  []byte("bad"),
-		"NEW\nLINE":  []byte("injected"),
-		"123START":   []byte("bad"),
+		"VALID_KEY": []byte("good"),
+		"bad=key":   []byte("injected"),
+		"lowercase": []byte("bad"),
+		"NEW\nLINE": []byte("injected"),
+		"123START":  []byte("bad"),
 	}
 	env := buildEnv(secrets)
 

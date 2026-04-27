@@ -835,7 +835,8 @@ func TestAddTag_IsTransactional(t *testing.T) {
 		t.Fatalf("value changed after AddTag: %q", string(sec.Value))
 	}
 
-	if err := v.AddTag(ctx, "KEY", "aws"); err != nil {
+	err = v.AddTag(ctx, "KEY", "aws")
+	if err != nil {
 		t.Fatalf("duplicate AddTag: %v", err)
 	}
 

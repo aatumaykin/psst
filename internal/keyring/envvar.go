@@ -2,7 +2,6 @@ package keyring
 
 import (
 	"errors"
-	"fmt"
 	"os"
 )
 
@@ -19,7 +18,7 @@ func (e *EnvVarProvider) GetRawKey(_, _ string) (string, error) {
 }
 
 func (e *EnvVarProvider) SetKey(_, _ string, _ []byte) error {
-	return fmt.Errorf("cannot store key: PSST_PASSWORD mode does not support key storage")
+	return errors.New("cannot store key: PSST_PASSWORD mode does not support key storage")
 }
 
 func (e *EnvVarProvider) IsAvailable() bool {
