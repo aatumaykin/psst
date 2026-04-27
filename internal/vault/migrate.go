@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -22,9 +23,11 @@ func (v *Vault) MigrateKDF(ctx context.Context) error {
 		return fmt.Errorf("get secrets: %w", err)
 	}
 
-	rawKey, err := v.kp.GetRawKey(serviceName, accountName)
-	if err != nil {
-		return fmt.Errorf("get raw key: %w", err)
+	v.mu.RLock()
+	rawKey := v.rawKey
+	v.mu.RUnlock()
+	if rawKey == "" {
+		return errors.New("vault not unlocked: no raw key available")
 	}
 
 	saltB64, err := v.store.GetMeta(ctx, "kdf_salt")

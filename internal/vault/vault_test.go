@@ -297,11 +297,13 @@ func setupTestVaultV1(t *testing.T) *Vault {
 	}
 	kp.key = rawKey
 
-	v1Key, err := enc.KeyToBuffer(hex.EncodeToString(rawKey))
+	rawKeyStr := hex.EncodeToString(rawKey)
+	v1Key, err := enc.KeyToBuffer(rawKeyStr)
 	if err != nil {
 		t.Fatal(err)
 	}
 	v.key = v1Key
+	v.rawKey = rawKeyStr
 
 	ctx := context.Background()
 	if err = s.SetMeta(ctx, "kdf_version", "1"); err != nil {

@@ -12,11 +12,12 @@ import (
 )
 
 type Vault struct {
-	mu    sync.RWMutex
-	enc   crypto.Encryptor
-	kp    keyring.KeyProvider
-	store store.SecretStore
-	key   []byte
+	mu     sync.RWMutex
+	enc    crypto.Encryptor
+	kp     keyring.KeyProvider
+	store  store.SecretStore
+	key    []byte
+	rawKey string
 }
 
 const (
@@ -59,6 +60,7 @@ func (v *Vault) Close() error {
 	defer v.mu.Unlock()
 	crypto.ZeroBytes(v.key)
 	v.key = nil
+	v.rawKey = ""
 	return v.store.Close()
 }
 

@@ -24,6 +24,9 @@ func (v *Vault) Unlock(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("unlock vault: %w", err)
 	}
+	v.mu.Lock()
+	v.rawKey = rawKey
+	v.mu.Unlock()
 
 	kdfVersion, err := v.readKDFVersion(ctx)
 	if err != nil {
