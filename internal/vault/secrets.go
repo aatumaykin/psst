@@ -65,6 +65,7 @@ func (v *Vault) GetSecret(ctx context.Context, name string) (*Secret, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer crypto.ZeroBytes(key)
 
 	stored, err := v.store.GetSecret(ctx, name)
 	if err != nil {
@@ -125,6 +126,7 @@ func (v *Vault) GetAllSecrets(ctx context.Context) (map[string][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer crypto.ZeroBytes(key)
 
 	all, err := v.store.GetAllSecrets(ctx)
 	if err != nil {
