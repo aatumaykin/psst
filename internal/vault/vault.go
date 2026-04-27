@@ -20,10 +20,10 @@ type Vault struct {
 }
 
 const (
-	serviceName   = "psst"
-	accountName   = "vault-key"
-	maxHistory    = 10
-	saltSize      = 16
+	serviceName = "psst"
+	accountName = "vault-key"
+	maxHistory  = 10
+	saltSize    = 16
 
 	maxUnlockAttempts     = 10
 	unlockDelayBaseMs     = 500

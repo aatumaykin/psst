@@ -2,7 +2,7 @@ package vault
 
 import "context"
 
-type VaultInterface interface {
+type Interface interface {
 	Unlock(ctx context.Context) error
 	GetSecret(ctx context.Context, name string) (*Secret, error)
 	SetSecret(ctx context.Context, name string, value []byte, tags []string) error

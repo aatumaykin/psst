@@ -15,7 +15,7 @@ var exportCmd = &cobra.Command{
 	Short: "Export secrets in .env format",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		envFile, _ := cmd.Flags().GetString("env-file")
-		return withVault(cmd, func(v vault.VaultInterface, f *output.Formatter) error {
+		return withVault(cmd, func(v vault.Interface, f *output.Formatter) error {
 			secrets, err := v.GetAllSecrets(cmd.Context())
 			if err != nil {
 				return exitWithError(err.Error())

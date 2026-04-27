@@ -55,7 +55,7 @@ var setCmd = &cobra.Command{
 			return exitWithError("Value cannot be empty")
 		}
 
-		return withVault(cmd, func(v vault.VaultInterface, f *output.Formatter) error {
+		return withVault(cmd, func(v vault.Interface, f *output.Formatter) error {
 			valueBytes := []byte(value)
 			defer func() {
 				for i := range valueBytes {

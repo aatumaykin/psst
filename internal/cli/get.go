@@ -18,7 +18,7 @@ var getCmd = &cobra.Command{
 		if err := vault.ValidateSecretName(name); err != nil {
 			return exitWithError(fmt.Sprintf("Invalid secret name %q", name))
 		}
-		return withVault(cmd, func(v vault.VaultInterface, f *output.Formatter) error {
+		return withVault(cmd, func(v vault.Interface, f *output.Formatter) error {
 			sec, err := v.GetSecret(cmd.Context(), name)
 			if err != nil {
 				return exitWithError(err.Error())

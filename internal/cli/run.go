@@ -19,7 +19,7 @@ var runCmd = &cobra.Command{
 		_, _, _, _, tags := getGlobalFlags(cmd)
 		noMask, _ := cmd.Flags().GetBool("no-mask")
 
-		return withVault(cmd, func(v vault.VaultInterface, f *output.Formatter) error {
+		return withVault(cmd, func(v vault.Interface, _ *output.Formatter) error {
 			var secrets map[string][]byte
 			var err error
 			if len(tags) > 0 {

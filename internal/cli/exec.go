@@ -41,7 +41,7 @@ func handleExecPatternDirect(
 	}
 
 	for _, name := range secretNames {
-		if err := vault.ValidateSecretName(name); err != nil {
+		if nameErr := vault.ValidateSecretName(name); nameErr != nil {
 			return exitWithError(fmt.Sprintf("Invalid secret name %q", name))
 		}
 	}

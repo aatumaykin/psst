@@ -12,7 +12,7 @@ var listCmd = &cobra.Command{
 	Short: "List all secrets",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		_, _, _, _, tags := getGlobalFlags(cmd)
-		return withVault(cmd, func(v vault.VaultInterface, f *output.Formatter) error {
+		return withVault(cmd, func(v vault.Interface, f *output.Formatter) error {
 			if len(tags) > 0 {
 				filtered, tagErr := v.GetSecretsByTags(cmd.Context(), tags)
 				if tagErr != nil {

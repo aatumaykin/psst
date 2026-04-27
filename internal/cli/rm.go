@@ -19,7 +19,7 @@ var rmCmd = &cobra.Command{
 		if err := vault.ValidateSecretName(name); err != nil {
 			return exitWithError(fmt.Sprintf("Invalid secret name %q", name))
 		}
-		return withVault(cmd, func(v vault.VaultInterface, f *output.Formatter) error {
+		return withVault(cmd, func(v vault.Interface, f *output.Formatter) error {
 			if delErr := v.DeleteSecret(cmd.Context(), name); delErr != nil {
 				return exitWithError(delErr.Error())
 			}

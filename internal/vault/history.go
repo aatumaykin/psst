@@ -8,13 +8,13 @@ import (
 )
 
 func maxVersion(history []store.HistoryEntry) int {
-	max := 0
+	maxV := 0
 	for _, h := range history {
-		if h.Version > max {
-			max = h.Version
+		if h.Version > maxV {
+			maxV = h.Version
 		}
 	}
-	return max
+	return maxV
 }
 
 func (v *Vault) GetHistory(ctx context.Context, name string) ([]SecretHistoryEntry, error) {

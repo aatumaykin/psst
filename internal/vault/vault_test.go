@@ -1013,7 +1013,7 @@ func TestConcurrentAccess(t *testing.T) {
 		}
 	}()
 	for i := range 50 {
-		v.SetSecret(ctx, "KEY", []byte(fmt.Sprintf("v%d", i)), nil)
+		v.SetSecret(ctx, "KEY", fmt.Appendf(nil, "v%d", i), nil)
 	}
 	<-done
 }

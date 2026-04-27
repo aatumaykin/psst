@@ -48,10 +48,10 @@ var importCmd = &cobra.Command{
 			}
 		}
 
-		return withVault(cmd, func(v vault.VaultInterface, f *output.Formatter) error {
+		return withVault(cmd, func(v vault.Interface, f *output.Formatter) error {
 			count := 0
 			for name, value := range entries {
-				if err := vault.ValidateSecretName(name); err != nil {
+				if nameErr := vault.ValidateSecretName(name); nameErr != nil {
 					if !f.IsQuiet() {
 						fmt.Fprintf(os.Stderr, "Skipping invalid name: %s\n", name)
 					}

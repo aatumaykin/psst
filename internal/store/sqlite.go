@@ -37,7 +37,8 @@ func NewSQLite(dbPath string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("verify database connection: %w", err)
 	}
 	var integrity string
-	if intErr := db.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&integrity); intErr != nil || integrity != "ok" {
+	if intErr := db.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&integrity); intErr != nil ||
+		integrity != "ok" {
 		_ = db.Close()
 		if intErr != nil {
 			return nil, fmt.Errorf("vault integrity check failed: %w", intErr)

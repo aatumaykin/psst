@@ -21,7 +21,7 @@ var tagCmd = &cobra.Command{
 			return exitWithError(fmt.Sprintf("Invalid secret name %q", name))
 		}
 
-		return withVault(cmd, func(v vault.VaultInterface, f *output.Formatter) error {
+		return withVault(cmd, func(v vault.Interface, f *output.Formatter) error {
 			if tagErr := v.AddTag(cmd.Context(), name, tag); tagErr != nil {
 				return exitWithError(tagErr.Error())
 			}
@@ -43,7 +43,7 @@ var untagCmd = &cobra.Command{
 			return exitWithError(fmt.Sprintf("Invalid secret name %q", name))
 		}
 
-		return withVault(cmd, func(v vault.VaultInterface, f *output.Formatter) error {
+		return withVault(cmd, func(v vault.Interface, f *output.Formatter) error {
 			if tagErr := v.RemoveTag(cmd.Context(), name, tag); tagErr != nil {
 				return exitWithError(tagErr.Error())
 			}

@@ -25,7 +25,7 @@ var rollbackCmd = &cobra.Command{
 			return exitWithError("Specify version with --to <number>")
 		}
 
-		return withVault(cmd, func(v vault.VaultInterface, f *output.Formatter) error {
+		return withVault(cmd, func(v vault.Interface, f *output.Formatter) error {
 			if rbErr := v.Rollback(cmd.Context(), name, toVersion); rbErr != nil {
 				return exitWithError(rbErr.Error())
 			}

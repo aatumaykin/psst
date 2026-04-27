@@ -119,7 +119,7 @@ const (
 	ExitAuthFailed = 5
 )
 
-func getUnlockedVault(ctx context.Context, jsonOut, quiet, global bool, env string) (vault.VaultInterface, error) {
+func getUnlockedVault(ctx context.Context, jsonOut, quiet, global bool, env string) (vault.Interface, error) {
 	vaultPath, err := vault.FindVaultPath(global, env)
 	if err != nil {
 		return nil, err
@@ -161,7 +161,7 @@ func printAuthFailed(jsonOut, quiet bool) {
 	}
 }
 
-func withVault(cmd *cobra.Command, fn func(v vault.VaultInterface, f *output.Formatter) error) error {
+func withVault(cmd *cobra.Command, fn func(v vault.Interface, f *output.Formatter) error) error {
 	jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
 	v, err := getUnlockedVault(cmd.Context(), jsonOut, quiet, global, env)
 	if err != nil {

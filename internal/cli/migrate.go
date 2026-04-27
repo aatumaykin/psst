@@ -14,7 +14,7 @@ var migrateCmd = &cobra.Command{
 	Use:   "migrate",
 	Short: "Migrate vault to latest KDF version",
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		return withVault(cmd, func(v vault.VaultInterface, f *output.Formatter) error {
+		return withVault(cmd, func(v vault.Interface, f *output.Formatter) error {
 			if migrateErr := v.MigrateKDF(cmd.Context()); migrateErr != nil {
 				return exitWithError(fmt.Sprintf("Migration failed: %v", migrateErr))
 			}
