@@ -6,9 +6,32 @@ import (
 	"strings"
 )
 
-// parseGlobalFlagsFromArgs mirrors the global flags defined in root.go init().
-// When adding/removing/changing global flags (PersistentFlags on rootCmd),
-// update this function and filterSecretNames to stay in sync.
+type flagDef struct {
+	Name     string
+	Short    string
+	HasValue bool
+}
+
+var globalFlags = []flagDef{
+	{Name: "--json"},
+	{Name: "--quiet", Short: "-q"},
+	{Name: "--global", Short: "-g"},
+	{Name: "--env", HasValue: true},
+	{Name: "--tag", HasValue: true},
+}
+
+func isKnownFlag(arg string) bool {
+	for _, f := range globalFlags {
+		if arg == f.Name || (f.Short != "" && arg == f.Short) {
+			return true
+		}
+		if f.HasValue && strings.HasPrefix(arg, f.Name+"=") {
+			return true
+		}
+	}
+	return false
+}
+
 func parseGlobalFlagsFromArgs(args []string) (bool, bool, bool, string, []string) {
 	var jsonOut, quiet, global bool
 	var env string
@@ -51,25 +74,30 @@ func parseGlobalFlagsFromArgs(args []string) (bool, bool, bool, string, []string
 }
 
 func filterSecretNames(args []string) []string {
-	skip := map[string]bool{
-		"--json": true, "--quiet": true, "-q": true,
-		"--global": true, "-g": true, "--no-mask": true,
-		"--expand-args": true,
-	}
 	valueArgs := map[int]bool{}
 	for i := 0; i < len(args); i++ {
-		if (args[i] == "--env" || args[i] == "--tag") && i+1 < len(args) {
-			valueArgs[i] = true
-			valueArgs[i+1] = true
-			i++
-		}
-		if strings.HasPrefix(args[i], "--env=") || strings.HasPrefix(args[i], "--tag=") {
-			valueArgs[i] = true
+		for _, f := range globalFlags {
+			if !f.HasValue {
+				continue
+			}
+			if args[i] == f.Name && i+1 < len(args) {
+				valueArgs[i] = true
+				valueArgs[i+1] = true
+				i++
+				break
+			}
+			if strings.HasPrefix(args[i], f.Name+"=") {
+				valueArgs[i] = true
+				break
+			}
 		}
 	}
+
+	extraFlags := map[string]bool{"--no-mask": true, "--expand-args": true}
+
 	var names []string
 	for i, a := range args {
-		if skip[a] || valueArgs[i] {
+		if isKnownFlag(a) || extraFlags[a] || valueArgs[i] {
 			continue
 		}
 		if !strings.HasPrefix(a, "-") {
