@@ -631,3 +631,143 @@ func TestUnlock_BruteForceProtection(t *testing.T) {
 		t.Fatal("should be locked after max failed attempts")
 	}
 }
+
+func TestRequireUnlock_ReturnsErrorWhenLocked(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "vault.db")
+	s, err := store.NewSQLite(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.InitSchema()
+
+	enc := crypto.NewAESGCM()
+	kp := &testKeyProvider{enc: enc, key: nil}
+
+	v := New(enc, kp, s)
+	defer v.Close()
+
+	_, err = v.ListSecrets(context.Background())
+	if err == nil {
+		t.Fatal("ListSecrets on locked vault should fail")
+	}
+	if !strings.Contains(err.Error(), "locked") {
+		t.Fatalf("expected locked error, got: %v", err)
+	}
+}
+
+func TestSetSecret_RejectsInvalidName(t *testing.T) {
+	v := setupTestVault(t)
+	defer v.Close()
+	ctx := context.Background()
+
+	for _, name := range []string{"lower", "123ABC", "has-dash", "has space"} {
+		err := v.SetSecret(ctx, name, []byte("val"), nil)
+		if err == nil {
+			t.Fatalf("SetSecret(%q) should be rejected", name)
+		}
+	}
+}
+
+func TestEmptyVault_RequiresCorrectPassword(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "vault.db")
+	enc := crypto.NewAESGCM()
+
+	rightKey, err := enc.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	kp := &testKeyProvider{enc: enc, key: rightKey}
+
+	ctx := context.Background()
+	if err = InitVault(ctx, dbPath, enc, kp, InitOptions{SkipKeychain: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := store.NewSQLite(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	wrongKey, _ := enc.GenerateKey()
+	wrongKey[0] ^= 0xFF
+	wrongKp := &testKeyProvider{enc: enc, key: wrongKey}
+
+	wrongV := New(enc, wrongKp, s)
+	defer wrongV.Close()
+
+	if err = wrongV.Unlock(ctx); err == nil {
+		t.Fatal("unlock with wrong key on empty vault should fail")
+	}
+
+	s2, err := store.NewSQLite(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+
+	v := New(enc, kp, s2)
+	defer v.Close()
+
+	if err = v.Unlock(ctx); err != nil {
+		t.Fatalf("unlock with correct key on empty vault: %v", err)
+	}
+}
+
+func TestReadKDFVersion_RejectsUnknownVersion(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "vault.db")
+	s, err := store.NewSQLite(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.InitSchema()
+	ctx := context.Background()
+
+	enc := crypto.NewAESGCM()
+	rightKey, _ := enc.GenerateKey()
+	kp := &testKeyProvider{enc: enc, key: rightKey}
+
+	s.SetMeta(ctx, "kdf_version", "99")
+
+	v := New(enc, kp, s)
+	defer v.Close()
+
+	err = v.Unlock(ctx)
+	if err == nil {
+		t.Fatal("Unlock should fail with unknown KDF version")
+	}
+	if !strings.Contains(err.Error(), "unsupported KDF version") {
+		t.Fatalf("expected unsupported KDF version error, got: %v", err)
+	}
+}
+
+func TestReadKDFVersion_RejectsCorruptedVersion(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "vault.db")
+	s, err := store.NewSQLite(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.InitSchema()
+	ctx := context.Background()
+
+	enc := crypto.NewAESGCM()
+	rightKey, _ := enc.GenerateKey()
+	kp := &testKeyProvider{enc: enc, key: rightKey}
+
+	s.SetMeta(ctx, "kdf_version", "abc")
+
+	v := New(enc, kp, s)
+	defer v.Close()
+
+	err = v.Unlock(ctx)
+	if err == nil {
+		t.Fatal("Unlock should fail with corrupted KDF version")
+	}
+	if !strings.Contains(err.Error(), "corrupted kdf_version") {
+		t.Fatalf("expected corrupted kdf_version error, got: %v", err)
+	}
+}

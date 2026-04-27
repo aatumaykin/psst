@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"time"
@@ -38,6 +40,8 @@ const (
 	metaUnlockLockedUntil = "unlock_locked_until"
 )
 
+var secretNameRegex = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
+
 func New(enc crypto.Encryptor, kp keyring.KeyProvider, s store.SecretStore) *Vault {
 	return &Vault{enc: enc, kp: kp, store: s}
 }
@@ -62,7 +66,7 @@ func FindVaultPath(global bool, env string) (string, error) {
 func InitVault(
 	ctx context.Context,
 	vaultPath string,
-	_ crypto.Encryptor,
+	enc crypto.Encryptor,
 	kp keyring.KeyProvider,
 	opts InitOptions,
 ) error {
@@ -93,6 +97,7 @@ func InitVault(
 		return fmt.Errorf("set kdf salt: %w", err)
 	}
 
+	var rawKey string
 	if !opts.SkipKeychain && !keyring.IsEnvProvider(kp) {
 		var key []byte
 		key, err = kp.GenerateKey()
@@ -102,6 +107,29 @@ func InitVault(
 		if err = kp.SetKey(serviceName, accountName, key); err != nil {
 			return fmt.Errorf("store key in keychain: %w", err)
 		}
+		rawKey = hex.EncodeToString(key)
+	} else {
+		rawKey, err = kp.GetRawKey(serviceName, accountName)
+		if err != nil {
+			return nil
+		}
+	}
+
+	derivedKey, deriveErr := enc.KeyToBufferV2WithSalt(rawKey, salt)
+	if deriveErr != nil {
+		return fmt.Errorf("derive verification key: %w", deriveErr)
+	}
+
+	verifyCiphertext, verifyIV, encErr := enc.Encrypt([]byte("psst-verify"), derivedKey)
+	if encErr != nil {
+		return fmt.Errorf("create verification: %w", encErr)
+	}
+
+	if metaErr := s.SetMeta(ctx, "verify_iv", base64.StdEncoding.EncodeToString(verifyIV)); metaErr != nil {
+		return fmt.Errorf("set verify_iv: %w", metaErr)
+	}
+	if metaErr := s.SetMeta(ctx, "verify_data", base64.StdEncoding.EncodeToString(verifyCiphertext)); metaErr != nil {
+		return fmt.Errorf("set verify_data: %w", metaErr)
 	}
 
 	return nil
@@ -126,7 +154,10 @@ func (v *Vault) Unlock(ctx context.Context) error {
 	}
 	var key []byte
 	switch kdfVersion {
+	case 1:
+		key, err = v.enc.KeyToBuffer(rawKey)
 	case crypto.KDFVersion2:
+		var saltB64 string
 		saltB64, metaErr := v.store.GetMeta(ctx, "kdf_salt")
 		if metaErr != nil {
 			return fmt.Errorf("get kdf_salt: %w", metaErr)
@@ -134,13 +165,14 @@ func (v *Vault) Unlock(ctx context.Context) error {
 		if saltB64 == "" {
 			return errors.New("vault corrupted: kdf_salt missing for V2 vault")
 		}
+		var salt []byte
 		salt, decodeErr := base64.StdEncoding.DecodeString(saltB64)
 		if decodeErr != nil {
 			return fmt.Errorf("decode kdf_salt: %w", decodeErr)
 		}
 		key, err = v.enc.KeyToBufferV2WithSalt(rawKey, salt)
 	default:
-		key, err = v.enc.KeyToBuffer(rawKey)
+		return fmt.Errorf("unsupported KDF version: %d", kdfVersion)
 	}
 	if err != nil {
 		return fmt.Errorf("derive key: %w", err)
@@ -150,13 +182,31 @@ func (v *Vault) Unlock(ctx context.Context) error {
 
 	all, verifyErr := v.store.GetAllSecrets(ctx)
 	if verifyErr != nil {
-		for i := range v.key {
-			v.key[i] = 0
-		}
+		crypto.ZeroBytes(v.key)
 		v.key = nil
 		return fmt.Errorf("verify vault: %w", verifyErr)
 	}
-	if len(all) > 0 {
+
+	verifyIV, ivErr := v.store.GetMeta(ctx, "verify_iv")
+	verifyData, dataErr := v.store.GetMeta(ctx, "verify_data")
+
+	if ivErr == nil && dataErr == nil && verifyIV != "" && verifyData != "" {
+		ivBytes, _ := base64.StdEncoding.DecodeString(verifyIV)
+		dataBytes, _ := base64.StdEncoding.DecodeString(verifyData)
+		_, decErr := v.enc.Decrypt(dataBytes, ivBytes, v.key)
+		if decErr != nil {
+			attempts, _ := v.store.IncrementMetaInt(ctx, metaUnlockAttempts, 1)
+			if attempts >= maxUnlockAttempts {
+				lockDuration := time.Duration(attempts*unlockDelayBaseMs) * time.Millisecond
+				lockedUntil := time.Now().Add(lockDuration)
+				_ = v.store.SetMeta(ctx, metaUnlockLockedUntil, lockedUntil.Format(time.RFC3339))
+				_ = v.store.SetMeta(ctx, metaUnlockAttempts, "0")
+			}
+			crypto.ZeroBytes(v.key)
+			v.key = nil
+			return errors.New("authentication failed")
+		}
+	} else if len(all) > 0 {
 		_, decErr := v.enc.Decrypt(all[0].EncryptedValue, all[0].IV, v.key)
 		if decErr != nil {
 			attempts, _ := v.store.IncrementMetaInt(ctx, metaUnlockAttempts, 1)
@@ -166,9 +216,7 @@ func (v *Vault) Unlock(ctx context.Context) error {
 				_ = v.store.SetMeta(ctx, metaUnlockLockedUntil, lockedUntil.Format(time.RFC3339))
 				_ = v.store.SetMeta(ctx, metaUnlockAttempts, "0")
 			}
-			for i := range v.key {
-				v.key[i] = 0
-			}
+			crypto.ZeroBytes(v.key)
 			v.key = nil
 			return errors.New("authentication failed")
 		}
@@ -189,7 +237,10 @@ func (v *Vault) readKDFVersion(ctx context.Context) (int, error) {
 	}
 	n, err := strconv.Atoi(val)
 	if err != nil {
-		return 1, nil //nolint:nilerr // unrecognized version defaults to V1
+		return 0, fmt.Errorf("corrupted kdf_version: %q: %w", val, err)
+	}
+	if n < 1 || n > 2 {
+		return 0, fmt.Errorf("unsupported KDF version: %d", n)
 	}
 	return n, nil
 }
@@ -201,6 +252,9 @@ func (v *Vault) SetSecret(ctx context.Context, name string, value []byte, tags [
 
 	if len(name) > maxSecretNameLen {
 		return fmt.Errorf("secret name too long: max %d bytes", maxSecretNameLen)
+	}
+	if !secretNameRegex.MatchString(name) {
+		return fmt.Errorf("invalid secret name %q: must match ^[A-Z][A-Z0-9_]*$", name)
 	}
 	if len(value) > maxSecretValueLen {
 		return fmt.Errorf("secret value too long: max %d bytes", maxSecretValueLen)
@@ -274,6 +328,9 @@ func (v *Vault) GetSecret(ctx context.Context, name string) (*Secret, error) {
 }
 
 func (v *Vault) ListSecrets(ctx context.Context) ([]SecretMeta, error) {
+	if err := v.requireUnlock(); err != nil {
+		return nil, err
+	}
 	storeMetas, err := v.store.ListSecrets(ctx)
 	if err != nil {
 		return nil, err
@@ -291,6 +348,9 @@ func (v *Vault) ListSecrets(ctx context.Context) ([]SecretMeta, error) {
 }
 
 func (v *Vault) DeleteSecret(ctx context.Context, name string) error {
+	if err := v.requireUnlock(); err != nil {
+		return err
+	}
 	return v.store.ExecTx(func() error {
 		if err := v.store.DeleteSecret(ctx, name); err != nil {
 			return err
@@ -300,6 +360,9 @@ func (v *Vault) DeleteSecret(ctx context.Context, name string) error {
 }
 
 func (v *Vault) GetHistory(ctx context.Context, name string) ([]SecretHistoryEntry, error) {
+	if err := v.requireUnlock(); err != nil {
+		return nil, err
+	}
 	entries, err := v.store.GetHistory(ctx, name)
 	if err != nil {
 		return nil, err
@@ -370,6 +433,9 @@ func (v *Vault) Rollback(ctx context.Context, name string, version int) error {
 }
 
 func (v *Vault) AddTag(ctx context.Context, name string, tag string) error {
+	if err := v.requireUnlock(); err != nil {
+		return err
+	}
 	sec, err := v.store.GetSecret(ctx, name)
 	if err != nil {
 		return err
@@ -386,6 +452,9 @@ func (v *Vault) AddTag(ctx context.Context, name string, tag string) error {
 }
 
 func (v *Vault) RemoveTag(ctx context.Context, name string, tag string) error {
+	if err := v.requireUnlock(); err != nil {
+		return err
+	}
 	sec, err := v.store.GetSecret(ctx, name)
 	if err != nil {
 		return err
@@ -441,6 +510,10 @@ func (v *Vault) GetAllSecrets(ctx context.Context) (map[string][]byte, error) {
 		var plaintext []byte
 		plaintext, err = v.enc.Decrypt(s.EncryptedValue, s.IV, v.key)
 		if err != nil {
+			for k, v := range result {
+				crypto.ZeroBytes(v)
+				delete(result, k)
+			}
 			return nil, fmt.Errorf("decrypt secret: %w", err)
 		}
 		result[s.Name] = plaintext
@@ -482,6 +555,13 @@ func (v *Vault) Close() error {
 	}
 	v.key = nil
 	return v.store.Close()
+}
+
+func (v *Vault) requireUnlock() error {
+	if v.key == nil {
+		return fmt.Errorf("vault is locked: unlock required")
+	}
+	return nil
 }
 
 func (v *Vault) MigrateKDF(ctx context.Context) error {
@@ -544,6 +624,7 @@ func (v *Vault) MigrateKDF(ctx context.Context) error {
 		}
 		return v.store.SetMeta(ctx, "kdf_version", strconv.Itoa(crypto.CurrentKDFVersion))
 	}); txErr != nil {
+		crypto.ZeroBytes(newKey)
 		return txErr
 	}
 	for i := range v.key {
