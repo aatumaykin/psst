@@ -2,243 +2,151 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Fix all security, architecture, and robustness findings from the comprehensive audit of psst.
+**Goal:** Fix 9 audit findings (3 HIGH, 5 MEDIUM, 4 LOW) — security hardening, bug fixes, test coverage.
 
-**Architecture:** Bottom-up approach in 6 phases: security P0 fixes → vault.go split → vault.Open() factory → CLI refactoring → robustness improvements → tests. Each phase produces a compilable, test-passing state.
+**Architecture:** Targeted fixes in vault, runner, cli, output packages. Each task is independently committable. No new dependencies.
 
-**Tech Stack:** Go 1.26, Cobra CLI, SQLite (modernc.org/sqlite), AES-256-GCM + Argon2id, OS keychain (go-keyring).
+**Tech Stack:** Go 1.26, standard library + existing deps (cobra, sqlite, argon2, keyring).
 
 ---
 
 ## File Structure
 
-**New files:**
-- `internal/vault/path.go` — FindVaultPath + env name validation
-- `internal/vault/init.go` — InitVault
-- `internal/vault/unlock.go` — Unlock, failUnlock, readKDFVersion, checkLockout, deriveKey, verifyKey, resetFailedAttempts
-- `internal/vault/secrets.go` — SetSecret, GetSecret, ListSecrets, DeleteSecret, GetAllSecrets, ErrSecretNotFound
-- `internal/vault/history.go` — GetHistory, Rollback, maxVersion
-- `internal/vault/tags.go` — AddTag, RemoveTag, GetSecretsByTags, GetSecretNamesByTags, GetSecretsByTagValues
-- `internal/vault/migrate.go` — MigrateKDF
-- `internal/vault/validation.go` — ValidateSecretName, ValidateTags, exported regex + constants
-- `internal/vault/interface.go` — VaultInterface for CLI testability
-
-**Modified files:**
-- `internal/vault/vault.go` — reduced to struct + New + Close + requireUnlock + Open
-- `internal/vault/types.go` — add InitOptions (already exists, no change)
-- `internal/cli/root.go` — remove store/crypto/keyring imports, add withVault, exit constants
-- `internal/cli/exec.go` — ExecConfig struct, use VaultInterface + ValidateSecretName
-- `internal/cli/set.go` — use vault.ValidateSecretName, withVault
-- `internal/cli/get.go` — use vault.ValidateSecretName, withVault
-- `internal/cli/rm.go` — use vault.ValidateSecretName, withVault
-- `internal/cli/history.go` — use vault.ValidateSecretName, withVault
-- `internal/cli/rollback.go` — use vault.ValidateSecretName, withVault
-- `internal/cli/tag.go` — use vault.ValidateSecretName, withVault
-- `internal/cli/import.go` — use vault.ValidateSecretName, withVault
-- `internal/cli/run.go` — use withVault
-- `internal/cli/export.go` — use withVault
-- `internal/cli/scan.go` — use withVault
-- `internal/cli/migrate.go` — use withVault
-- `internal/cli/init.go` — use vault.Open in InitVault path
-- `internal/cli/args.go` — remove dead params from filterSecretNames
-- `internal/cli/update.go` — use Formatter consistently
-- `internal/crypto/aesgcm.go` — add runtime.KeepAlive to ZeroBytes
-- `internal/store/sqlite.go` — PRAGMA integrity_check on open, ExecTx doc
-- `internal/keyring/oskeyring.go` — PSST_PASSWORD fallback
+| Action | File | Purpose |
+|--------|------|---------|
+| Modify | `internal/vault/secrets.go` | H1: zero key copies |
+| Modify | `internal/vault/unlock.go` | H3: lazy-load secrets; M3: handle SetMeta errors |
+| Modify | `internal/vault/tags.go` | M2: refactor GetSecretsByTagValues |
+| Modify | `internal/runner/runner.go` | M4: use crypto.ZeroBytes |
+| Modify | `Makefile` | H2: add -race |
+| Modify | `internal/cli/args.go` | M5: unify flag parsing |
+| Modify | `internal/cli/root.go` | M5: extract flag definitions |
+| Modify | `internal/output/output_test.go` | L3: add missing tests |
+| Modify | `tests/integration_test.go` | L4: add missing integration tests |
 
 ---
 
-## Phase 1: Security P0
-
-### Task 1: Path traversal in --env (S-1)
+### Task 1: H1 — Zero key copies in GetSecret and GetAllSecrets
 
 **Files:**
-- Modify: `internal/vault/vault.go:56-71`
-- Test: `internal/vault/vault_test.go`
+- Modify: `internal/vault/secrets.go:63` and `internal/vault/secrets.go:123`
 
-- [ ] **Step 1: Add env name validation test**
+- [ ] **Step 1: Add defer crypto.ZeroBytes(key) to GetSecret**
 
-Add to `internal/vault/vault_test.go`:
-
-```go
-func TestFindVaultPath_RejectsTraversal(t *testing.T) {
-	for _, env := range []string{"../etc", "..", "a/b", "a..b"} {
-		t.Run(env, func(t *testing.T) {
-			_, err := FindVaultPath(false, env)
-			if err == nil {
-				t.Fatalf("FindVaultPath(%q) should reject", env)
-			}
-		})
-	}
-}
-
-func TestFindVaultPath_AcceptsValidEnv(t *testing.T) {
-	for _, env := range []string{"prod", "staging-1", "test_env", "v2"} {
-		t.Run(env, func(t *testing.T) {
-			_, err := FindVaultPath(false, env)
-			if err != nil {
-				t.Fatalf("FindVaultPath(%q) should accept: %v", env, err)
-			}
-		})
-	}
-}
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `go test ./internal/vault/ -run TestFindVaultPath_Rejects -v`
-Expected: FAIL — FindVaultPath does not validate env names
-
-- [ ] **Step 3: Add envNameRegex and validation to FindVaultPath**
-
-In `internal/vault/vault.go`, add after the `secretNameRegex` var (line 48):
+In `internal/vault/secrets.go`, add the defer after the `copyKey` call in `GetSecret`:
 
 ```go
-var envNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+func (v *Vault) GetSecret(ctx context.Context, name string) (*Secret, error) {
+	key, err := v.copyKey()
+	if err != nil {
+		return nil, err
+	}
+	defer crypto.ZeroBytes(key)
 ```
 
-Change `FindVaultPath` to validate env:
+- [ ] **Step 2: Add defer crypto.ZeroBytes(key) to GetAllSecrets**
+
+In the same file, add the defer in `GetAllSecrets`:
 
 ```go
-func FindVaultPath(global bool, env string) (string, error) {
-	if env != "" && !envNameRegex.MatchString(env) {
-		return "", fmt.Errorf("invalid env name %q: must match %s", env, envNameRegex.String())
+func (v *Vault) GetAllSecrets(ctx context.Context) (map[string][]byte, error) {
+	key, err := v.copyKey()
+	if err != nil {
+		return nil, err
 	}
-
-	baseDir := ".psst"
-	if global {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("get home dir: %w", err)
-		}
-		baseDir = filepath.Join(home, ".psst")
-	}
-
-	if env != "" {
-		baseDir = filepath.Join(baseDir, "envs", env)
-	}
-
-	return filepath.Join(baseDir, "vault.db"), nil
-}
+	defer crypto.ZeroBytes(key)
 ```
 
-- [ ] **Step 4: Run tests**
+- [ ] **Step 3: Run tests**
 
-Run: `go test ./internal/vault/ -run TestFindVaultPath -v`
+Run: `go test ./internal/vault/ -v -run TestSetGetSecret`
+Run: `go test ./internal/vault/ -v -run TestGetAllSecrets`
 Expected: PASS
+
+- [ ] **Step 4: Run full test suite**
+
+Run: `go test ./... -v`
+Expected: All PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add internal/vault/vault.go internal/vault/vault_test.go
-git commit -m "fix: validate env name to prevent path traversal"
+git add internal/vault/secrets.go
+git commit -m "fix: zero key copies after GetSecret and GetAllSecrets"
 ```
 
 ---
 
-### Task 2: TOCTOU in Unlock — verify key before storing (S-2)
+### Task 2: H2 — Add -race to make test
 
 **Files:**
-- Modify: `internal/vault/vault.go:146-222`
+- Modify: `Makefile:19`
 
-- [ ] **Step 1: Write failing test for concurrent unlock safety**
+- [ ] **Step 1: Update Makefile test target**
 
-Add to `internal/vault/vault_test.go`:
+Change line 19 of `Makefile` from:
+
+```
+	go test ./... -v
+```
+
+to:
+
+```
+	go test -race ./... -v
+```
+
+- [ ] **Step 2: Run make test to verify**
+
+Run: `make test`
+Expected: All PASS (may be slower due to race detector)
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add Makefile
+git commit -m "fix: enable race detector in make test"
+```
+
+---
+
+### Task 3: H3 — Lazy-load secrets in Unlock
+
+**Files:**
+- Modify: `internal/vault/unlock.go:64-91`
+
+- [ ] **Step 1: Write the test for unlock without loading all secrets**
+
+Add a test in `internal/vault/vault_test.go` that verifies unlock works when vault has verify_data but no secrets:
 
 ```go
-func TestUnlock_DoesNotExposeUnverifiedKey(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "vault.db")
-	enc := crypto.NewAESGCM()
-
-	rightKey, err := enc.GenerateKey()
-	if err != nil {
-		t.Fatal(err)
-	}
-	kp := &testKeyProvider{enc: enc, key: rightKey}
-
-	ctx := context.Background()
-	if err = InitVault(ctx, dbPath, enc, kp, InitOptions{SkipKeychain: true}); err != nil {
-		t.Fatal(err)
-	}
-
-	s, err := store.NewSQLite(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
-
-	wrongKey, _ := enc.GenerateKey()
-	wrongKey[0] ^= 0xFF
-	wrongKp := &testKeyProvider{enc: enc, key: wrongKey}
-
-	v := New(enc, wrongKp, s)
+func TestUnlock_WithVerifyData_NoSecrets(t *testing.T) {
+	v := setupTestVault(t)
 	defer v.Close()
+	ctx := context.Background()
 
-	unlockErr := v.Unlock(ctx)
-	if unlockErr == nil {
-		t.Fatal("wrong key should fail unlock")
+	if err := v.Unlock(ctx); err != nil {
+		t.Fatal(err)
 	}
 
-	if v.key != nil {
-		t.Fatal("v.key must be nil after failed unlock — unverified key was exposed")
+	sec, err := v.GetSecret(ctx, "NONEXISTENT")
+	if err != ErrSecretNotFound {
+		t.Fatalf("expected ErrSecretNotFound, got %v", err)
 	}
+	_ = sec
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run test to verify it passes (verify_data path already works)**
 
-Run: `go test ./internal/vault/ -run TestUnlock_DoesNotExposeUnverifiedKey -v`
-Expected: FAIL — `v.key` is set before verification
+Run: `go test ./internal/vault/ -v -run TestUnlock_WithVerifyData_NoSecrets`
+Expected: PASS
 
-- [ ] **Step 3: Fix Unlock to use local key variable**
+- [ ] **Step 3: Restructure Unlock to lazy-load**
 
-Replace the `Unlock` method in `internal/vault/vault.go` (lines 147-222). The key change: store derived key in local `key` variable, only assign `v.key = key` after successful verification:
+In `internal/vault/unlock.go`, replace the block from line 64 to line 91. The current code:
 
 ```go
-func (v *Vault) Unlock(ctx context.Context) error {
-	if lockedUntil, _ := v.store.GetMeta(ctx, metaUnlockLockedUntil); lockedUntil != "" {
-		ts, parseErr := time.Parse(time.RFC3339, lockedUntil)
-		if parseErr == nil && time.Now().Before(ts) {
-			return fmt.Errorf("vault locked until %s due to too many failed unlock attempts", ts.Format(time.Kitchen))
-		}
-	}
-
-	rawKey, err := v.kp.GetRawKey(serviceName, accountName)
-	if err != nil {
-		return fmt.Errorf("unlock vault: %w", err)
-	}
-
-	kdfVersion, err := v.readKDFVersion(ctx)
-	if err != nil {
-		return err
-	}
-	var key []byte
-	switch kdfVersion {
-	case 1:
-		key, err = v.enc.KeyToBuffer(rawKey)
-	case crypto.KDFVersion2:
-		var saltB64 string
-		saltB64, metaErr := v.store.GetMeta(ctx, "kdf_salt")
-		if metaErr != nil {
-			return fmt.Errorf("get kdf_salt: %w", metaErr)
-		}
-		if saltB64 == "" {
-			return errors.New("vault corrupted: kdf_salt missing for V2 vault")
-		}
-		var salt []byte
-		salt, decodeErr := base64.StdEncoding.DecodeString(saltB64)
-		if decodeErr != nil {
-			return fmt.Errorf("decode kdf_salt: %w", decodeErr)
-		}
-		key, err = v.enc.KeyToBufferV2WithSalt(rawKey, salt)
-	default:
-		return fmt.Errorf("unsupported KDF version: %d", kdfVersion)
-	}
-	if err != nil {
-		return fmt.Errorf("derive key: %w", err)
-	}
-
 	all, verifyErr := v.store.GetAllSecrets(ctx)
 	if verifyErr != nil {
 		return fmt.Errorf("verify vault: %w", verifyErr)
@@ -267,488 +175,73 @@ func (v *Vault) Unlock(ctx context.Context) error {
 		}
 		verified = true
 	}
-
-	v.mu.Lock()
-	v.key = key
-	v.mu.Unlock()
-
-	if verified {
-		_ = v.store.SetMeta(ctx, metaUnlockAttempts, "0")
-		_ = v.store.SetMeta(ctx, metaUnlockLockedUntil, "")
-		_ = v.store.SetMeta(ctx, metaUnlockCycle, "0")
-	}
-	return nil
-}
 ```
 
-Update `failUnlock` to accept the key parameter:
+Replace with:
 
 ```go
-func (v *Vault) failUnlock(ctx context.Context, key []byte) error {
-	crypto.ZeroBytes(key)
-	attempts, _ := v.store.IncrementMetaInt(ctx, metaUnlockAttempts, 1)
-	if attempts >= maxUnlockAttempts {
-		cycle := 0
-		if cycleStr, cycleErr := v.store.GetMeta(ctx, metaUnlockCycle); cycleErr == nil {
-			if n, e := strconv.Atoi(cycleStr); e == nil {
-				cycle = n
-			}
-		}
+	verified := false
 
-		lockDuration := min(
-			time.Duration(unlockDelayBaseMs)*time.Millisecond*time.Duration(1<<uint(cycle)),
-			maxLockDuration,
-		)
-		lockedUntil := time.Now().Add(lockDuration)
-		_ = v.store.SetMeta(ctx, metaUnlockLockedUntil, lockedUntil.Format(time.RFC3339))
-		_ = v.store.SetMeta(ctx, metaUnlockAttempts, "0")
-		_ = v.store.SetMeta(ctx, metaUnlockCycle, strconv.Itoa(cycle+1))
-	}
-	return errors.New("authentication failed")
-}
-```
-
-- [ ] **Step 4: Run all vault tests**
-
-Run: `go test ./internal/vault/ -v`
-Expected: ALL PASS
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add internal/vault/vault.go internal/vault/vault_test.go
-git commit -m "fix: verify key before storing in Vault to prevent TOCTOU"
-```
-
----
-
-### Task 3: Silent init failure (S-3)
-
-**Files:**
-- Modify: `internal/vault/vault.go:119-123`
-- Test: `internal/vault/vault_test.go`
-
-- [ ] **Step 1: Write failing test**
-
-Add to `internal/vault/vault_test.go`:
-
-```go
-func TestInitVault_ReturnsErrorWithoutKey(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "vault.db")
-	enc := crypto.NewAESGCM()
-
-	kp := &testKeyProvider{enc: enc, key: nil}
-
-	ctx := context.Background()
-	err := InitVault(ctx, dbPath, enc, kp, InitOptions{SkipKeychain: true})
-	if err == nil {
-		t.Fatal("InitVault should return error when no key is available")
-	}
-}
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `go test ./internal/vault/ -run TestInitVault_ReturnsErrorWithoutKey -v`
-Expected: FAIL — InitVault returns nil
-
-- [ ] **Step 3: Fix InitVault to return error**
-
-In `internal/vault/vault.go`, change lines 119-123 from:
-
-```go
-	rawKey, err = kp.GetRawKey(serviceName, accountName)
-	if err != nil {
-		return nil
-	}
-```
-
-to:
-
-```go
-	rawKey, err = kp.GetRawKey(serviceName, accountName)
-	if err != nil {
-		return fmt.Errorf("no key available: set PSST_PASSWORD or ensure keychain is accessible: %w", err)
-	}
-```
-
-- [ ] **Step 4: Run all vault tests**
-
-Run: `go test ./internal/vault/ -v`
-Expected: ALL PASS
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add internal/vault/vault.go internal/vault/vault_test.go
-git commit -m "fix: return error when InitVault has no key source"
-```
-
----
-
-## Phase 2: Split vault.go
-
-### Task 4: Create validation.go
-
-**Files:**
-- Create: `internal/vault/validation.go`
-- Modify: `internal/vault/vault.go` (remove constants + regex)
-
-- [ ] **Step 1: Create validation.go**
-
-```go
-package vault
-
-import (
-	"fmt"
-	"regexp"
-)
-
-const (
-	maxSecretNameLen  = 256
-	maxSecretValueLen = 4096
-	maxTags           = 20
-)
-
-var secretNameRegex = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
-
-var tagRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
-
-func ValidateSecretName(name string) error {
-	if len(name) > maxSecretNameLen {
-		return fmt.Errorf("secret name too long: max %d bytes", maxSecretNameLen)
-	}
-	if !secretNameRegex.MatchString(name) {
-		return fmt.Errorf("invalid secret name %q: must match %s", name, secretNameRegex.String())
-	}
-	return nil
-}
-
-func ValidateTags(tags []string) error {
-	if len(tags) > maxTags {
-		return fmt.Errorf("too many tags: max %d", maxTags)
-	}
-	for _, t := range tags {
-		if !tagRegex.MatchString(t) {
-			return fmt.Errorf("invalid tag %q: must match %s", t, tagRegex.String())
-		}
-	}
-	return nil
-}
-```
-
-- [ ] **Step 2: Remove constants and regex from vault.go**
-
-In `internal/vault/vault.go`, remove lines 32-48 (the const block and secretNameRegex). The constants and regex are now in `validation.go`.
-
-- [ ] **Step 3: Update SetSecret to use ValidateSecretName and ValidateTags**
-
-In `internal/vault/vault.go`, replace the name/value validation in `SetSecret` (lines 277-285) with:
-
-```go
-	if err := ValidateSecretName(name); err != nil {
-		return err
-	}
-	if len(value) > maxSecretValueLen {
-		return fmt.Errorf("secret value too long: max %d bytes", maxSecretValueLen)
-	}
-	if err := ValidateTags(tags); err != nil {
-		return err
-	}
-```
-
-Note: `ValidateSecretName` already checks both length and regex.
-
-- [ ] **Step 4: Run tests**
-
-Run: `go test ./internal/vault/ -v`
-Expected: ALL PASS
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add internal/vault/validation.go internal/vault/vault.go
-git commit -m "refactor: extract validation functions from vault.go"
-```
-
----
-
-### Task 5: Split vault.go into focused files
-
-**Files:**
-- Create: `internal/vault/path.go`
-- Create: `internal/vault/init.go`
-- Create: `internal/vault/unlock.go`
-- Create: `internal/vault/secrets.go`
-- Create: `internal/vault/history.go`
-- Create: `internal/vault/tags.go`
-- Create: `internal/vault/migrate.go`
-- Modify: `internal/vault/vault.go`
-
-This is the largest task. Each new file gets specific functions from vault.go with appropriate imports.
-
-- [ ] **Step 1: Create path.go**
-
-```go
-package vault
-
-import (
-	"fmt"
-	"os"
-	"path/filepath"
-)
-
-func FindVaultPath(global bool, env string) (string, error) {
-	if env != "" && !envNameRegex.MatchString(env) {
-		return "", fmt.Errorf("invalid env name %q: must match %s", env, envNameRegex.String())
-	}
-
-	baseDir := ".psst"
-	if global {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("get home dir: %w", err)
-		}
-		baseDir = filepath.Join(home, ".psst")
-	}
-
-	if env != "" {
-		baseDir = filepath.Join(baseDir, "envs", env)
-	}
-
-	return filepath.Join(baseDir, "vault.db"), nil
-}
-```
-
-- [ ] **Step 2: Create init.go**
-
-```go
-package vault
-
-import (
-	"context"
-	"crypto/rand"
-	"encoding/base64"
-	"encoding/hex"
-	"fmt"
-	"os"
-	"path/filepath"
-	"strconv"
-
-	"github.com/aatumaykin/psst/internal/crypto"
-	"github.com/aatumaykin/psst/internal/keyring"
-	"github.com/aatumaykin/psst/internal/store"
-)
-
-func InitVault(
-	ctx context.Context,
-	vaultPath string,
-	enc crypto.Encryptor,
-	kp keyring.KeyProvider,
-	opts InitOptions,
-) error {
-	dir := filepath.Dir(vaultPath)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return fmt.Errorf("create vault directory: %w", err)
-	}
-
-	s, err := store.NewSQLite(vaultPath)
-	if err != nil {
-		return fmt.Errorf("create database: %w", err)
-	}
-	defer s.Close()
-
-	if err = s.InitSchema(); err != nil {
-		return fmt.Errorf("init schema: %w", err)
-	}
-
-	if err = s.SetMeta(ctx, "kdf_version", strconv.Itoa(crypto.CurrentKDFVersion)); err != nil {
-		return fmt.Errorf("set vault metadata: %w", err)
-	}
-
-	salt := make([]byte, saltSize)
-	if _, err = rand.Read(salt); err != nil {
-		return fmt.Errorf("generate salt: %w", err)
-	}
-	if err = s.SetMeta(ctx, "kdf_salt", base64.StdEncoding.EncodeToString(salt)); err != nil {
-		return fmt.Errorf("set kdf salt: %w", err)
-	}
-
-	var rawKey string
-	if !opts.SkipKeychain && !keyring.IsEnvProvider(kp) {
-		var key []byte
-		key, err = kp.GenerateKey()
-		if err != nil {
-			return fmt.Errorf("generate key: %w", err)
-		}
-		if err = kp.SetKey(serviceName, accountName, key); err != nil {
-			return fmt.Errorf("store key in keychain: %w", err)
-		}
-		rawKey = hex.EncodeToString(key)
-	} else {
-		rawKey, err = kp.GetRawKey(serviceName, accountName)
-		if err != nil {
-			return fmt.Errorf("no key available: set PSST_PASSWORD or ensure keychain is accessible: %w", err)
-		}
-	}
-
-	derivedKey, deriveErr := enc.KeyToBufferV2WithSalt(rawKey, salt)
-	if deriveErr != nil {
-		return fmt.Errorf("derive verification key: %w", deriveErr)
-	}
-
-	verifyCiphertext, verifyIV, encErr := enc.Encrypt([]byte("psst-verify"), derivedKey)
-	if encErr != nil {
-		return fmt.Errorf("create verification: %w", encErr)
-	}
-
-	if metaErr := s.SetMeta(ctx, "verify_iv", base64.StdEncoding.EncodeToString(verifyIV)); metaErr != nil {
-		return fmt.Errorf("set verify_iv: %w", metaErr)
-	}
-	if metaErr := s.SetMeta(ctx, "verify_data", base64.StdEncoding.EncodeToString(verifyCiphertext)); metaErr != nil {
-		return fmt.Errorf("set verify_data: %w", metaErr)
-	}
-
-	return nil
-}
-```
-
-- [ ] **Step 3: Create unlock.go**
-
-```go
-package vault
-
-import (
-	"context"
-	"encoding/base64"
-	"errors"
-	"fmt"
-	"strconv"
-	"time"
-
-	"github.com/aatumaykin/psst/internal/crypto"
-)
-
-func (v *Vault) Unlock(ctx context.Context) error {
-	if err := v.checkLockout(ctx); err != nil {
-		return err
-	}
-
-	rawKey, err := v.kp.GetRawKey(serviceName, accountName)
-	if err != nil {
-		return fmt.Errorf("unlock vault: %w", err)
-	}
-
-	key, kdfVersion, deriveErr := v.deriveKey(ctx, rawKey)
-	if deriveErr != nil {
-		return deriveErr
-	}
-
-	if kdfVersion == 1 {
-		fmt.Fprintf(os.Stderr, "warning: vault uses deprecated KDF (SHA-256). Run 'psst migrate' to upgrade to Argon2id.\n")
-	}
-
-	all, verifyErr := v.store.GetAllSecrets(ctx)
-	if verifyErr != nil {
-		return fmt.Errorf("verify vault: %w", verifyErr)
-	}
-
-	if err = v.verifyKey(ctx, key, all); err != nil {
-		return err
-	}
-
-	v.mu.Lock()
-	v.key = key
-	v.mu.Unlock()
-
-	v.resetFailedAttempts(ctx)
-	return nil
-}
-
-func (v *Vault) checkLockout(ctx context.Context) error {
-	lockedUntil, _ := v.store.GetMeta(ctx, metaUnlockLockedUntil)
-	if lockedUntil == "" {
-		return nil
-	}
-	ts, parseErr := time.Parse(time.RFC3339, lockedUntil)
-	if parseErr == nil && time.Now().Before(ts) {
-		return fmt.Errorf("vault locked until %s due to too many failed unlock attempts", ts.Format(time.Kitchen))
-	}
-	return nil
-}
-
-func (v *Vault) deriveKey(ctx context.Context, rawKey string) ([]byte, int, error) {
-	kdfVersion, err := v.readKDFVersion(ctx)
-	if err != nil {
-		return nil, 0, err
-	}
-	var key []byte
-	switch kdfVersion {
-	case 1:
-		key, err = v.enc.KeyToBuffer(rawKey)
-	case crypto.KDFVersion2:
-		var saltB64 string
-		saltB64, metaErr := v.store.GetMeta(ctx, "kdf_salt")
-		if metaErr != nil {
-			return nil, 0, fmt.Errorf("get kdf_salt: %w", metaErr)
-		}
-		if saltB64 == "" {
-			return nil, 0, errors.New("vault corrupted: kdf_salt missing for V2 vault")
-		}
-		var salt []byte
-		salt, decodeErr := base64.StdEncoding.DecodeString(saltB64)
-		if decodeErr != nil {
-			return nil, 0, fmt.Errorf("decode kdf_salt: %w", decodeErr)
-		}
-		key, err = v.enc.KeyToBufferV2WithSalt(rawKey, salt)
-	default:
-		return nil, 0, fmt.Errorf("unsupported KDF version: %d", kdfVersion)
-	}
-	if err != nil {
-		return nil, 0, fmt.Errorf("derive key: %w", err)
-	}
-	return key, kdfVersion, nil
-}
-
-func (v *Vault) verifyKey(ctx context.Context, key []byte, all []StoredSecret) error {
 	verifyIV, ivErr := v.store.GetMeta(ctx, "verify_iv")
 	verifyData, dataErr := v.store.GetMeta(ctx, "verify_data")
 
 	if ivErr == nil && dataErr == nil && verifyIV != "" && verifyData != "" {
 		ivBytes, ivDecodeErr := base64.StdEncoding.DecodeString(verifyIV)
 		if ivDecodeErr != nil {
-			crypto.ZeroBytes(key)
 			return fmt.Errorf("decode verify_iv: %w", ivDecodeErr)
 		}
 		dataBytes, dataDecodeErr := base64.StdEncoding.DecodeString(verifyData)
 		if dataDecodeErr != nil {
-			crypto.ZeroBytes(key)
 			return fmt.Errorf("decode verify_data: %w", dataDecodeErr)
 		}
 		if _, decErr := v.enc.Decrypt(dataBytes, ivBytes, key); decErr != nil {
 			return v.failUnlock(ctx, key)
 		}
-		return nil
-	}
-
-	if len(all) > 0 {
-		if _, decErr := v.enc.Decrypt(all[0].EncryptedValue, all[0].IV, key); decErr != nil {
-			return v.failUnlock(ctx, key)
+		verified = true
+	} else {
+		all, verifyErr := v.store.GetAllSecrets(ctx)
+		if verifyErr != nil {
+			return fmt.Errorf("verify vault: %w", verifyErr)
+		}
+		if len(all) > 0 {
+			if _, decErr := v.enc.Decrypt(all[0].EncryptedValue, all[0].IV, key); decErr != nil {
+				return v.failUnlock(ctx, key)
+			}
+			verified = true
 		}
 	}
-	return nil
-}
+```
 
-func (v *Vault) resetFailedAttempts(ctx context.Context) {
-	_ = v.store.SetMeta(ctx, metaUnlockAttempts, "0")
-	_ = v.store.SetMeta(ctx, metaUnlockLockedUntil, "")
-	_ = v.store.SetMeta(ctx, metaUnlockCycle, "0")
-}
+- [ ] **Step 4: Run full vault tests**
 
+Run: `go test ./internal/vault/ -v`
+Expected: All PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add internal/vault/unlock.go
+git commit -m "refactor: lazy-load secrets in Unlock only when verify_data absent"
+```
+
+---
+
+### Task 4: M3 — Handle SetMeta errors in failUnlock
+
+**Files:**
+- Modify: `internal/vault/unlock.go:105-126`
+
+- [ ] **Step 1: Update failUnlock to propagate SetMeta errors**
+
+Replace the `failUnlock` function in `internal/vault/unlock.go` (lines 105-126) with:
+
+```go
 func (v *Vault) failUnlock(ctx context.Context, key []byte) error {
 	crypto.ZeroBytes(key)
-	attempts, _ := v.store.IncrementMetaInt(ctx, metaUnlockAttempts, 1)
+	attempts, incErr := v.store.IncrementMetaInt(ctx, metaUnlockAttempts, 1)
+	if incErr != nil {
+		return fmt.Errorf("authentication failed (rate-limit write error: %w)", incErr)
+	}
 	if attempts >= maxUnlockAttempts {
 		cycle := 0
 		if cycleStr, cycleErr := v.store.GetMeta(ctx, metaUnlockCycle); cycleErr == nil {
@@ -762,1064 +255,618 @@ func (v *Vault) failUnlock(ctx context.Context, key []byte) error {
 			maxLockDuration,
 		)
 		lockedUntil := time.Now().Add(lockDuration)
-		_ = v.store.SetMeta(ctx, metaUnlockLockedUntil, lockedUntil.Format(time.RFC3339))
+		if metaErr := v.store.SetMeta(ctx, metaUnlockLockedUntil, lockedUntil.Format(time.RFC3339)); metaErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to persist lock state: %v\n", metaErr)
+		}
 		_ = v.store.SetMeta(ctx, metaUnlockAttempts, "0")
 		_ = v.store.SetMeta(ctx, metaUnlockCycle, strconv.Itoa(cycle+1))
 	}
 	return errors.New("authentication failed")
 }
+```
 
-func (v *Vault) readKDFVersion(ctx context.Context) (int, error) {
-	val, err := v.store.GetMeta(ctx, "kdf_version")
+Key changes:
+- `IncrementMetaInt` error is checked and returned
+- `SetMeta` for `lockedUntil` logs warning on failure (critical for rate-limiting)
+- Less critical `SetMeta` calls (`unlock_attempts` reset, `unlock_cycle` increment) remain silently ignored — these are best-effort
+
+- [ ] **Step 2: Run full vault tests**
+
+Run: `go test ./internal/vault/ -v -run TestUnlock`
+Expected: All PASS
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add internal/vault/unlock.go
+git commit -m "fix: propagate rate-limit metadata errors in failUnlock"
+```
+
+---
+
+### Task 5: M2 — Refactor GetSecretsByTagValues to avoid N+1
+
+**Files:**
+- Modify: `internal/vault/tags.go:90-104`
+
+- [ ] **Step 1: Write the test**
+
+Add a test in `internal/vault/vault_test.go` to verify `GetSecretsByTagValues` returns correct values:
+
+```go
+func TestGetSecretsByTagValues(t *testing.T) {
+	v := setupTestVault(t)
+	defer v.Close()
+	ctx := context.Background()
+
+	v.SetSecret(ctx, "KEY_A", []byte("val_a"), []string{"aws"})
+	v.SetSecret(ctx, "KEY_B", []byte("val_b"), []string{"aws", "prod"})
+	v.SetSecret(ctx, "KEY_C", []byte("val_c"), []string{"gcp"})
+
+	result, err := v.GetSecretsByTagValues(ctx, []string{"aws"})
 	if err != nil {
-		return 0, fmt.Errorf("get kdf_version: %w", err)
+		t.Fatal(err)
 	}
-	if val == "" {
-		return 1, nil
+
+	if len(result) != 2 {
+		t.Fatalf("expected 2 secrets, got %d", len(result))
 	}
-	n, err := strconv.Atoi(val)
-	if err != nil {
-		return 0, fmt.Errorf("corrupted kdf_version: %q: %w", val, err)
+	if string(result["KEY_A"]) != "val_a" {
+		t.Fatalf("KEY_A = %q, want %q", string(result["KEY_A"]), "val_a")
 	}
-	if n < 1 || n > 2 {
-		return 0, fmt.Errorf("unsupported KDF version: %d", n)
+	if string(result["KEY_B"]) != "val_b" {
+		t.Fatalf("KEY_B = %q, want %q", string(result["KEY_B"]), "val_b")
 	}
-	return n, nil
+	if _, ok := result["KEY_C"]; ok {
+		t.Fatal("KEY_C should not be in results")
+	}
 }
 ```
 
-Note: unlock.go needs `"os"` added to imports for the V1 warning `fmt.Fprintf(os.Stderr, ...)`.
+- [ ] **Step 2: Run test to verify it passes (current implementation works)**
 
-The `verifyKey` function references `StoredSecret` — add import `"github.com/aatumaykin/psst/internal/store"` to unlock.go.
+Run: `go test ./internal/vault/ -v -run TestGetSecretsByTagValues`
+Expected: PASS
 
-Full imports for unlock.go:
+- [ ] **Step 3: Refactor GetSecretsByTagValues**
 
-```go
-import (
-	"context"
-	"encoding/base64"
-	"errors"
-	"fmt"
-	"os"
-	"strconv"
-	"time"
-
-	"github.com/aatumaykin/psst/internal/crypto"
-	"github.com/aatumaykin/psst/internal/store"
-)
-```
-
-And change `all []StoredSecret` to `all []store.StoredSecret` in `verifyKey`.
-
-- [ ] **Step 4: Create secrets.go**
+Replace `GetSecretsByTagValues` in `internal/vault/tags.go` (lines 90-104) with:
 
 ```go
-package vault
-
-import (
-	"context"
-	"errors"
-	"fmt"
-
-	"github.com/aatumaykin/psst/internal/crypto"
-	"github.com/aatumaykin/psst/internal/store"
-)
-
-var ErrSecretNotFound = errors.New("secret not found")
-
-func (v *Vault) SetSecret(ctx context.Context, name string, value []byte, tags []string) error {
-	v.mu.RLock()
-	key := v.key
-	v.mu.RUnlock()
-	if key == nil {
-		return errors.New("vault is locked")
-	}
-
-	if err := ValidateSecretName(name); err != nil {
-		return err
-	}
-	if len(value) > maxSecretValueLen {
-		return fmt.Errorf("secret value too long: max %d bytes", maxSecretValueLen)
-	}
-	if err := ValidateTags(tags); err != nil {
-		return err
-	}
-
-	return v.store.ExecTx(func() error {
-		existing, err := v.store.GetSecret(ctx, name)
-		if err != nil {
-			return fmt.Errorf("get existing secret: %w", err)
-		}
-		if existing != nil {
-			var history []store.HistoryEntry
-			history, err = v.store.GetHistory(ctx, name)
-			if err != nil {
-				return fmt.Errorf("get history: %w", err)
-			}
-			version := maxVersion(history) + 1
-			if err = v.store.AddHistory(ctx,
-				name, version,
-				existing.EncryptedValue, existing.IV, existing.Tags,
-			); err != nil {
-				return fmt.Errorf("archive history: %w", err)
-			}
-			if err = v.store.PruneHistory(ctx, name, maxHistory); err != nil {
-				return fmt.Errorf("prune history: %w", err)
-			}
-		}
-
-		ciphertext, iv, err := v.enc.Encrypt(value, key)
-		if err != nil {
-			return fmt.Errorf("encrypt: %w", err)
-		}
-
-		return v.store.SetSecret(ctx, name, ciphertext, iv, tags)
-	})
-}
-
-func (v *Vault) GetSecret(ctx context.Context, name string) (*Secret, error) {
-	v.mu.RLock()
-	key := v.key
-	v.mu.RUnlock()
-	if key == nil {
-		return nil, errors.New("vault is locked")
-	}
-
-	stored, err := v.store.GetSecret(ctx, name)
-	if err != nil {
-		return nil, err
-	}
-	if stored == nil {
-		return nil, ErrSecretNotFound
-	}
-
-	plaintext, err := v.enc.Decrypt(stored.EncryptedValue, stored.IV, key)
-	if err != nil {
-		return nil, fmt.Errorf("decrypt: %w", err)
-	}
-
-	return &Secret{
-		Name:      stored.Name,
-		Value:     plaintext,
-		Tags:      stored.Tags,
-		CreatedAt: stored.CreatedAt,
-		UpdatedAt: stored.UpdatedAt,
-	}, nil
-}
-
-func (v *Vault) ListSecrets(ctx context.Context) ([]SecretMeta, error) {
-	if err := v.requireUnlock(); err != nil {
-		return nil, err
-	}
-	storeMetas, err := v.store.ListSecrets(ctx)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]SecretMeta, len(storeMetas))
-	for i, m := range storeMetas {
-		result[i] = SecretMeta{
-			Name:      m.Name,
-			Tags:      m.Tags,
-			CreatedAt: m.CreatedAt,
-			UpdatedAt: m.UpdatedAt,
-		}
-	}
-	return result, nil
-}
-
-func (v *Vault) DeleteSecret(ctx context.Context, name string) error {
-	if err := v.requireUnlock(); err != nil {
-		return err
-	}
-	return v.store.ExecTx(func() error {
-		if err := v.store.DeleteSecret(ctx, name); err != nil {
-			return err
-		}
-		return v.store.DeleteHistory(ctx, name)
-	})
-}
-
-func (v *Vault) GetAllSecrets(ctx context.Context) (map[string][]byte, error) {
-	v.mu.RLock()
-	key := v.key
-	v.mu.RUnlock()
-	if key == nil {
-		return nil, errors.New("vault is locked")
-	}
-
-	all, err := v.store.GetAllSecrets(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	result := make(map[string][]byte, len(all))
-	for _, s := range all {
-		var plaintext []byte
-		plaintext, err = v.enc.Decrypt(s.EncryptedValue, s.IV, key)
-		if err != nil {
-			for k, v := range result {
-				crypto.ZeroBytes(v)
-				delete(result, k)
-			}
-			return nil, fmt.Errorf("decrypt secret: %w", err)
-		}
-		result[s.Name] = plaintext
-	}
-	return result, nil
-}
-```
-
-- [ ] **Step 5: Create history.go**
-
-```go
-package vault
-
-import (
-	"context"
-	"fmt"
-
-	"github.com/aatumaykin/psst/internal/store"
-)
-
-func (v *Vault) GetHistory(ctx context.Context, name string) ([]SecretHistoryEntry, error) {
-	if err := v.requireUnlock(); err != nil {
-		return nil, err
-	}
-	entries, err := v.store.GetHistory(ctx, name)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]SecretHistoryEntry, len(entries))
-	for i, e := range entries {
-		result[i] = SecretHistoryEntry{
-			Version:    e.Version,
-			Tags:       e.Tags,
-			ArchivedAt: e.ArchivedAt,
-		}
-	}
-	return result, nil
-}
-
-func (v *Vault) Rollback(ctx context.Context, name string, version int) error {
-	if err := v.requireUnlock(); err != nil {
-		return err
-	}
-
-	return v.store.ExecTx(func() error {
-		current, err := v.store.GetSecret(ctx, name)
-		if err != nil {
-			return err
-		}
-		if current == nil {
-			return fmt.Errorf("secret %q not found", name)
-		}
-
-		history, err := v.store.GetHistory(ctx, name)
-		if err != nil {
-			return err
-		}
-
-		var target *store.HistoryEntry
-		for i := range history {
-			if history[i].Version == version {
-				target = &history[i]
-				break
-			}
-		}
-		if target == nil {
-			return fmt.Errorf("version %d not found", version)
-		}
-
-		newVersion := maxVersion(history) + 1
-		if err = v.store.AddHistory(
-			ctx,
-			name,
-			newVersion,
-			current.EncryptedValue,
-			current.IV,
-			current.Tags,
-		); err != nil {
-			return fmt.Errorf("archive history: %w", err)
-		}
-		if err = v.store.PruneHistory(ctx, name, maxHistory); err != nil {
-			return fmt.Errorf("prune history: %w", err)
-		}
-		return v.store.SetSecret(ctx, name, target.EncryptedValue, target.IV, target.Tags)
-	})
-}
-
-func maxVersion(entries []store.HistoryEntry) int {
-	maxV := 0
-	for _, h := range entries {
-		if h.Version > maxV {
-			maxV = h.Version
-		}
-	}
-	return maxV
-}
-```
-
-- [ ] **Step 6: Create tags.go**
-
-```go
-package vault
-
-import (
-	"context"
-	"fmt"
-	"slices"
-)
-
-func (v *Vault) AddTag(ctx context.Context, name string, tag string) error {
-	if err := v.requireUnlock(); err != nil {
-		return err
-	}
-
-	return v.store.ExecTx(func() error {
-		sec, err := v.store.GetSecret(ctx, name)
-		if err != nil {
-			return err
-		}
-		if sec == nil {
-			return fmt.Errorf("secret %q not found", name)
-		}
-
-		if slices.Contains(sec.Tags, tag) {
-			return nil
-		}
-		sec.Tags = append(sec.Tags, tag)
-		return v.store.SetSecret(ctx, name, sec.EncryptedValue, sec.IV, sec.Tags)
-	})
-}
-
-func (v *Vault) RemoveTag(ctx context.Context, name string, tag string) error {
-	if err := v.requireUnlock(); err != nil {
-		return err
-	}
-
-	return v.store.ExecTx(func() error {
-		sec, err := v.store.GetSecret(ctx, name)
-		if err != nil {
-			return err
-		}
-		if sec == nil {
-			return fmt.Errorf("secret %q not found", name)
-		}
-
-		filtered := make([]string, 0, len(sec.Tags))
-		for _, t := range sec.Tags {
-			if t != tag {
-				filtered = append(filtered, t)
-			}
-		}
-		sec.Tags = filtered
-		return v.store.SetSecret(ctx, name, sec.EncryptedValue, sec.IV, sec.Tags)
-	})
-}
-
-func (v *Vault) GetSecretsByTags(ctx context.Context, tags []string) ([]SecretMeta, error) {
-	all, err := v.ListSecrets(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(tags) == 0 {
-		return all, nil
-	}
-
-	var result []SecretMeta
-	for _, s := range all {
-		for _, wantTag := range tags {
-			if slices.Contains(s.Tags, wantTag) {
-				result = append(result, s)
-				break
-			}
-		}
-	}
-	return result, nil
-}
-
-func (v *Vault) GetSecretNamesByTags(ctx context.Context, tags []string) ([]string, error) {
-	metas, err := v.GetSecretsByTags(ctx, tags)
-	if err != nil {
-		return nil, err
-	}
-	names := make([]string, len(metas))
-	for i, m := range metas {
-		names[i] = m.Name
-	}
-	return names, nil
-}
-
 func (v *Vault) GetSecretsByTagValues(ctx context.Context, tags []string) (map[string][]byte, error) {
 	names, err := v.GetSecretNamesByTags(ctx, tags)
 	if err != nil {
 		return nil, err
 	}
+	if len(names) == 0 {
+		return map[string][]byte{}, nil
+	}
+
+	all, err := v.GetAllSecrets(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get secrets: %w", err)
+	}
+
+	nameSet := make(map[string]bool, len(names))
+	for _, n := range names {
+		nameSet[n] = true
+	}
+
 	result := make(map[string][]byte, len(names))
-	for _, name := range names {
-		sec, secErr := v.GetSecret(ctx, name)
-		if secErr != nil {
-			return nil, fmt.Errorf("get secret: %w", secErr)
+	for name, val := range all {
+		if nameSet[name] {
+			result[name] = val
 		}
-		result[name] = sec.Value
 	}
 	return result, nil
 }
 ```
 
-- [ ] **Step 7: Create migrate.go**
+Benefits: one `GetAllSecrets` call (one key copy, one store query) instead of N calls.
 
-Move `MigrateKDF` from vault.go (lines 619-691) to `internal/vault/migrate.go`. The code is identical — just move it with its imports.
+- [ ] **Step 4: Run test to verify refactored version passes**
 
-- [ ] **Step 8: Reduce vault.go to essentials**
+Run: `go test ./internal/vault/ -v -run TestGetSecretsByTagValues`
+Expected: PASS
 
-After splitting, `internal/vault/vault.go` should contain only:
+- [ ] **Step 5: Run full vault tests**
 
-```go
-package vault
-
-import (
-	"context"
-	"errors"
-	"sync"
-
-	"github.com/aatumaykin/psst/internal/crypto"
-	"github.com/aatumaykin/psst/internal/keyring"
-	"github.com/aatumaykin/psst/internal/store"
-)
-
-type Vault struct {
-	mu    sync.RWMutex
-	enc   crypto.Encryptor
-	kp    keyring.KeyProvider
-	store store.SecretStore
-	key   []byte
-}
-
-const (
-	serviceName           = "psst"
-	accountName           = "vault-key"
-	maxHistory            = 10
-	saltSize              = 16
-	maxUnlockAttempts     = 10
-	unlockDelayBaseMs     = 500
-	maxLockDuration       = 5 * time.Minute
-	metaUnlockAttempts    = "unlock_attempts"
-	metaUnlockLockedUntil = "unlock_locked_until"
-	metaUnlockCycle       = "unlock_cycle"
-)
-
-func New(enc crypto.Encryptor, kp keyring.KeyProvider, s store.SecretStore) *Vault {
-	return &Vault{enc: enc, kp: kp, store: s}
-}
-
-func (v *Vault) Close() error {
-	v.mu.Lock()
-	crypto.ZeroBytes(v.key)
-	v.key = nil
-	v.mu.Unlock()
-	return v.store.Close()
-}
-
-func (v *Vault) requireUnlock() error {
-	v.mu.RLock()
-	unlocked := v.key != nil
-	v.mu.RUnlock()
-	if !unlocked {
-		return errors.New("vault is locked: unlock required")
-	}
-	return nil
-}
-```
-
-Note: vault.go needs `"time"` in imports for `maxLockDuration`.
-
-Full imports for vault.go:
-
-```go
-import (
-	"context"
-	"errors"
-	"sync"
-	"time"
-
-	"github.com/aatumaykin/psst/internal/crypto"
-	"github.com/aatumaykin/psst/internal/keyring"
-	"github.com/aatumaykin/psst/internal/store"
-)
-```
-
-- [ ] **Step 9: Run all tests**
-
-Run: `go test ./... -v`
-Expected: ALL PASS — this is a pure refactor, no behavior changes
-
-- [ ] **Step 10: Commit**
-
-```bash
-git add internal/vault/
-git commit -m "refactor: split vault.go into focused files"
-```
-
----
-
-## Phase 3: Architecture — vault.Open() + VaultInterface
-
-### Task 6: Add VaultInterface and vault.Open()
-
-**Files:**
-- Create: `internal/vault/interface.go`
-- Modify: `internal/vault/vault.go` (add Open function)
-- Modify: `internal/cli/root.go`
-
-- [ ] **Step 1: Create interface.go**
-
-```go
-package vault
-
-import "context"
-
-type VaultInterface interface {
-	Unlock(ctx context.Context) error
-	GetSecret(ctx context.Context, name string) (*Secret, error)
-	SetSecret(ctx context.Context, name string, value []byte, tags []string) error
-	ListSecrets(ctx context.Context) ([]SecretMeta, error)
-	DeleteSecret(ctx context.Context, name string) error
-	GetAllSecrets(ctx context.Context) (map[string][]byte, error)
-	GetHistory(ctx context.Context, name string) ([]SecretHistoryEntry, error)
-	Rollback(ctx context.Context, name string, version int) error
-	AddTag(ctx context.Context, name, tag string) error
-	RemoveTag(ctx context.Context, name, tag string) error
-	GetSecretsByTags(ctx context.Context, tags []string) ([]SecretMeta, error)
-	GetSecretNamesByTags(ctx context.Context, tags []string) ([]string, error)
-	GetSecretsByTagValues(ctx context.Context, tags []string) (map[string][]byte, error)
-	MigrateKDF(ctx context.Context) error
-	Close() error
-}
-```
-
-- [ ] **Step 2: Add Open() to vault.go**
-
-Add to `internal/vault/vault.go`:
-
-```go
-func Open(vaultPath string) (*Vault, error) {
-	enc := crypto.NewAESGCM()
-	kp := keyring.NewProvider(enc)
-
-	s, err := store.NewSQLite(vaultPath)
-	if err != nil {
-		return nil, fmt.Errorf("open store: %w", err)
-	}
-
-	if err = s.InitSchema(); err != nil {
-		_ = s.Close()
-		return nil, fmt.Errorf("init schema: %w", err)
-	}
-
-	return New(enc, kp, s), nil
-}
-```
-
-Add `"fmt"` to vault.go imports.
-
-- [ ] **Step 3: Refactor getUnlockedVault in root.go**
-
-Replace the entire `getUnlockedVault` function and remove `createDependencies`:
-
-```go
-const (
-	ExitSuccess    = 0
-	ExitError      = 1
-	ExitNoVault    = 3
-	ExitAuthFailed = 5
-)
-
-func getUnlockedVault(ctx context.Context, jsonOut, quiet, global bool, env string) (vault.VaultInterface, error) {
-	vaultPath, err := vault.FindVaultPath(global, env)
-	if err != nil {
-		return nil, err
-	}
-
-	//nolint:gosec // user-provided path is intentional for CLI tool
-	if _, statErr := os.Stat(vaultPath); os.IsNotExist(statErr) {
-		printNoVault(jsonOut, quiet)
-		return nil, &exitError{code: ExitNoVault}
-	}
-
-	v, err := vault.Open(vaultPath)
-	if err != nil {
-		return nil, fmt.Errorf("open vault: %w", err)
-	}
-
-	if unlockErr := v.Unlock(ctx); unlockErr != nil {
-		_ = v.Close()
-		printAuthFailed(jsonOut, quiet)
-		return nil, &exitError{code: ExitAuthFailed}
-	}
-	return v, nil
-}
-```
-
-Remove `createDependencies()` function entirely.
-
-Update imports in root.go — remove:
-- `"github.com/aatumaykin/psst/internal/crypto"`
-- `"github.com/aatumaykin/psst/internal/keyring"`
-- `"github.com/aatumaykin/psst/internal/store"`
-
-The root.go should now import:
-```go
-import (
-	"context"
-	"errors"
-	"fmt"
-	"os"
-
-	"github.com/spf13/cobra"
-
-	"github.com/aatumaykin/psst/internal/keyring"
-	"github.com/aatumaykin/psst/internal/output"
-	"github.com/aatumaykin/psst/internal/runner"
-	"github.com/aatumaykin/psst/internal/vault"
-)
-```
-
-Note: `keyring` import is still needed for `keyring.IsKeychainAvailable()` in `printAuthFailed`.
-
-- [ ] **Step 4: Update init.go CLI command**
-
-In `internal/cli/init.go`, replace `createDependencies()` call:
-
-```go
-enc, kp := createDependencies()
-```
-
-with:
-
-```go
-enc := crypto.NewAESGCM()
-kp := keyring.NewProvider(enc)
-```
-
-And add imports:
-```go
-"github.com/aatumaykin/psst/internal/crypto"
-"github.com/aatumaykin/psst/internal/keyring"
-```
-
-(Remove `"github.com/aatumaykin/psst/internal/vault"` if already present — no, keep it, `vault.FindVaultPath` and `vault.InitVault` are still used.)
-
-Actually, init.go already imports keyring and vault. Just need to add crypto import and remove the createDependencies call.
-
-- [ ] **Step 5: Run all tests**
-
-Run: `go test ./... -v`
-Expected: ALL PASS
+Run: `go test ./internal/vault/ -v`
+Expected: All PASS
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add internal/vault/interface.go internal/vault/vault.go internal/cli/root.go internal/cli/init.go
-git commit -m "refactor: add VaultInterface and vault.Open() factory"
+git add internal/vault/tags.go internal/vault/vault_test.go
+git commit -m "refactor: GetSecretsByTagValues uses single GetAllSecrets instead of N+1"
 ```
 
 ---
 
-## Phase 4: CLI refactoring
-
-### Task 7: Named exit constants + remove validName from CLI + withVault helper
+### Task 6: M4 — Deduplicate zeroBytes
 
 **Files:**
-- Modify: `internal/cli/root.go`
-- Modify: `internal/cli/set.go`
-- Modify: `internal/cli/get.go`
-- Modify: `internal/cli/rm.go`
-- Modify: `internal/cli/history.go`
-- Modify: `internal/cli/rollback.go`
-- Modify: `internal/cli/tag.go`
-- Modify: `internal/cli/import.go`
-- Modify: `internal/cli/exec.go`
-- Modify: `internal/cli/run.go`
-- Modify: `internal/cli/export.go`
-- Modify: `internal/cli/scan.go`
-- Modify: `internal/cli/migrate.go`
-- Modify: `internal/cli/args.go`
+- Modify: `internal/runner/runner.go:199-203` and all call sites in runner package
 
-- [ ] **Step 1: Add withVault helper and exit constants to root.go**
+- [ ] **Step 1: Replace runner.zeroBytes with crypto.ZeroBytes**
 
-Exit constants were added in Task 6. Add `withVault`:
+In `internal/runner/runner.go`:
 
+Add import:
 ```go
-func withVault(cmd *cobra.Command, fn func(v vault.VaultInterface, f *output.Formatter) error) error {
-	jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
-	v, err := getUnlockedVault(cmd.Context(), jsonOut, quiet, global, env)
-	if err != nil {
-		return err
-	}
-	defer v.Close()
-	f := getFormatter(jsonOut, quiet)
-	return fn(v, f)
-}
+"github.com/aatumaykin/psst/internal/crypto"
 ```
 
-- [ ] **Step 2: Remove validName regex from set.go**
+Replace all calls to `zeroBytes(...)` with `crypto.ZeroBytes(...)` in `runner.go`:
+- Line 113: `zeroBytes(secretValues[i])` → `crypto.ZeroBytes(secretValues[i])`
+- Line 143: `zeroBytes(tail)` → `crypto.ZeroBytes(tail)`
+- Line 150: `zeroBytes(data)` → `crypto.ZeroBytes(data)`
+- Line 154: `zeroBytes(masked)` → `crypto.ZeroBytes(masked)`
+- Line 163: `zeroBytes(masked)` → `crypto.ZeroBytes(masked)`
 
-In `internal/cli/set.go`, remove line 14:
-```go
-var validName = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
-```
-
-And the `"regexp"` import.
-
-Replace all `validName.MatchString(name)` with `vault.ValidateSecretName(name) == nil` throughout all CLI files.
-
-Add `"github.com/aatumaykin/psst/internal/vault"` import where needed.
-
-Files using `validName`:
-- `set.go` — line 25
-- `get.go` — line 18
-- `rm.go` — line 19
-- `history.go` — line 22
-- `rollback.go` — line 19
-- `tag.go` — lines 19, 48
-- `import.go` — lines 65, 133
-- `exec.go` — line 37
-
-Replace `!validName.MatchString(name)` with `vault.ValidateSecretName(name) != nil` in each.
-
-- [ ] **Step 3: Refactor commands to use withVault**
-
-Example — refactor `get.go`:
+Then delete the local `zeroBytes` function (lines 199-203):
 
 ```go
-var getCmd = &cobra.Command{
-	Use:   "get <name>",
-	Short: "Get a secret value",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		name := args[0]
-		if err := vault.ValidateSecretName(name); err != nil {
-			return exitWithError(fmt.Sprintf("Invalid secret name %q", name))
-		}
-		return withVault(cmd, func(v vault.VaultInterface, f *output.Formatter) error {
-			sec, err := v.GetSecret(cmd.Context(), name)
-			if err != nil {
-				return exitWithError(err.Error())
-			}
-			f.SecretValue(name, string(sec.Value))
-			return nil
-		})
-	},
-}
-```
-
-Apply similar pattern to: `set.go`, `rm.go`, `list.go`, `history.go`, `rollback.go`, `tag.go`, `export.go`, `scan.go`, `migrate.go`, `run.go`.
-
-For `list.go` and `scan.go` which also need tags, extract them before calling `withVault`.
-
-- [ ] **Step 4: Fix filterSecretNames dead parameters**
-
-In `internal/cli/args.go`, simplify the signature:
-
-```go
-func filterSecretNames(args []string) []string {
-```
-
-Remove the 4 unused parameters. Update the call site in `root.go`:
-```go
-secretNames := filterSecretNames(args[:dashDashIdx])
-```
-
-- [ ] **Step 5: Add ExecConfig struct for exec.go**
-
-Replace the 9-parameter `handleExecPatternDirect` with:
-
-```go
-type ExecConfig struct {
-	JSONOut bool
-	Quiet   bool
-	Global  bool
-	Env     string
-	Tags    []string
-	NoMask  bool
-}
-
-func handleExecPatternDirect(
-	ctx context.Context,
-	secretNames []string,
-	commandArgs []string,
-	cfg ExecConfig,
-) error {
-```
-
-Update the call site in `Execute()` (root.go) accordingly.
-
-- [ ] **Step 6: Use Formatter in update.go**
-
-Replace `fmt.Fprintf(os.Stdout, ...)` calls with Formatter methods. For `updateCheckCmd` and `updateInstallCmd`, extract formatter early and use it consistently.
-
-- [ ] **Step 7: Run all tests**
-
-Run: `go test ./... -v`
-Expected: ALL PASS
-
-- [ ] **Step 8: Commit**
-
-```bash
-git add internal/cli/
-git commit -m "refactor: CLI uses withVault, ValidateSecretName, named exit constants"
-```
-
----
-
-## Phase 5: Robustness
-
-### Task 8: PRAGMA integrity_check + PSST_PASSWORD fallback + ZeroBytes + ExecTx doc
-
-**Files:**
-- Modify: `internal/store/sqlite.go`
-- Modify: `internal/keyring/oskeyring.go`
-- Modify: `internal/crypto/aesgcm.go`
-
-- [ ] **Step 1: Add PRAGMA integrity_check to NewSQLite**
-
-In `internal/store/sqlite.go`, after the `PingContext` check (line 37), add:
-
-```go
-	var integrity string
-	if intErr := db.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&integrity); intErr != nil || integrity != "ok" {
-		_ = db.Close()
-		if intErr != nil {
-			return nil, fmt.Errorf("vault integrity check failed: %w", intErr)
-		}
-		return nil, fmt.Errorf("vault integrity check failed: %s", integrity)
-	}
-```
-
-- [ ] **Step 2: Add PSST_PASSWORD fallback in oskeyring.go**
-
-In `internal/keyring/oskeyring.go`, update `GetRawKey`:
-
-```go
-func (o *OSKeyring) GetRawKey(service, account string) (string, error) {
-	encoded, err := keyring.Get(service, account)
-	if err == nil {
-		return encoded, nil
-	}
-	if pw := os.Getenv("PSST_PASSWORD"); pw != "" {
-		return pw, nil
-	}
-	return "", fmt.Errorf("keychain unavailable and PSST_PASSWORD not set: %w", err)
-}
-```
-
-Add `"os"` to imports.
-
-- [ ] **Step 3: Add runtime.KeepAlive to ZeroBytes**
-
-In `internal/crypto/aesgcm.go`, update `ZeroBytes`:
-
-```go
-func ZeroBytes(b []byte) {
+// DELETE this function:
+func zeroBytes(b []byte) {
 	for i := range b {
 		b[i] = 0
 	}
-	runtime.KeepAlive(b)
 }
 ```
 
-Add `"runtime"` to imports.
+- [ ] **Step 2: Run runner tests**
 
-- [ ] **Step 4: Add ExecTx documentation**
+Run: `go test ./internal/runner/ -v`
+Expected: All PASS
 
-In `internal/store/sqlite.go`, add doc comment to `ExecTx`:
-
-```go
-// ExecTx executes fn within a database transaction.
-// fn MUST NOT call ExecTx recursively — the mutex is not reentrant.
-func (s *SQLiteStore) ExecTx(fn func() error) error {
-```
-
-- [ ] **Step 5: Run all tests**
+- [ ] **Step 3: Run full test suite**
 
 Run: `go test ./... -v`
-Expected: ALL PASS
+Expected: All PASS
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add internal/store/sqlite.go internal/keyring/oskeyring.go internal/crypto/aesgcm.go
-git commit -m "fix: integrity check on open, PSST_PASSWORD fallback, ZeroBytes hardening"
+git add internal/runner/runner.go
+git commit -m "refactor: replace runner.zeroBytes with crypto.ZeroBytes"
 ```
 
 ---
 
-## Phase 6: Tests
-
-### Task 9: Add security and robustness tests
+### Task 7: M5 — Unify flag parsing
 
 **Files:**
-- Modify: `internal/vault/vault_test.go`
-- Modify: `internal/store/sqlite_test.go`
+- Modify: `internal/cli/root.go`
+- Modify: `internal/cli/args.go`
 
-- [ ] **Step 1: Add corrupted vault test**
+- [ ] **Step 1: Define flag metadata struct in args.go**
 
-In `internal/store/sqlite_test.go`:
+Add to `internal/cli/args.go` after the imports:
 
 ```go
-func TestCorruptedVault(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "corrupt.db")
-
-	data := []byte("this is not a valid sqlite database")
-	if err := os.WriteFile(dbPath, data, 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err := NewSQLite(dbPath)
-	if err == nil {
-		t.Fatal("should reject corrupted database")
-	}
+type flagDef struct {
+	Name    string
+	Short   string
+	HasValue bool
 }
-```
 
-- [ ] **Step 2: Add name boundary test**
-
-In `internal/vault/vault_test.go`:
-
-```go
-func TestSetSecret_NameExactly256Bytes(t *testing.T) {
-	v := setupTestVault(t)
-	defer v.Close()
-	ctx := context.Background()
-
-	name := strings.Repeat("A", 256)
-	err := v.SetSecret(ctx, name, []byte("val"), nil)
-	if err != nil {
-		t.Fatalf("256-byte name should be accepted: %v", err)
-	}
+var globalFlags = []flagDef{
+	{Name: "--json", Short: ""},
+	{Name: "--quiet", Short: "-q"},
+	{Name: "--global", Short: "-g"},
+	{Name: "--env", HasValue: true},
+	{Name: "--tag", HasValue: true},
 }
-```
 
-- [ ] **Step 3: Add null bytes in value test**
-
-In `internal/vault/vault_test.go`:
-
-```go
-func TestSetGetSecret_NullBytes(t *testing.T) {
-	v := setupTestVault(t)
-	defer v.Close()
-	ctx := context.Background()
-
-	value := []byte("hello\x00world")
-	if err := v.SetSecret(ctx, "BIN_KEY", value, nil); err != nil {
-		t.Fatal(err)
-	}
-
-	sec, err := v.GetSecret(ctx, "BIN_KEY")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(sec.Value, value) {
-		t.Fatalf("value mismatch: got %q, want %q", sec.Value, value)
-	}
-}
-```
-
-Add `"bytes"` import to test file.
-
-- [ ] **Step 4: Add ValidateTags test**
-
-In `internal/vault/vault_test.go`:
-
-```go
-func TestValidateTags(t *testing.T) {
-	if err := ValidateTags([]string{"aws", "prod-1", "test_env"}); err != nil {
-		t.Fatalf("valid tags: %v", err)
-	}
-	if err := ValidateTags(nil); err != nil {
-		t.Fatalf("nil tags: %v", err)
-	}
-	if err := ValidateTags(make([]string, 21)); err == nil {
-		t.Fatal("too many tags should fail")
-	}
-	if err := ValidateTags([]string{"invalid tag!"}); err == nil {
-		t.Fatal("invalid tag should fail")
-	}
-}
-```
-
-- [ ] **Step 5: Add concurrent access test**
-
-In `internal/vault/vault_test.go`:
-
-```go
-func TestConcurrentAccess(t *testing.T) {
-	v := setupTestVault(t)
-	defer v.Close()
-	ctx := context.Background()
-
-	v.SetSecret(ctx, "KEY", []byte("initial"), nil)
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for range 50 {
-			v.GetSecret(ctx, "KEY")
+func isKnownFlag(arg string) bool {
+	for _, f := range globalFlags {
+		if arg == f.Name || (f.Short != "" && arg == f.Short) {
+			return true
 		}
-	}()
-	for i := range 50 {
-		v.SetSecret(ctx, "KEY", []byte(fmt.Sprintf("v%d", i)), nil)
+		if f.HasValue && strings.HasPrefix(arg, f.Name+"=") {
+			return true
+		}
 	}
-	<-done
+	return false
 }
 ```
 
-- [ ] **Step 6: Run all tests**
+- [ ] **Step 2: Rewrite parseGlobalFlagsFromArgs using the struct**
 
-Run: `go test ./... -v -race`
-Expected: ALL PASS, no race conditions
+Replace `parseGlobalFlagsFromArgs` in `internal/cli/args.go`:
+
+```go
+func parseGlobalFlagsFromArgs(args []string) (bool, bool, bool, string, []string) {
+	var jsonOut, quiet, global bool
+	var env string
+	var tags []string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--json":
+			jsonOut = true
+		case "--quiet", "-q":
+			quiet = true
+		case "--global", "-g":
+			global = true
+		case "--env":
+			i++
+			if i < len(args) {
+				env = args[i]
+			}
+		case "--tag":
+			i++
+			if i < len(args) {
+				tags = append(tags, args[i])
+			}
+		default:
+			if v, found := strings.CutPrefix(args[i], "--env="); found {
+				env = v
+				continue
+			}
+			if v, found := strings.CutPrefix(args[i], "--tag="); found {
+				tags = append(tags, v)
+			}
+		}
+	}
+	if os.Getenv("PSST_GLOBAL") == "1" {
+		global = true
+	}
+	if env == "" {
+		env = os.Getenv("PSST_ENV")
+	}
+	return jsonOut, quiet, global, env, tags
+}
+```
+
+Note: function body stays the same — the `globalFlags` slice is used by `filterSecretNames` and `isKnownFlag`.
+
+- [ ] **Step 3: Rewrite filterSecretNames using isKnownFlag**
+
+Replace `filterSecretNames` in `internal/cli/args.go`:
+
+```go
+func filterSecretNames(args []string) []string {
+	valueArgs := map[int]bool{}
+	for i := 0; i < len(args); i++ {
+		for _, f := range globalFlags {
+			if !f.HasValue {
+				continue
+			}
+			if args[i] == f.Name && i+1 < len(args) {
+				valueArgs[i] = true
+				valueArgs[i+1] = true
+				i++
+				break
+			}
+			if strings.HasPrefix(args[i], f.Name+"=") {
+				valueArgs[i] = true
+				break
+			}
+		}
+	}
+
+	extraFlags := map[string]bool{"--no-mask": true, "--expand-args": true}
+
+	var names []string
+	for i, a := range args {
+		if isKnownFlag(a) || extraFlags[a] || valueArgs[i] {
+			continue
+		}
+		if !strings.HasPrefix(a, "-") {
+			names = append(names, a)
+		}
+	}
+	return names
+}
+```
+
+- [ ] **Step 4: Run args tests**
+
+Run: `go test ./internal/cli/ -v -run TestParse`
+Expected: All PASS
+
+- [ ] **Step 5: Run full test suite**
+
+Run: `go test ./... -v`
+Expected: All PASS
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add internal/cli/args.go
+git commit -m "refactor: extract flag definitions into shared globalFlags struct"
+```
+
+---
+
+### Task 8: L3 — Add missing output tests
+
+**Files:**
+- Modify: `internal/output/output_test.go`
+
+- [ ] **Step 1: Add ScanResults tests**
+
+Append to `internal/output/output_test.go`:
+
+```go
+func TestScanResultsEmpty(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{stdout: &buf, stderr: &buf}
+	f.ScanResults(nil)
+	if !strings.Contains(buf.String(), "No secrets found") {
+		t.Fatalf("expected no-secrets message, got: %s", buf.String())
+	}
+}
+
+func TestScanResultsHuman(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{stdout: &buf, stderr: &buf}
+	f.ScanResults([]ScanMatch{
+		{File: "config.yaml", Line: 5, SecretName: "API_KEY"},
+	})
+	if !strings.Contains(buf.String(), "config.yaml:5") {
+		t.Fatalf("expected file:line in output, got: %s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "API_KEY") {
+		t.Fatalf("expected secret name in output, got: %s", buf.String())
+	}
+}
+
+func TestScanResultsJSON(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{jsonMode: true, stdout: &buf, stderr: &buf}
+	f.ScanResults([]ScanMatch{
+		{File: "config.yaml", Line: 5, SecretName: "API_KEY"},
+	})
+	if !strings.Contains(buf.String(), `"file"`) {
+		t.Fatalf("expected JSON output, got: %s", buf.String())
+	}
+}
+```
+
+- [ ] **Step 2: Add EnvList / EnvListWriter tests**
+
+```go
+func TestEnvListHuman(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{stdout: &buf, stderr: &buf}
+	f.EnvList(map[string]string{"KEY": "value", "PATH_KEY": `path with spaces`})
+	output := buf.String()
+	if !strings.Contains(output, "KEY=value") {
+		t.Fatalf("expected KEY=value in output, got: %s", output)
+	}
+	if !strings.Contains(output, `"path with spaces"`) {
+		t.Fatalf("expected quoted value, got: %s", output)
+	}
+}
+
+func TestEnvListJSON(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{jsonMode: true, stdout: &buf, stderr: &buf}
+	f.EnvList(map[string]string{"KEY": "value"})
+	if !strings.Contains(buf.String(), `"KEY"`) {
+		t.Fatalf("expected JSON output, got: %s", buf.String())
+	}
+}
+
+func TestEnvListWriter(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{}
+	f.EnvListWriter(map[string]string{"A": "1", "B": "2"}, &buf)
+	if !strings.Contains(buf.String(), "A=1") || !strings.Contains(buf.String(), "B=2") {
+		t.Fatalf("expected both entries, got: %s", buf.String())
+	}
+}
+```
+
+- [ ] **Step 3: Add EnvironmentList test**
+
+```go
+func TestEnvironmentListHuman(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{stdout: &buf, stderr: &buf}
+	f.EnvironmentList([]string{"prod", "staging"})
+	if !strings.Contains(buf.String(), "prod") || !strings.Contains(buf.String(), "staging") {
+		t.Fatalf("expected env names in output, got: %s", buf.String())
+	}
+}
+
+func TestEnvironmentListEmpty(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{stdout: &buf, stderr: &buf}
+	f.EnvironmentList(nil)
+	if !strings.Contains(buf.String(), "No environments") {
+		t.Fatalf("expected empty message, got: %s", buf.String())
+	}
+}
+```
+
+- [ ] **Step 4: Add VersionInfo test**
+
+```go
+func TestVersionInfoHuman(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{stdout: &buf, stderr: &buf}
+	f.VersionInfo(VersionData{
+		Version: "1.0.0", Commit: "abc123", Date: "2025-01-01",
+		GoVersion: "go1.26", OSArch: "linux/amd64",
+	})
+	if !strings.Contains(buf.String(), "psst 1.0.0") {
+		t.Fatalf("expected version in output, got: %s", buf.String())
+	}
+}
+
+func TestVersionInfoQuiet(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{quiet: true, stdout: &buf, stderr: &buf}
+	f.VersionInfo(VersionData{Version: "1.0.0"})
+	if !strings.Contains(buf.String(), "1.0.0") {
+		t.Fatalf("quiet mode should output version, got: %s", buf.String())
+	}
+	if strings.Contains(buf.String(), "commit") {
+		t.Fatalf("quiet mode should not output details, got: %s", buf.String())
+	}
+}
+
+func TestVersionInfoJSON(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{jsonMode: true, stdout: &buf, stderr: &buf}
+	f.VersionInfo(VersionData{Version: "1.0.0", Commit: "abc123"})
+	if !strings.Contains(buf.String(), `"version"`) {
+		t.Fatalf("expected JSON output, got: %s", buf.String())
+	}
+}
+```
+
+- [ ] **Step 5: Add Print test**
+
+```go
+func TestPrint(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{stdout: &buf, stderr: &buf}
+	f.Print("hello")
+	if !strings.Contains(buf.String(), "hello") {
+		t.Fatalf("expected message, got: %s", buf.String())
+	}
+}
+
+func TestPrintQuiet(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{quiet: true, stdout: &buf, stderr: &buf}
+	f.Print("hello")
+	if len(buf.String()) > 0 {
+		t.Fatalf("quiet should produce no output, got: %s", buf.String())
+	}
+}
+```
+
+- [ ] **Step 6: Run output tests**
+
+Run: `go test ./internal/output/ -v`
+Expected: All PASS
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add internal/vault/vault_test.go internal/store/sqlite_test.go
-git commit -m "test: add security, boundary, concurrency, and corruption tests"
+git add internal/output/output_test.go
+git commit -m "test: add coverage for ScanResults, EnvList, VersionInfo, Print"
 ```
 
 ---
 
-### Task 10: Final verification + backup docs
+### Task 9: L4 — Add integration tests for exec-pattern and flags
 
-- [ ] **Step 1: Run full test suite with race detector**
+**Files:**
+- Modify: `tests/integration_test.go`
 
-Run: `go test -race ./...`
-Expected: ALL PASS
+- [ ] **Step 1: Add test for exec-pattern with --tag**
 
-- [ ] **Step 2: Run linter**
+Append to `tests/integration_test.go`:
 
-Run: `make build`
-Expected: Build succeeds
+```go
+func TestExecPatternWithTag(t *testing.T) {
+	env := newTestEnv(t)
+	env.mustRun("init")
+	env.setPassword("test-password")
+	env.mustRun("set", "API_KEY", stdin("secret123"))
+	env.mustRun("tag", "API_KEY", "--tag", "aws")
 
-- [ ] **Step 3: Run go vet**
+	output := env.mustRun("--tag", "aws", "--", "env")
+	if !strings.Contains(output, "API_KEY=secret123") {
+		t.Fatalf("expected API_KEY in env output, got: %s", output)
+	}
+}
+```
 
-Run: `go vet ./...`
-Expected: No issues
+- [ ] **Step 2: Add test for --expand-args**
 
-- [ ] **Step 4: Add backup section to README**
+```go
+func TestExecPatternWithExpandArgs(t *testing.T) {
+	env := newTestEnv(t)
+	env.mustRun("init")
+	env.setPassword("test-password")
+	env.mustRun("set", "API_KEY", stdin("secret123"))
 
-Add a "Backup & Recovery" section to README.md with:
-- Copy `vault.db` to backup location
-- For keychain users: note that keychain entry must also be backed up
-- For PSST_PASSWORD users: backup is password-based, just keep vault.db + password
-- Recovery: copy vault.db back, ensure keychain entry exists or PSST_PASSWORD is set
-- Warning: `psst export` writes plaintext
+	output := env.mustRun("--expand-args", "API_KEY", "--", "echo", "$API_KEY")
+	if !strings.Contains(output, "secret123") {
+		t.Fatalf("expected expanded secret in output, got: %s", output)
+	}
+	if !strings.Contains(output, "[REDACTED]") {
+		t.Fatalf("expected masked output, got: %s", output)
+	}
+}
+```
 
-- [ ] **Step 5: Final commit**
+- [ ] **Step 3: Add test for --env flag**
+
+```go
+func TestEnvFlag(t *testing.T) {
+	env := newTestEnv(t)
+	env.mustRun("init", "--env", "staging")
+	env.setPassword("test-password")
+	env.mustRun("--env", "staging", "set", "DB_HOST", stdin("db.example.com"))
+
+	output := env.mustRun("--env", "staging", "list")
+	if !strings.Contains(output, "DB_HOST") {
+		t.Fatalf("expected DB_HOST in list, got: %s", output)
+	}
+}
+```
+
+- [ ] **Step 4: Add test for migrate**
+
+```go
+func TestMigrate(t *testing.T) {
+	env := newTestEnv(t)
+	env.mustRun("init")
+	env.setPassword("test-password")
+	env.mustRun("set", "KEY", stdin("val"))
+
+	output := env.mustRun("migrate")
+	if !strings.Contains(output, "migrated") && !strings.Contains(output, "already") {
+		t.Fatalf("expected migrate output, got: %s", output)
+	}
+
+	val := env.mustRun("get", "KEY")
+	if !strings.Contains(val, "val") {
+		t.Fatalf("secret should survive migration, got: %s", val)
+	}
+}
+```
+
+- [ ] **Step 5: Run integration tests**
+
+Run: `go test ./tests/ -v -run TestExecPatternWithTag`
+Run: `go test ./tests/ -v -run TestExecPatternWithExpandArgs`
+Run: `go test ./tests/ -v -run TestEnvFlag`
+Run: `go test ./tests/ -v -run TestMigrate`
+Expected: All PASS
+
+Note: if `newTestEnv` or helper methods differ from what's shown, adapt to match the existing test patterns in `integration_test.go`.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add README.md
-git commit -m "docs: add backup and recovery section"
+git add tests/integration_test.go
+git commit -m "test: add integration tests for exec-pattern with --tag, --expand-args, --env, migrate"
 ```
+
+---
+
+## Final Verification
+
+- [ ] **Run full test suite with race detector**
+
+Run: `make test`
+Expected: All PASS
+
+- [ ] **Run linter**
+
+Run: `make lint`
+Expected: No errors
+
+- [ ] **Verify no regressions**
+
+Run: `make build && ./psst version`
+Expected: Version info printed
