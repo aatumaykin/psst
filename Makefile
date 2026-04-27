@@ -16,7 +16,7 @@ build:
 	go build -trimpath -ldflags "$(LDFLAGS)" -o psst ./cmd/psst/
 
 test:
-	go test ./... -v
+	go test -race ./... -v
 
 lint:
 ifndef GOLANGCI_LINT
