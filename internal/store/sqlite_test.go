@@ -283,3 +283,18 @@ func TestVaultFileCreated(t *testing.T) {
 		t.Fatal("vault.db should be created")
 	}
 }
+
+func TestCorruptedVault(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "corrupt.db")
+
+	data := []byte("this is not a valid sqlite database")
+	if err := os.WriteFile(dbPath, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := NewSQLite(dbPath)
+	if err == nil {
+		t.Fatal("should reject corrupted database")
+	}
+}

@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/hex"
@@ -949,4 +950,70 @@ func TestReadKDFVersion_RejectsCorruptedVersion(t *testing.T) {
 	if !strings.Contains(err.Error(), "corrupted kdf_version") {
 		t.Fatalf("expected corrupted kdf_version error, got: %v", err)
 	}
+}
+
+func TestSetSecret_NameExactly256Bytes(t *testing.T) {
+	v := setupTestVault(t)
+	defer v.Close()
+	ctx := context.Background()
+
+	name := strings.Repeat("A", 256)
+	err := v.SetSecret(ctx, name, []byte("val"), nil)
+	if err != nil {
+		t.Fatalf("256-byte name should be accepted: %v", err)
+	}
+}
+
+func TestSetGetSecret_NullBytes(t *testing.T) {
+	v := setupTestVault(t)
+	defer v.Close()
+	ctx := context.Background()
+
+	value := []byte("hello\x00world")
+	if err := v.SetSecret(ctx, "BIN_KEY", value, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	sec, err := v.GetSecret(ctx, "BIN_KEY")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(sec.Value, value) {
+		t.Fatalf("value mismatch: got %q, want %q", sec.Value, value)
+	}
+}
+
+func TestValidateTags(t *testing.T) {
+	if err := ValidateTags([]string{"aws", "prod-1", "test_env"}); err != nil {
+		t.Fatalf("valid tags: %v", err)
+	}
+	if err := ValidateTags(nil); err != nil {
+		t.Fatalf("nil tags: %v", err)
+	}
+	if err := ValidateTags(make([]string, 21)); err == nil {
+		t.Fatal("too many tags should fail")
+	}
+	if err := ValidateTags([]string{"invalid tag!"}); err == nil {
+		t.Fatal("invalid tag should fail")
+	}
+}
+
+func TestConcurrentAccess(t *testing.T) {
+	v := setupTestVault(t)
+	defer v.Close()
+	ctx := context.Background()
+
+	v.SetSecret(ctx, "KEY", []byte("initial"), nil)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 50 {
+			v.GetSecret(ctx, "KEY")
+		}
+	}()
+	for i := range 50 {
+		v.SetSecret(ctx, "KEY", []byte(fmt.Sprintf("v%d", i)), nil)
+	}
+	<-done
 }
