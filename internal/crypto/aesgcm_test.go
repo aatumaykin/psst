@@ -187,7 +187,8 @@ func TestKeyToBufferV1_V2_ProduceDifferentKeys(t *testing.T) {
 
 func TestKeyToBufferV2WithSalt_Deterministic(t *testing.T) {
 	enc := NewAESGCM()
-	salt := []byte("unique-vault-salt")
+	salt := make([]byte, saltSize)
+	salt[0] = 1
 	key1, err := enc.KeyToBufferV2WithSalt("mypassword", salt)
 	if err != nil {
 		t.Fatalf("KeyToBufferV2WithSalt failed: %v", err)
@@ -204,8 +205,12 @@ func TestKeyToBufferV2WithSalt_Deterministic(t *testing.T) {
 
 func TestKeyToBufferV2WithSalt_DifferentSalts(t *testing.T) {
 	enc := NewAESGCM()
-	key1, _ := enc.KeyToBufferV2WithSalt("mypassword", []byte("salt-a"))
-	key2, _ := enc.KeyToBufferV2WithSalt("mypassword", []byte("salt-b"))
+	saltA := make([]byte, saltSize)
+	saltA[0] = 1
+	saltB := make([]byte, saltSize)
+	saltB[0] = 2
+	key1, _ := enc.KeyToBufferV2WithSalt("mypassword", saltA)
+	key2, _ := enc.KeyToBufferV2WithSalt("mypassword", saltB)
 	if string(key1) == string(key2) {
 		t.Fatal("different salts should produce different keys")
 	}
@@ -214,7 +219,9 @@ func TestKeyToBufferV2WithSalt_DifferentSalts(t *testing.T) {
 func TestKeyToBufferV2WithSalt_DifferentFromHardcoded(t *testing.T) {
 	enc := NewAESGCM()
 	v2, _ := enc.KeyToBufferV2("mypassword")
-	withSalt, _ := enc.KeyToBufferV2WithSalt("mypassword", []byte("custom-salt"))
+	salt := make([]byte, saltSize)
+	salt[0] = 99
+	withSalt, _ := enc.KeyToBufferV2WithSalt("mypassword", salt)
 	if string(v2) == string(withSalt) {
 		t.Fatal("custom salt should produce different key from hardcoded salt")
 	}
@@ -225,7 +232,8 @@ func TestKeyToBufferV2WithSalt_NeverBypassesArgon2id(t *testing.T) {
 	raw := make([]byte, 32)
 	raw[0] = 99
 	b64 := base64.StdEncoding.EncodeToString(raw)
-	salt := []byte("any-salt")
+	salt := make([]byte, saltSize)
+	salt[0] = 1
 
 	result, err := enc.KeyToBufferV2WithSalt(b64, salt)
 	if err != nil {
@@ -239,5 +247,66 @@ func TestKeyToBufferV2WithSalt_NeverBypassesArgon2id(t *testing.T) {
 	expected := argon2.IDKey([]byte(b64), salt, argon2Iterations, argon2Memory, argon2Threads, aesKeySize)
 	if string(result) != string(expected) {
 		t.Fatal("KeyToBufferV2WithSalt should use Argon2id on the password string, not raw decoded bytes")
+	}
+}
+
+func TestKeyToBufferV2WithSalt_RejectsWrongSaltSize(t *testing.T) {
+	enc := NewAESGCM()
+	_, err := enc.KeyToBufferV2WithSalt("mypassword", []byte("short"))
+	if err == nil {
+		t.Fatal("KeyToBufferV2WithSalt should reject undersized salt")
+	}
+
+	longSalt := make([]byte, saltSize+1)
+	_, err = enc.KeyToBufferV2WithSalt("mypassword", longSalt)
+	if err == nil {
+		t.Fatal("KeyToBufferV2WithSalt should reject oversized salt")
+	}
+
+	emptySalt := []byte{}
+	_, err = enc.KeyToBufferV2WithSalt("mypassword", emptySalt)
+	if err == nil {
+		t.Fatal("KeyToBufferV2WithSalt should reject empty salt")
+	}
+}
+
+func TestEncrypt_RejectsWrongKeySize(t *testing.T) {
+	enc := NewAESGCM()
+	plaintext := []byte("test data")
+
+	_, _, err := enc.Encrypt(plaintext, []byte{1, 2, 3})
+	if err == nil {
+		t.Fatal("Encrypt should reject undersized key")
+	}
+
+	longKey := make([]byte, 64)
+	_, _, err = enc.Encrypt(plaintext, longKey)
+	if err == nil {
+		t.Fatal("Encrypt should reject oversized key")
+	}
+
+	_, _, err = enc.Encrypt(plaintext, nil)
+	if err == nil {
+		t.Fatal("Encrypt should reject nil key")
+	}
+}
+
+func TestDecrypt_RejectsWrongKeySize(t *testing.T) {
+	enc := NewAESGCM()
+
+	_, err := enc.Decrypt([]byte("ciphertext"), []byte("iv"), []byte{1, 2, 3})
+	if err == nil {
+		t.Fatal("Decrypt should reject undersized key")
+	}
+
+	longKey := make([]byte, 64)
+	_, err = enc.Decrypt([]byte("ciphertext"), []byte("iv"), longKey)
+	if err == nil {
+		t.Fatal("Decrypt should reject oversized key")
+	}
+
+	_, err = enc.Decrypt([]byte("ciphertext"), []byte("iv"), nil)
+	if err == nil {
+		t.Fatal("Decrypt should reject nil key")
 	}
 }
