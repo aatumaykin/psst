@@ -5,6 +5,7 @@ import (
 	"time"
 )
 
+// StoredSecret is an encrypted secret as stored in the database.
 type StoredSecret struct {
 	Name           string
 	EncryptedValue []byte
@@ -14,6 +15,7 @@ type StoredSecret struct {
 	UpdatedAt      time.Time
 }
 
+// SecretMeta is secret metadata without encrypted values.
 type SecretMeta struct {
 	Name      string
 	Tags      []string
@@ -21,6 +23,7 @@ type SecretMeta struct {
 	UpdatedAt time.Time
 }
 
+// HistoryEntry is a previous version of a stored secret.
 type HistoryEntry struct {
 	ID             int64
 	Name           string
@@ -31,6 +34,7 @@ type HistoryEntry struct {
 	ArchivedAt     time.Time
 }
 
+// SecretStore is the persistence interface for encrypted secrets.
 type SecretStore interface {
 	InitSchema() error
 	GetSecret(ctx context.Context, name string) (*StoredSecret, error)

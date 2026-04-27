@@ -13,6 +13,7 @@ import (
 
 const maxBinarySize = 100 * 1024 * 1024
 
+// PerformUpdate downloads and installs the latest version.
 func PerformUpdate(info *UpdateInfo, force bool) error {
 	if !force && !info.IsNewer() {
 		return fmt.Errorf("already up to date (v%s)", info.CurrentVersion)

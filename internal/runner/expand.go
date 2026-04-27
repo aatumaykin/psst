@@ -5,6 +5,7 @@ import (
 	"strings"
 )
 
+// ExpandEnvVars replaces $KEY and ${KEY} patterns in arg with values from env.
 func ExpandEnvVars(arg string, env map[string][]byte) string {
 	if len(env) == 0 {
 		return arg

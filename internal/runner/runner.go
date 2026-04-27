@@ -18,16 +18,20 @@ const gracefulShutdownDelay = 5 * time.Second
 
 var validEnvName = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 
+// ExecOptions controls subprocess execution behavior.
 type ExecOptions struct {
 	MaskOutput bool
 }
 
+// Runner executes commands with secrets injected into the environment.
 type Runner struct{}
 
+// New creates a new Runner.
 func New() *Runner {
 	return &Runner{}
 }
 
+// Exec runs a command with secrets injected as environment variables.
 func (r *Runner) Exec(secrets map[string][]byte, command string, args []string, opts ExecOptions) (int, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

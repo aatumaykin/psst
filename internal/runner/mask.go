@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// MaskSecrets replaces all occurrences of secret values in text with "[REDACTED]".
 func MaskSecrets(text string, secrets []string) string {
 	if len(secrets) == 0 {
 		return text
@@ -39,6 +40,7 @@ func MaskSecrets(text string, secrets []string) string {
 	return text
 }
 
+// MaskSecretsBytes replaces all occurrences of secret values in data with "[REDACTED]".
 func MaskSecretsBytes(data []byte, secrets [][]byte) []byte {
 	if len(secrets) == 0 {
 		return data

@@ -60,8 +60,7 @@ var updateInstallCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Download and install the latest version",
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		jsonOut, quiet, _, _, _ := getGlobalFlags(cmd)
-		_ = getFormatter(jsonOut, quiet)
+		_, quiet, _, _, _ := getGlobalFlags(cmd)
 		force, _ := cmd.Flags().GetBool("force")
 
 		info, err := updater.CheckForUpdate()

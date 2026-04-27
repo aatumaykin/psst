@@ -22,6 +22,7 @@ type SQLiteStore struct {
 	dbPath    string
 }
 
+// NewSQLite opens or creates a SQLite-backed secret store.
 func NewSQLite(dbPath string) (*SQLiteStore, error) {
 	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {

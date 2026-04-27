@@ -4,12 +4,14 @@ import (
 	"os"
 )
 
+// KeyDeriver derives encryption keys from passwords.
 type KeyDeriver interface {
 	KeyToBuffer(key string) ([]byte, error)
 	KeyToBufferV2(key string) ([]byte, error)
 	GenerateKey() ([]byte, error)
 }
 
+// KeyProvider retrieves and stores encryption keys using the OS keychain or env vars.
 type KeyProvider interface {
 	GetRawKey(service, account string) (string, error)
 	SetKey(service, account string, key []byte) error
@@ -17,6 +19,7 @@ type KeyProvider interface {
 	GenerateKey() ([]byte, error)
 }
 
+// NewProvider returns an OS keychain provider if available, otherwise an env-based one.
 func NewProvider(deriver KeyDeriver) KeyProvider {
 	oskr := &OSKeyring{deriver: deriver}
 	if oskr.IsAvailable() {

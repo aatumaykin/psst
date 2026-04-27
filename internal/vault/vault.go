@@ -20,6 +20,7 @@ import (
 	"github.com/aatumaykin/psst/internal/store"
 )
 
+// Vault manages encrypted secrets stored in a persistent backend.
 type Vault struct {
 	mu    sync.RWMutex
 	enc   crypto.Encryptor
@@ -46,10 +47,12 @@ const (
 
 var secretNameRegex = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 
+// New creates a Vault with the given encryptor, key provider, and store.
 func New(enc crypto.Encryptor, kp keyring.KeyProvider, s store.SecretStore) *Vault {
 	return &Vault{enc: enc, kp: kp, store: s}
 }
 
+// FindVaultPath returns the path to the vault database file based on global/env flags.
 func FindVaultPath(global bool, env string) (string, error) {
 	baseDir := ".psst"
 	if global {
@@ -67,6 +70,7 @@ func FindVaultPath(global bool, env string) (string, error) {
 	return filepath.Join(baseDir, "vault.db"), nil
 }
 
+// InitVault creates a new vault database at vaultPath and stores the encryption key.
 func InitVault(
 	ctx context.Context,
 	vaultPath string,
@@ -139,6 +143,7 @@ func InitVault(
 	return nil
 }
 
+// Unlock derives the decryption key from the stored credentials.
 func (v *Vault) Unlock(ctx context.Context) error {
 	if lockedUntil, _ := v.store.GetMeta(ctx, metaUnlockLockedUntil); lockedUntil != "" {
 		ts, parseErr := time.Parse(time.RFC3339, lockedUntil)
@@ -282,6 +287,7 @@ func (v *Vault) readKDFVersion(ctx context.Context) (int, error) {
 	return n, nil
 }
 
+// SetSecret encrypts and stores a secret with the given name, value, and tags.
 func (v *Vault) SetSecret(ctx context.Context, name string, value []byte, tags []string) error {
 	v.mu.RLock()
 	key := v.key
@@ -338,8 +344,10 @@ func (v *Vault) SetSecret(ctx context.Context, name string, value []byte, tags [
 	})
 }
 
+// ErrSecretNotFound is returned when a requested secret does not exist.
 var ErrSecretNotFound = errors.New("secret not found")
 
+// GetSecret decrypts and returns the named secret.
 func (v *Vault) GetSecret(ctx context.Context, name string) (*Secret, error) {
 	v.mu.RLock()
 	key := v.key
@@ -370,6 +378,7 @@ func (v *Vault) GetSecret(ctx context.Context, name string) (*Secret, error) {
 	}, nil
 }
 
+// ListSecrets returns metadata for all stored secrets without decrypting values.
 func (v *Vault) ListSecrets(ctx context.Context) ([]SecretMeta, error) {
 	if err := v.requireUnlock(); err != nil {
 		return nil, err
@@ -390,6 +399,7 @@ func (v *Vault) ListSecrets(ctx context.Context) ([]SecretMeta, error) {
 	return result, nil
 }
 
+// DeleteSecret removes a secret and its history.
 func (v *Vault) DeleteSecret(ctx context.Context, name string) error {
 	if err := v.requireUnlock(); err != nil {
 		return err
@@ -402,6 +412,7 @@ func (v *Vault) DeleteSecret(ctx context.Context, name string) error {
 	})
 }
 
+// GetHistory returns the version history for a secret.
 func (v *Vault) GetHistory(ctx context.Context, name string) ([]SecretHistoryEntry, error) {
 	if err := v.requireUnlock(); err != nil {
 		return nil, err
@@ -421,6 +432,7 @@ func (v *Vault) GetHistory(ctx context.Context, name string) ([]SecretHistoryEnt
 	return result, nil
 }
 
+// Rollback restores a secret to a previous version.
 func (v *Vault) Rollback(ctx context.Context, name string, version int) error {
 	if err := v.requireUnlock(); err != nil {
 		return err
@@ -475,6 +487,7 @@ func (v *Vault) Rollback(ctx context.Context, name string, version int) error {
 	})
 }
 
+// AddTag adds a tag to a secret.
 func (v *Vault) AddTag(ctx context.Context, name string, tag string) error {
 	if err := v.requireUnlock(); err != nil {
 		return err
@@ -497,6 +510,7 @@ func (v *Vault) AddTag(ctx context.Context, name string, tag string) error {
 	})
 }
 
+// RemoveTag removes a tag from a secret.
 func (v *Vault) RemoveTag(ctx context.Context, name string, tag string) error {
 	if err := v.requireUnlock(); err != nil {
 		return err
@@ -522,6 +536,7 @@ func (v *Vault) RemoveTag(ctx context.Context, name string, tag string) error {
 	})
 }
 
+// GetSecretsByTags returns metadata for secrets matching any of the given tags.
 func (v *Vault) GetSecretsByTags(ctx context.Context, tags []string) ([]SecretMeta, error) {
 	all, err := v.ListSecrets(ctx)
 	if err != nil {
@@ -544,6 +559,7 @@ func (v *Vault) GetSecretsByTags(ctx context.Context, tags []string) ([]SecretMe
 	return result, nil
 }
 
+// GetAllSecrets decrypts and returns all secrets as a name-to-value map.
 func (v *Vault) GetAllSecrets(ctx context.Context) (map[string][]byte, error) {
 	v.mu.RLock()
 	key := v.key
@@ -573,6 +589,7 @@ func (v *Vault) GetAllSecrets(ctx context.Context) (map[string][]byte, error) {
 	return result, nil
 }
 
+// GetSecretNamesByTags returns the names of secrets matching any of the given tags.
 func (v *Vault) GetSecretNamesByTags(ctx context.Context, tags []string) ([]string, error) {
 	metas, err := v.GetSecretsByTags(ctx, tags)
 	if err != nil {
@@ -585,6 +602,7 @@ func (v *Vault) GetSecretNamesByTags(ctx context.Context, tags []string) ([]stri
 	return names, nil
 }
 
+// GetSecretsByTagValues decrypts and returns secrets matching any of the given tags.
 func (v *Vault) GetSecretsByTagValues(ctx context.Context, tags []string) (map[string][]byte, error) {
 	names, err := v.GetSecretNamesByTags(ctx, tags)
 	if err != nil {
@@ -601,6 +619,7 @@ func (v *Vault) GetSecretsByTagValues(ctx context.Context, tags []string) (map[s
 	return result, nil
 }
 
+// Close zeroes the encryption key and closes the underlying store.
 func (v *Vault) Close() error {
 	v.mu.Lock()
 	crypto.ZeroBytes(v.key)
@@ -619,6 +638,7 @@ func (v *Vault) requireUnlock() error {
 	return nil
 }
 
+// MigrateKDF re-encrypts all secrets using the current KDF version.
 func (v *Vault) MigrateKDF(ctx context.Context) error {
 	v.mu.RLock()
 	key := v.key
