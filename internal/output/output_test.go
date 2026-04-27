@@ -123,3 +123,137 @@ func TestHistoryItemConversionJSON(t *testing.T) {
 		t.Fatalf("expected JSON with version field, got: %s", output)
 	}
 }
+
+func TestScanResultsEmpty(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{stdout: &buf, stderr: &buf}
+	f.ScanResults(nil)
+	if !strings.Contains(buf.String(), "No secrets found") {
+		t.Fatalf("expected no-secrets message, got: %s", buf.String())
+	}
+}
+
+func TestScanResultsHuman(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{stdout: &buf, stderr: &buf}
+	f.ScanResults([]ScanMatch{
+		{File: "config.yaml", Line: 5, SecretName: "API_KEY"},
+	})
+	if !strings.Contains(buf.String(), "config.yaml:5") {
+		t.Fatalf("expected file:line in output, got: %s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "API_KEY") {
+		t.Fatalf("expected secret name in output, got: %s", buf.String())
+	}
+}
+
+func TestScanResultsJSON(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{jsonMode: true, stdout: &buf, stderr: &buf}
+	f.ScanResults([]ScanMatch{
+		{File: "config.yaml", Line: 5, SecretName: "API_KEY"},
+	})
+	if !strings.Contains(buf.String(), `"file"`) {
+		t.Fatalf("expected JSON output, got: %s", buf.String())
+	}
+}
+
+func TestEnvListHuman(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{stdout: &buf, stderr: &buf}
+	f.EnvList(map[string]string{"KEY": "value", "PATH_KEY": "path with spaces"})
+	output := buf.String()
+	if !strings.Contains(output, "KEY=value") {
+		t.Fatalf("expected KEY=value in output, got: %s", output)
+	}
+	if !strings.Contains(output, `"path with spaces"`) {
+		t.Fatalf("expected quoted value, got: %s", output)
+	}
+}
+
+func TestEnvListJSON(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{jsonMode: true, stdout: &buf, stderr: &buf}
+	f.EnvList(map[string]string{"KEY": "value"})
+	if !strings.Contains(buf.String(), `"KEY"`) {
+		t.Fatalf("expected JSON output, got: %s", buf.String())
+	}
+}
+
+func TestEnvListWriter(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{}
+	f.EnvListWriter(map[string]string{"A": "1", "B": "2"}, &buf)
+	if !strings.Contains(buf.String(), "A=1") || !strings.Contains(buf.String(), "B=2") {
+		t.Fatalf("expected both entries, got: %s", buf.String())
+	}
+}
+
+func TestEnvironmentListHuman(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{stdout: &buf, stderr: &buf}
+	f.EnvironmentList([]string{"prod", "staging"})
+	if !strings.Contains(buf.String(), "prod") || !strings.Contains(buf.String(), "staging") {
+		t.Fatalf("expected env names in output, got: %s", buf.String())
+	}
+}
+
+func TestEnvironmentListEmpty(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{stdout: &buf, stderr: &buf}
+	f.EnvironmentList(nil)
+	if !strings.Contains(buf.String(), "No environments") {
+		t.Fatalf("expected empty message, got: %s", buf.String())
+	}
+}
+
+func TestVersionInfoHuman(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{stdout: &buf, stderr: &buf}
+	f.VersionInfo(VersionData{
+		Version: "1.0.0", Commit: "abc123", Date: "2025-01-01",
+		GoVersion: "go1.26", OSArch: "linux/amd64",
+	})
+	if !strings.Contains(buf.String(), "psst 1.0.0") {
+		t.Fatalf("expected version in output, got: %s", buf.String())
+	}
+}
+
+func TestVersionInfoQuiet(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{quiet: true, stdout: &buf, stderr: &buf}
+	f.VersionInfo(VersionData{Version: "1.0.0"})
+	if !strings.Contains(buf.String(), "1.0.0") {
+		t.Fatalf("quiet mode should output version, got: %s", buf.String())
+	}
+	if strings.Contains(buf.String(), "commit") {
+		t.Fatalf("quiet mode should not output details, got: %s", buf.String())
+	}
+}
+
+func TestVersionInfoJSON(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{jsonMode: true, stdout: &buf, stderr: &buf}
+	f.VersionInfo(VersionData{Version: "1.0.0", Commit: "abc123"})
+	if !strings.Contains(buf.String(), `"version"`) {
+		t.Fatalf("expected JSON output, got: %s", buf.String())
+	}
+}
+
+func TestPrint(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{stdout: &buf, stderr: &buf}
+	f.Print("hello")
+	if !strings.Contains(buf.String(), "hello") {
+		t.Fatalf("expected message, got: %s", buf.String())
+	}
+}
+
+func TestPrintQuiet(t *testing.T) {
+	var buf bytes.Buffer
+	f := &Formatter{quiet: true, stdout: &buf, stderr: &buf}
+	f.Print("hello")
+	if len(buf.String()) > 0 {
+		t.Fatalf("quiet should produce no output, got: %s", buf.String())
+	}
+}
