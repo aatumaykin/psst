@@ -182,6 +182,41 @@ Fallback environment variables: `PSST_GLOBAL=1`, `PSST_ENV=<name>`.
 - Vault database file permissions set to `0600`
 - Best-effort memory zeroing for keys and plaintext
 
+## Backup & Recovery
+
+The vault stores all secrets in a single encrypted SQLite database. If this file or the encryption key is lost, secrets are irrecoverable.
+
+### Manual backup
+
+```bash
+# 1. Copy the vault database
+cp .psst/vault.db /backup/vault-$(date +%Y%m%d).db
+
+# 2. For keychain users: the key is in the OS keychain (psst/vault-key)
+#    No additional backup needed if the keychain is intact.
+
+# 3. For PSST_PASSWORD users: backup is the password itself.
+#    Keep the vault.db file and the password in separate locations.
+```
+
+### Recovery
+
+```bash
+# Restore vault.db to the expected location
+cp /backup/vault.db .psst/vault.db
+
+# Ensure keychain is accessible (keychain users)
+# OR set PSST_PASSWORD (password users)
+psst list   # verify access
+```
+
+### Plaintext backup (warning: exposes secret values)
+
+```bash
+psst export --env-file .env.backup   # writes unencrypted values
+# Delete .env.backup after use!
+```
+
 ## CI / Headless Environments
 
 When OS keychain is unavailable (servers, Docker, CI), use `PSST_PASSWORD`:
