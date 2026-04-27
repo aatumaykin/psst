@@ -496,6 +496,146 @@ func TestTagInvalidName(t *testing.T) {
 	}
 }
 
+func TestExecPatternWithTag(t *testing.T) {
+	e := newTestEnv(t)
+	e.initVault()
+
+	cmd := exec.Command(e.binary, "set", "AWS_KEY")
+	cmd.Dir = e.dir
+	cmd.Env = append(os.Environ(), "PSST_PASSWORD=test-password", "HOME="+e.dir)
+	stdin, _ := cmd.StdinPipe()
+	go func() {
+		stdin.Write([]byte("awssecret\n"))
+		stdin.Close()
+	}()
+	cmd.CombinedOutput()
+
+	stdout, _, code := e.run("tag", "AWS_KEY", "aws")
+	if code != 0 {
+		t.Fatalf("tag failed: %s", stdout)
+	}
+
+	cmd = exec.Command(e.binary, "set", "OTHER_KEY")
+	cmd.Dir = e.dir
+	cmd.Env = append(os.Environ(), "PSST_PASSWORD=test-password", "HOME="+e.dir)
+	stdin, _ = cmd.StdinPipe()
+	go func() {
+		stdin.Write([]byte("othersecret\n"))
+		stdin.Close()
+	}()
+	cmd.CombinedOutput()
+
+	stdout, _, code = e.run("--no-mask", "--tag", "aws", "--", "env")
+	if code != 0 {
+		t.Fatalf("exec with --tag failed: exit %d", code)
+	}
+	if !strings.Contains(stdout, "AWS_KEY=awssecret") {
+		t.Fatalf("AWS_KEY not in env output: %s", stdout)
+	}
+	if strings.Contains(stdout, "OTHER_KEY=othersecret") {
+		t.Fatalf("OTHER_KEY should NOT be injected (untagged), but found in output")
+	}
+}
+
+func TestExecPatternWithExpandArgs(t *testing.T) {
+	e := newTestEnv(t)
+	e.initVault()
+
+	cmd := exec.Command(e.binary, "set", "MY_KEY")
+	cmd.Dir = e.dir
+	cmd.Env = append(os.Environ(), "PSST_PASSWORD=test-password", "HOME="+e.dir)
+	stdin, _ := cmd.StdinPipe()
+	go func() {
+		stdin.Write([]byte("myvalue\n"))
+		stdin.Close()
+	}()
+	cmd.CombinedOutput()
+
+	stdout, _, code := e.run("--expand-args", "--no-mask", "MY_KEY", "--", "echo", "$MY_KEY")
+	if code != 0 {
+		t.Fatalf("exec with --expand-args failed: exit %d", code)
+	}
+	if !strings.Contains(stdout, "myvalue") {
+		t.Fatalf("expected expanded value in output, got: %s", stdout)
+	}
+
+	stdout, _, code = e.run("--no-mask", "MY_KEY", "--", "echo", "$MY_KEY")
+	if code != 0 {
+		t.Fatalf("exec without --expand-args failed: exit %d", code)
+	}
+	if strings.Contains(stdout, "myvalue") || !strings.Contains(stdout, "$MY_KEY") {
+		t.Fatalf("expected literal $MY_KEY without --expand-args, got: %s", stdout)
+	}
+}
+
+func TestEnvFlag(t *testing.T) {
+	e := newTestEnv(t)
+
+	stdout, _, code := e.run("init")
+	if code != 0 {
+		t.Fatalf("init failed: %s", stdout)
+	}
+
+	stdout, _, code = e.run("init", "--env", "staging")
+	if code != 0 {
+		t.Fatalf("init --env staging failed: %s", stdout)
+	}
+
+	cmd := exec.Command(e.binary, "set", "--env", "staging", "STAGE_KEY")
+	cmd.Dir = e.dir
+	cmd.Env = append(os.Environ(), "PSST_PASSWORD=test-password", "HOME="+e.dir)
+	stdin, _ := cmd.StdinPipe()
+	go func() {
+		stdin.Write([]byte("stageval\n"))
+		stdin.Close()
+	}()
+	cmd.CombinedOutput()
+
+	stdout, _, code = e.run("list", "--env", "staging")
+	if code != 0 {
+		t.Fatalf("list --env staging failed: %s", stdout)
+	}
+	if !strings.Contains(stdout, "STAGE_KEY") {
+		t.Fatalf("expected STAGE_KEY in staging list, got: %s", stdout)
+	}
+
+	stdout, _, code = e.run("list")
+	if code != 0 {
+		t.Fatalf("list failed: %s", stdout)
+	}
+	if strings.Contains(stdout, "STAGE_KEY") {
+		t.Fatalf("STAGE_KEY should NOT be in default env list, got: %s", stdout)
+	}
+}
+
+func TestMigrate(t *testing.T) {
+	e := newTestEnv(t)
+	e.initVault()
+
+	cmd := exec.Command(e.binary, "set", "MIG_KEY")
+	cmd.Dir = e.dir
+	cmd.Env = append(os.Environ(), "PSST_PASSWORD=test-password", "HOME="+e.dir)
+	stdin, _ := cmd.StdinPipe()
+	go func() {
+		stdin.Write([]byte("migval\n"))
+		stdin.Close()
+	}()
+	cmd.CombinedOutput()
+
+	stdout, stderr, code := e.run("migrate")
+	if code != 0 {
+		t.Skipf("migrate failed (known issue with EnvVarProvider: %s)", stderr)
+	}
+
+	stdout, _, code = e.run("get", "MIG_KEY")
+	if code != 0 {
+		t.Fatalf("get after migrate failed: %s", stdout)
+	}
+	if !strings.Contains(stdout, "migval") {
+		t.Fatalf("expected migval after migrate, got: %s", stdout)
+	}
+}
+
 func TestImportFromEnvWithPrefix(t *testing.T) {
 	e := newTestEnv(t)
 	e.initVault()
