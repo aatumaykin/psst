@@ -1075,9 +1075,10 @@ func TestUnlock_LockDurationExponential(t *testing.T) {
 	if lockedUntil1 == "" {
 		t.Fatal("expected lock after first cycle")
 	}
-	ts1, parseErr := time.Parse(time.RFC3339, lockedUntil1)
-	if parseErr != nil {
-		t.Fatal(parseErr)
+
+	cycleAfterFirst, _ := s.GetMeta(ctx, metaUnlockCycle)
+	if cycleAfterFirst != "1" {
+		t.Fatalf("unlock_cycle after first cycle = %q, want %q", cycleAfterFirst, "1")
 	}
 
 	s.SetMeta(ctx, metaUnlockLockedUntil, "")
@@ -1096,15 +1097,18 @@ func TestUnlock_LockDurationExponential(t *testing.T) {
 	if lockedUntil2 == "" {
 		t.Fatal("expected lock after second cycle")
 	}
-	ts2, parseErr := time.Parse(time.RFC3339, lockedUntil2)
-	if parseErr != nil {
-		t.Fatal(parseErr)
-	}
 
-	duration1 := ts1.Sub(time.Now().Add(-500 * time.Millisecond))
-	duration2 := ts2.Sub(time.Now().Add(-500 * time.Millisecond))
-	if duration2 <= duration1 {
-		t.Fatalf("second lock duration (%v) should exceed first (%v)", duration2, duration1)
+	ts1, _ := time.Parse(time.RFC3339, lockedUntil1)
+	ts2, _ := time.Parse(time.RFC3339, lockedUntil2)
+	expected1 := time.Duration(unlockDelayBaseMs) * time.Millisecond
+	expected2 := time.Duration(unlockDelayBaseMs) * 2 * time.Millisecond
+	tolerance := 2 * time.Second
+
+	if ts1.Before(time.Now().Add(expected1).Add(-tolerance)) || ts1.After(time.Now().Add(expected1).Add(tolerance)) {
+		t.Fatalf("first lock timestamp not within expected range for base duration %v", expected1)
+	}
+	if ts2.Before(time.Now().Add(expected2).Add(-tolerance)) || ts2.After(time.Now().Add(expected2).Add(tolerance)) {
+		t.Fatalf("second lock timestamp not within expected range for double duration %v", expected2)
 	}
 }
 
