@@ -67,18 +67,40 @@ func (v *Vault) Unlock(ctx context.Context) error {
 		return fmt.Errorf("derive key: %w", err)
 	}
 
-	verified, verifyErr := v.verifyVault(ctx, key)
-	if verifyErr != nil {
-		return verifyErr
+	verified, hasData := v.tryVerify(ctx, key)
+
+	if !verified && hasData && kdfVersion == crypto.KDFVersion2 {
+		crypto.ZeroBytes(key)
+		legacyKey, legacyErr := v.tryLegacyV2Key(rawKey)
+		if legacyErr == nil && legacyKey != nil {
+			legacyVerified, _ := v.tryVerify(ctx, legacyKey)
+			if legacyVerified {
+				key = legacyKey
+				verified = true
+				v.mu.Lock()
+				v.legacyV2 = true
+				v.mu.Unlock()
+				fmt.Fprintln(os.Stderr,
+					"Warning: vault uses legacy encryption (pre-v1.3.0). Run 'psst migrate' to upgrade.")
+			} else {
+				crypto.ZeroBytes(legacyKey)
+			}
+		}
 	}
 
 	if !verified {
 		crypto.ZeroBytes(key)
-		return errors.New("vault integrity check failed: no verification data. Re-initialize with 'psst init'")
+		if !hasData {
+			return errors.New("vault integrity check failed: no verification data. Re-initialize with 'psst init'")
+		}
+		return v.failUnlock(ctx, nil)
 	}
 
 	v.mu.Lock()
 	v.key = key
+	if !v.hasVerifyData(ctx) {
+		v.legacyV2 = true
+	}
 	v.mu.Unlock()
 
 	for k, val := range map[string]string{
@@ -93,40 +115,54 @@ func (v *Vault) Unlock(ctx context.Context) error {
 	return nil
 }
 
-func (v *Vault) verifyVault(ctx context.Context, key []byte) (bool, error) {
+func (v *Vault) hasVerifyData(ctx context.Context) bool {
+	verifyIV, _ := v.store.GetMeta(ctx, "verify_iv")
+	verifyData, _ := v.store.GetMeta(ctx, "verify_data")
+	return verifyIV != "" && verifyData != ""
+}
+
+func (v *Vault) tryVerify(ctx context.Context, key []byte) (verified bool, hasData bool) {
 	verifyIV, ivErr := v.store.GetMeta(ctx, "verify_iv")
 	verifyData, dataErr := v.store.GetMeta(ctx, "verify_data")
 
 	if ivErr == nil && dataErr == nil && verifyIV != "" && verifyData != "" {
 		ivBytes, ivDecodeErr := base64.StdEncoding.DecodeString(verifyIV)
 		if ivDecodeErr != nil {
-			return false, fmt.Errorf("decode verify_iv: %w", ivDecodeErr)
+			return false, true
 		}
 		dataBytes, dataDecodeErr := base64.StdEncoding.DecodeString(verifyData)
 		if dataDecodeErr != nil {
-			return false, fmt.Errorf("decode verify_data: %w", dataDecodeErr)
+			return false, true
 		}
-		if _, decErr := v.enc.Decrypt(dataBytes, ivBytes, key); decErr != nil {
-			return false, v.failUnlock(ctx, key)
-		}
-		return true, nil
+		_, decErr := v.enc.Decrypt(dataBytes, ivBytes, key)
+		return decErr == nil, true
 	}
 
 	all, verifyErr := v.store.GetAllSecrets(ctx)
 	if verifyErr != nil {
-		return false, fmt.Errorf("verify vault: %w", verifyErr)
+		return false, false
 	}
 	if len(all) > 0 {
-		if _, decErr := v.enc.Decrypt(all[0].EncryptedValue, all[0].IV, key); decErr != nil {
-			return false, v.failUnlock(ctx, key)
-		}
-		return true, nil
+		_, decErr := v.enc.Decrypt(all[0].EncryptedValue, all[0].IV, key)
+		return decErr == nil, true
 	}
-	return false, nil
+	return false, false
+}
+
+func (v *Vault) tryLegacyV2Key(rawKey []byte) ([]byte, error) {
+	decoded, decodeErr := base64.StdEncoding.DecodeString(string(rawKey))
+	if decodeErr != nil || len(decoded) != 32 {
+		return nil, errors.New("not a legacy base64-encoded 32-byte key")
+	}
+	key := make([]byte, 32)
+	copy(key, decoded)
+	return key, nil
 }
 
 func (v *Vault) failUnlock(ctx context.Context, key []byte) error {
-	crypto.ZeroBytes(key)
+	if key != nil {
+		crypto.ZeroBytes(key)
+	}
 	attempts, incErr := v.store.IncrementMetaInt(ctx, metaUnlockAttempts, 1)
 	if incErr != nil {
 		return fmt.Errorf("authentication failed (rate-limit write error: %w)", incErr)

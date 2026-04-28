@@ -3,6 +3,7 @@ package vault
 import (
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -12,13 +13,14 @@ import (
 )
 
 type Vault struct {
-	mu     sync.RWMutex
-	enc    crypto.Encryptor
-	kp     keyring.KeyProvider
-	store  store.SecretStore
-	key    []byte
-	rawKey []byte
-	v1KDF  bool
+	mu       sync.RWMutex
+	enc      crypto.Encryptor
+	kp       keyring.KeyProvider
+	store    store.SecretStore
+	key      []byte
+	rawKey   []byte
+	v1KDF    bool
+	legacyV2 bool
 }
 
 const (
@@ -77,7 +79,7 @@ func (v *Vault) withRLock(fn func() error) error {
 
 func (v *Vault) checkKDFBlocking() error {
 	if v.v1KDF {
-		return errors.New("vault uses legacy KDF (V1): run 'psst migrate' to upgrade")
+		fmt.Fprintln(os.Stderr, "Warning: vault uses legacy KDF (V1). Run 'psst migrate' to upgrade.")
 	}
 	return nil
 }

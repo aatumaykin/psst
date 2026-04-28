@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 
 	"github.com/aatumaykin/psst/internal/crypto"
@@ -25,6 +26,7 @@ func (v *Vault) MigrateKDF(ctx context.Context) error {
 
 	v.mu.RLock()
 	rawKey := v.rawKey
+	isLegacy := v.legacyV2
 	v.mu.RUnlock()
 	if len(rawKey) == 0 {
 		return errors.New("vault not unlocked: no raw key available")
@@ -53,7 +55,7 @@ func (v *Vault) MigrateKDF(ctx context.Context) error {
 	if txErr := v.store.ExecTx(func() error {
 		for _, s := range all {
 			var plaintext []byte
-			plaintext, err = v.enc.Decrypt(s.EncryptedValue, s.IV, key, []byte(s.Name))
+			plaintext, err = v.decryptSecret(s.EncryptedValue, s.IV, key, s.Name)
 			if err != nil {
 				return fmt.Errorf("decrypt secret: %w", err)
 			}
@@ -71,7 +73,20 @@ func (v *Vault) MigrateKDF(ctx context.Context) error {
 		if metaErr := v.store.SetMeta(ctx, "kdf_salt", saltB64); metaErr != nil {
 			return fmt.Errorf("store kdf_salt: %w", metaErr)
 		}
-		return v.store.SetMeta(ctx, "kdf_version", strconv.Itoa(crypto.CurrentKDFVersion))
+		if metaErr := v.store.SetMeta(ctx, "kdf_version", strconv.Itoa(crypto.CurrentKDFVersion)); metaErr != nil {
+			return fmt.Errorf("store kdf_version: %w", metaErr)
+		}
+		verifyCiphertext, verifyIV, verifyErr := v.enc.Encrypt([]byte("psst-verify"), newKey)
+		if verifyErr != nil {
+			return fmt.Errorf("create verification: %w", verifyErr)
+		}
+		if metaErr := v.store.SetMeta(ctx, "verify_iv", base64.StdEncoding.EncodeToString(verifyIV)); metaErr != nil {
+			return fmt.Errorf("store verify_iv: %w", metaErr)
+		}
+		if metaErr := v.store.SetMeta(ctx, "verify_data", base64.StdEncoding.EncodeToString(verifyCiphertext)); metaErr != nil {
+			return fmt.Errorf("store verify_data: %w", metaErr)
+		}
+		return nil
 	}); txErr != nil {
 		crypto.ZeroBytes(newKey)
 		return txErr
@@ -79,6 +94,11 @@ func (v *Vault) MigrateKDF(ctx context.Context) error {
 	v.mu.Lock()
 	crypto.ZeroBytes(v.key)
 	v.key = newKey
+	v.legacyV2 = false
 	v.mu.Unlock()
+
+	if isLegacy {
+		fmt.Fprintln(os.Stderr, "Migration complete: vault upgraded to current encryption format.")
+	}
 	return nil
 }

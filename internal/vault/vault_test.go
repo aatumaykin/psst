@@ -1327,7 +1327,7 @@ func TestTagsPreservedAfterRollback(t *testing.T) {
 	}
 }
 
-func TestV1Vault_BlocksGetSecret(t *testing.T) {
+func TestV1Vault_WarnsButAllows(t *testing.T) {
 	v := setupTestVaultV1(t)
 	defer v.Close()
 	ctx := context.Background()
@@ -1340,31 +1340,20 @@ func TestV1Vault_BlocksGetSecret(t *testing.T) {
 	v.v1KDF = true
 	v.mu.Unlock()
 
-	_, err := v.GetSecret(ctx, "TEST")
-	if err == nil {
-		t.Fatal("GetSecret on V1 vault should be blocked")
+	sec, err := v.GetSecret(ctx, "TEST")
+	if err != nil {
+		t.Fatalf("GetSecret on V1 vault should work: %v", err)
 	}
-	if !strings.Contains(err.Error(), "legacy KDF") {
-		t.Fatalf("expected legacy KDF error, got: %v", err)
-	}
-	if !strings.Contains(err.Error(), "psst migrate") {
-		t.Fatalf("error should mention 'psst migrate', got: %v", err)
+	if string(sec.Value) != "value" {
+		t.Fatalf("expected 'value', got %q", string(sec.Value))
 	}
 
-	_, err = v.GetAllSecrets(ctx)
-	if err == nil {
-		t.Fatal("GetAllSecrets on V1 vault should be blocked")
+	all, err := v.GetAllSecrets(ctx)
+	if err != nil {
+		t.Fatalf("GetAllSecrets on V1 vault should work: %v", err)
 	}
-	if !strings.Contains(err.Error(), "legacy KDF") {
-		t.Fatalf("expected legacy KDF error for GetAllSecrets, got: %v", err)
-	}
-
-	err = v.SetSecret(ctx, "NEW", []byte("val"), nil)
-	if err == nil {
-		t.Fatal("SetSecret on V1 vault should be blocked")
-	}
-	if !strings.Contains(err.Error(), "legacy KDF") {
-		t.Fatalf("expected legacy KDF error for SetSecret, got: %v", err)
+	if len(all) == 0 {
+		t.Fatal("GetAllSecrets should return secrets")
 	}
 }
 

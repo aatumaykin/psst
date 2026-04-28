@@ -49,13 +49,27 @@ func (v *Vault) SetSecret(ctx context.Context, name string, value []byte, tags [
 			}
 		}
 
-		ciphertext, iv, encErr := v.enc.Encrypt(value, key, []byte(name))
+		ciphertext, iv, encErr := v.encryptSecret(value, key, name)
 		if encErr != nil {
 			return fmt.Errorf("encrypt: %w", encErr)
 		}
 
 		return v.store.SetSecret(ctx, name, ciphertext, iv, tags)
 	})
+}
+
+func (v *Vault) decryptSecret(ciphertext, iv, key []byte, name string) ([]byte, error) {
+	if v.legacyV2 {
+		return v.enc.Decrypt(ciphertext, iv, key)
+	}
+	return v.enc.Decrypt(ciphertext, iv, key, []byte(name))
+}
+
+func (v *Vault) encryptSecret(plaintext, key []byte, name string) (ciphertext, iv []byte, err error) {
+	if v.legacyV2 {
+		return v.enc.Encrypt(plaintext, key)
+	}
+	return v.enc.Encrypt(plaintext, key, []byte(name))
 }
 
 var ErrSecretNotFound = errors.New("secret not found")
@@ -75,7 +89,7 @@ func (v *Vault) GetSecret(ctx context.Context, name string) (*Secret, error) {
 		return nil, ErrSecretNotFound
 	}
 
-	plaintext, err := v.enc.Decrypt(stored.EncryptedValue, stored.IV, key, []byte(name))
+	plaintext, err := v.decryptSecret(stored.EncryptedValue, stored.IV, key, name)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt: %w", err)
 	}
@@ -136,7 +150,7 @@ func (v *Vault) GetAllSecrets(ctx context.Context) (map[string][]byte, error) {
 	result := make(map[string][]byte, len(all))
 	for _, s := range all {
 		var plaintext []byte
-		plaintext, err = v.enc.Decrypt(s.EncryptedValue, s.IV, key, []byte(s.Name))
+		plaintext, err = v.decryptSecret(s.EncryptedValue, s.IV, key, s.Name)
 		if err != nil {
 			for k, v := range result {
 				crypto.ZeroBytes(v)
