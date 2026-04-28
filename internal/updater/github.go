@@ -12,10 +12,15 @@ import (
 
 const defaultGitHubAPIURL = "https://api.github.com/repos/aatumaykin/psst/releases/latest"
 
-const httpTimeoutSec = 15
+const apiTimeoutSec = 15
+const downloadTimeoutSec = 120
 
 func newHTTPClient() *http.Client {
-	return &http.Client{Timeout: httpTimeoutSec * time.Second}
+	return &http.Client{Timeout: apiTimeoutSec * time.Second}
+}
+
+func newDownloadClient() *http.Client {
+	return &http.Client{Timeout: downloadTimeoutSec * time.Second}
 }
 
 func fetchLatestRelease() (*ReleaseInfo, error) {
@@ -63,7 +68,7 @@ func downloadFile(url string) ([]byte, error) {
 		return nil, fmt.Errorf("create download request: %w", err)
 	}
 
-	client := newHTTPClient()
+	client := newDownloadClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("download %s: %w", url, err)
