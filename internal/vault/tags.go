@@ -7,49 +7,45 @@ import (
 )
 
 func (v *Vault) AddTag(ctx context.Context, name string, tag string) error {
-	if err := v.requireUnlock(); err != nil {
-		return err
-	}
+	return v.withRLock(func() error {
+		return v.store.ExecTx(func() error {
+			sec, err := v.store.GetSecret(ctx, name)
+			if err != nil {
+				return err
+			}
+			if sec == nil {
+				return fmt.Errorf("secret %q not found", name)
+			}
 
-	return v.store.ExecTx(func() error {
-		sec, err := v.store.GetSecret(ctx, name)
-		if err != nil {
-			return err
-		}
-		if sec == nil {
-			return fmt.Errorf("secret %q not found", name)
-		}
-
-		if slices.Contains(sec.Tags, tag) {
-			return nil
-		}
-		sec.Tags = append(sec.Tags, tag)
-		return v.store.SetSecret(ctx, name, sec.EncryptedValue, sec.IV, sec.Tags)
+			if slices.Contains(sec.Tags, tag) {
+				return nil
+			}
+			sec.Tags = append(sec.Tags, tag)
+			return v.store.SetSecret(ctx, name, sec.EncryptedValue, sec.IV, sec.Tags)
+		})
 	})
 }
 
 func (v *Vault) RemoveTag(ctx context.Context, name string, tag string) error {
-	if err := v.requireUnlock(); err != nil {
-		return err
-	}
-
-	return v.store.ExecTx(func() error {
-		sec, err := v.store.GetSecret(ctx, name)
-		if err != nil {
-			return err
-		}
-		if sec == nil {
-			return fmt.Errorf("secret %q not found", name)
-		}
-
-		filtered := make([]string, 0, len(sec.Tags))
-		for _, t := range sec.Tags {
-			if t != tag {
-				filtered = append(filtered, t)
+	return v.withRLock(func() error {
+		return v.store.ExecTx(func() error {
+			sec, err := v.store.GetSecret(ctx, name)
+			if err != nil {
+				return err
 			}
-		}
-		sec.Tags = filtered
-		return v.store.SetSecret(ctx, name, sec.EncryptedValue, sec.IV, sec.Tags)
+			if sec == nil {
+				return fmt.Errorf("secret %q not found", name)
+			}
+
+			filtered := make([]string, 0, len(sec.Tags))
+			for _, t := range sec.Tags {
+				if t != tag {
+					filtered = append(filtered, t)
+				}
+			}
+			sec.Tags = filtered
+			return v.store.SetSecret(ctx, name, sec.EncryptedValue, sec.IV, sec.Tags)
+		})
 	})
 }
 

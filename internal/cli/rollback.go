@@ -17,8 +17,8 @@ var rollbackCmd = &cobra.Command{
 		name := args[0]
 		toVersion, _ := cmd.Flags().GetInt("to")
 
-		if err := vault.ValidateSecretName(name); err != nil {
-			return exitWithError(fmt.Sprintf("Invalid secret name %q", name))
+		if err := requireValidName(name); err != nil {
+			return err
 		}
 
 		if toVersion <= 0 {

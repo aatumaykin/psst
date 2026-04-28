@@ -9,13 +9,13 @@ type EnvVarProvider struct {
 	deriver KeyDeriver
 }
 
-func (e *EnvVarProvider) GetRawKey(_, _ string) (string, error) {
+func (e *EnvVarProvider) GetRawKey(_, _ string) ([]byte, error) {
 	password := os.Getenv("PSST_PASSWORD")
 	if password == "" {
-		return "", errors.New("PSST_PASSWORD not set and OS keychain unavailable")
+		return nil, errors.New("PSST_PASSWORD not set and OS keychain unavailable")
 	}
 	os.Unsetenv("PSST_PASSWORD")
-	return password, nil
+	return []byte(password), nil
 }
 
 func (e *EnvVarProvider) SetKey(_, _ string, _ []byte) error {

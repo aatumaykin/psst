@@ -19,15 +19,15 @@ var updateCheckCmd = &cobra.Command{
 	Use:   "check",
 	Short: "Check if a newer version is available",
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		jsonOut, quiet, _, _, _ := getGlobalFlags(cmd)
-		f := getFormatter(jsonOut, quiet)
+		cfg := getGlobalFlags(cmd)
+		f := getFormatter(cfg.JSON, cfg.Quiet)
 
 		info, err := updater.CheckForUpdate()
 		if err != nil {
 			return exitWithError(fmt.Sprintf("Update check failed: %v", err))
 		}
 
-		if jsonOut {
+		if cfg.JSON {
 			f.PrintJSON(map[string]string{
 				"current": version.Version,
 				"latest":  info.LatestVersion,
@@ -36,7 +36,7 @@ var updateCheckCmd = &cobra.Command{
 			return nil
 		}
 
-		if quiet {
+		if cfg.Quiet {
 			if info.IsNewer() {
 				f.Print(info.LatestVersion)
 			}
@@ -59,8 +59,8 @@ var updateInstallCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Download and install the latest version",
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		_, quiet, _, _, _ := getGlobalFlags(cmd)
-		f := getFormatter(false, quiet)
+		cfg := getGlobalFlags(cmd)
+		f := getFormatter(false, cfg.Quiet)
 		force, _ := cmd.Flags().GetBool("force")
 
 		info, err := updater.CheckForUpdate()
@@ -69,13 +69,13 @@ var updateInstallCmd = &cobra.Command{
 		}
 
 		if !force && !info.IsNewer() {
-			if !quiet {
+			if !cfg.Quiet {
 				f.Print(fmt.Sprintf("Already up to date (v%s). Use --force to reinstall.", info.CurrentVersion))
 			}
 			return nil
 		}
 
-		if !quiet {
+		if !cfg.Quiet {
 			f.Print(fmt.Sprintf("Updating from v%s to v%s...", info.CurrentVersion, info.LatestVersion))
 		}
 
@@ -83,7 +83,7 @@ var updateInstallCmd = &cobra.Command{
 			return exitWithError(fmt.Sprintf("Update failed: %v", updateErr))
 		}
 
-		if !quiet {
+		if !cfg.Quiet {
 			f.Print(fmt.Sprintf("Successfully updated to v%s!", info.LatestVersion))
 		}
 		return nil

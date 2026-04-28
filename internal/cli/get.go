@@ -1,10 +1,9 @@
 package cli
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 
+	"github.com/aatumaykin/psst/internal/crypto"
 	"github.com/aatumaykin/psst/internal/output"
 	"github.com/aatumaykin/psst/internal/vault"
 )
@@ -15,14 +14,15 @@ var getCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		if err := vault.ValidateSecretName(name); err != nil {
-			return exitWithError(fmt.Sprintf("Invalid secret name %q", name))
+		if err := requireValidName(name); err != nil {
+			return err
 		}
 		return withVault(cmd, func(v vault.Interface, f *output.Formatter) error {
 			sec, err := v.GetSecret(cmd.Context(), name)
 			if err != nil {
 				return exitWithError(err.Error())
 			}
+			defer crypto.ZeroBytes(sec.Value)
 			f.SecretValue(name, string(sec.Value))
 			return nil
 		})

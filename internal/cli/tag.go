@@ -17,8 +17,8 @@ var tagCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, tag := args[0], args[1]
 
-		if err := vault.ValidateSecretName(name); err != nil {
-			return exitWithError(fmt.Sprintf("Invalid secret name %q", name))
+		if err := requireValidName(name); err != nil {
+			return err
 		}
 
 		return withVault(cmd, func(v vault.Interface, f *output.Formatter) error {
@@ -39,8 +39,8 @@ var untagCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, tag := args[0], args[1]
 
-		if err := vault.ValidateSecretName(name); err != nil {
-			return exitWithError(fmt.Sprintf("Invalid secret name %q", name))
+		if err := requireValidName(name); err != nil {
+			return err
 		}
 
 		return withVault(cmd, func(v vault.Interface, f *output.Formatter) error {

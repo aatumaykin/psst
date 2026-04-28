@@ -35,7 +35,10 @@ func (v *Vault) Unlock(ctx context.Context) error {
 	var key []byte
 	switch kdfVersion {
 	case 1:
-		key, err = v.enc.KeyToBuffer(rawKey)
+		v.mu.Lock()
+		v.v1KDF = true
+		v.mu.Unlock()
+		key, err = v.enc.KeyToBuffer(string(rawKey))
 		defer func() {
 			if err == nil {
 				fmt.Fprintln(os.Stderr,
@@ -56,7 +59,7 @@ func (v *Vault) Unlock(ctx context.Context) error {
 		if decodeErr != nil {
 			return fmt.Errorf("decode kdf_salt: %w", decodeErr)
 		}
-		key, err = v.enc.KeyToBufferV2WithSalt(rawKey, salt)
+		key, err = v.enc.KeyToBufferV2WithSalt(string(rawKey), salt)
 	default:
 		return fmt.Errorf("unsupported KDF version: %d", kdfVersion)
 	}
@@ -64,47 +67,62 @@ func (v *Vault) Unlock(ctx context.Context) error {
 		return fmt.Errorf("derive key: %w", err)
 	}
 
-	verified := false
+	verified, verifyErr := v.verifyVault(ctx, key)
+	if verifyErr != nil {
+		return verifyErr
+	}
 
-	verifyIV, ivErr := v.store.GetMeta(ctx, "verify_iv")
-	verifyData, dataErr := v.store.GetMeta(ctx, "verify_data")
-
-	if ivErr == nil && dataErr == nil && verifyIV != "" && verifyData != "" {
-		ivBytes, ivDecodeErr := base64.StdEncoding.DecodeString(verifyIV)
-		if ivDecodeErr != nil {
-			return fmt.Errorf("decode verify_iv: %w", ivDecodeErr)
-		}
-		dataBytes, dataDecodeErr := base64.StdEncoding.DecodeString(verifyData)
-		if dataDecodeErr != nil {
-			return fmt.Errorf("decode verify_data: %w", dataDecodeErr)
-		}
-		if _, decErr := v.enc.Decrypt(dataBytes, ivBytes, key); decErr != nil {
-			return v.failUnlock(ctx, key)
-		}
-		verified = true
-	} else {
-		all, verifyErr := v.store.GetAllSecrets(ctx)
-		if verifyErr != nil {
-			return fmt.Errorf("verify vault: %w", verifyErr)
-		}
-		if len(all) > 0 {
-			if _, decErr := v.enc.Decrypt(all[0].EncryptedValue, all[0].IV, key); decErr != nil {
-				return v.failUnlock(ctx, key)
-			}
-			verified = true
-		}
+	if !verified {
+		crypto.ZeroBytes(key)
+		return errors.New("vault integrity check failed: no verification data. Re-initialize with 'psst init'")
 	}
 
 	v.mu.Lock()
 	v.key = key
 	v.mu.Unlock()
 
-	if verified {
-		_ = v.store.SetMeta(ctx, metaUnlockAttempts, "0")
-		_ = v.store.SetMeta(ctx, metaUnlockLockedUntil, "")
-		_ = v.store.SetMeta(ctx, metaUnlockCycle, "0")
+	for k, val := range map[string]string{
+		metaUnlockAttempts:    "0",
+		metaUnlockLockedUntil: "",
+		metaUnlockCycle:       "0",
+	} {
+		if metaErr := v.store.SetMeta(ctx, k, val); metaErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to reset %s: %v\n", k, metaErr)
+		}
 	}
 	return nil
+}
+
+func (v *Vault) verifyVault(ctx context.Context, key []byte) (bool, error) {
+	verifyIV, ivErr := v.store.GetMeta(ctx, "verify_iv")
+	verifyData, dataErr := v.store.GetMeta(ctx, "verify_data")
+
+	if ivErr == nil && dataErr == nil && verifyIV != "" && verifyData != "" {
+		ivBytes, ivDecodeErr := base64.StdEncoding.DecodeString(verifyIV)
+		if ivDecodeErr != nil {
+			return false, fmt.Errorf("decode verify_iv: %w", ivDecodeErr)
+		}
+		dataBytes, dataDecodeErr := base64.StdEncoding.DecodeString(verifyData)
+		if dataDecodeErr != nil {
+			return false, fmt.Errorf("decode verify_data: %w", dataDecodeErr)
+		}
+		if _, decErr := v.enc.Decrypt(dataBytes, ivBytes, key); decErr != nil {
+			return false, v.failUnlock(ctx, key)
+		}
+		return true, nil
+	}
+
+	all, verifyErr := v.store.GetAllSecrets(ctx)
+	if verifyErr != nil {
+		return false, fmt.Errorf("verify vault: %w", verifyErr)
+	}
+	if len(all) > 0 {
+		if _, decErr := v.enc.Decrypt(all[0].EncryptedValue, all[0].IV, key); decErr != nil {
+			return false, v.failUnlock(ctx, key)
+		}
+		return true, nil
+	}
+	return false, nil
 }
 
 func (v *Vault) failUnlock(ctx context.Context, key []byte) error {

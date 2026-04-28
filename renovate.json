@@ -3,15 +3,29 @@
   "extends": [
     "config:recommended"
   ],
-  "postUpdateOptions": ["gomodTidy"],
+  "labels": [
+    "dependencies"
+  ],
+  "assigneesFromCodeOwners": true,
+  "dependencyDashboard": true,
+  "postUpdateOptions": [
+    "gomodTidy"
+  ],
   "packageRules": [
     {
-      "matchManagers": ["github-actions"],
+      "matchManagers": [
+        "github-actions"
+      ],
       "pinDigests": true
     },
     {
-      "matchUpdateTypes": ["minor", "patch"],
-      "matchDepTypes": ["indirect"],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "matchDepTypes": [
+        "indirect"
+      ],
       "automerge": true
     }
   ],

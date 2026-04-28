@@ -13,17 +13,17 @@ type OSKeyring struct {
 	deriver KeyDeriver
 }
 
-func (o *OSKeyring) GetRawKey(service, account string) (string, error) {
+func (o *OSKeyring) GetRawKey(service, account string) ([]byte, error) {
 	encoded, err := keyring.Get(service, account)
 	if err == nil {
-		return encoded, nil
+		return []byte(encoded), nil
 	}
 	if pw := os.Getenv("PSST_PASSWORD"); pw != "" {
 		fmt.Fprintln(os.Stderr, "Warning: OS keychain unavailable, falling back to PSST_PASSWORD env var")
 		os.Unsetenv("PSST_PASSWORD")
-		return pw, nil
+		return []byte(pw), nil
 	}
-	return "", fmt.Errorf("keychain unavailable and PSST_PASSWORD not set: %w", err)
+	return nil, fmt.Errorf("keychain unavailable and PSST_PASSWORD not set: %w", err)
 }
 
 func (o *OSKeyring) SetKey(service, account string, key []byte) error {

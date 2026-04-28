@@ -39,6 +39,13 @@ func (r *Runner) Exec(secrets map[string][]byte, command string, args []string, 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	secretValues := filterEmpty(secrets)
+	defer func() {
+		for i := range secretValues {
+			crypto.ZeroBytes(secretValues[i])
+		}
+	}()
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
@@ -70,7 +77,7 @@ func (r *Runner) Exec(secrets map[string][]byte, command string, args []string, 
 	cmd.WaitDelay = gracefulShutdownDelay
 
 	if opts.MaskOutput {
-		return r.runWithMasking(cmd, secrets)
+		return r.runWithMasking(cmd, secretValues)
 	}
 
 	cmd.Stdin = os.Stdin
@@ -80,7 +87,7 @@ func (r *Runner) Exec(secrets map[string][]byte, command string, args []string, 
 	return exitCode(runErr), runErr
 }
 
-func (r *Runner) runWithMasking(cmd *exec.Cmd, secrets map[string][]byte) (int, error) {
+func (r *Runner) runWithMasking(cmd *exec.Cmd, secretValues [][]byte) (int, error) {
 	stdoutPipe, pipeErr := cmd.StdoutPipe()
 	if pipeErr != nil {
 		return 1, pipeErr
@@ -94,8 +101,6 @@ func (r *Runner) runWithMasking(cmd *exec.Cmd, secrets map[string][]byte) (int, 
 	if startErr := cmd.Start(); startErr != nil {
 		return 1, startErr
 	}
-
-	secretValues := filterEmpty(secrets)
 
 	doneStdout := make(chan struct{})
 	doneStderr := make(chan struct{})
@@ -111,10 +116,6 @@ func (r *Runner) runWithMasking(cmd *exec.Cmd, secrets map[string][]byte) (int, 
 
 	<-doneStdout
 	<-doneStderr
-
-	for i := range secretValues {
-		crypto.ZeroBytes(secretValues[i])
-	}
 
 	waitErr := cmd.Wait()
 	return exitCode(waitErr), waitErr

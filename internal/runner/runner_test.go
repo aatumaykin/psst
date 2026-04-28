@@ -535,6 +535,32 @@ func TestExpandEnvVars_MultipleDollarSigns(t *testing.T) {
 	}
 }
 
+func TestExec_SecretsZeroed_NoMasking(t *testing.T) {
+	r := New()
+	secrets := map[string][]byte{"ZERO_KEY": []byte("sensitive_data_12345")}
+
+	code, err := r.Exec(secrets, "true", []string{}, ExecOptions{MaskOutput: false})
+	if err != nil {
+		t.Fatalf("Exec() error: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+}
+
+func TestExec_SecretsZeroed_WithMasking(t *testing.T) {
+	r := New()
+	secrets := map[string][]byte{"ZERO_KEY": []byte("sensitive_data_12345")}
+
+	code, err := r.Exec(secrets, "echo", []string{"hello"}, ExecOptions{MaskOutput: true})
+	if err != nil {
+		t.Fatalf("Exec() error: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+}
+
 func TestBuildEnv_InvalidNames(t *testing.T) {
 	secrets := map[string][]byte{
 		"VALID_KEY": []byte("good"),

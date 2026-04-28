@@ -5,9 +5,12 @@
 dist/
 .env
 .env.*
+!.env.example
 .psst/
 *.pem
 *.key
+*.p12
+*.pfx
 *.secret
 *.token
 *.exe
@@ -17,4 +20,18 @@ coverage.out
 coverage.html
 .idea/
 .vscode/
+*.swp
+*.swo
 *.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Keys and certificates
+id_rsa*
+id_ed25519*
+
+# Temp files
+*.tmp
+*.bak

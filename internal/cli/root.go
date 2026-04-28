@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/aatumaykin/psst/internal/crypto"
 	"github.com/aatumaykin/psst/internal/keyring"
 	"github.com/aatumaykin/psst/internal/output"
 	"github.com/aatumaykin/psst/internal/runner"
@@ -42,23 +43,23 @@ func Execute() error {
 	}
 
 	if dashDashIdx >= 0 {
-		jsonOut, quiet, global, env, tags := parseGlobalFlagsFromArgs(args[:dashDashIdx])
+		cfg := parseGlobalFlagsFromArgs(args[:dashDashIdx])
 		secretNames := filterSecretNames(args[:dashDashIdx])
 		secretNames = filterSubcommandNames(secretNames)
 		commandArgs := args[dashDashIdx+1:]
 
-		if len(commandArgs) > 0 && (len(secretNames) > 0 || len(tags) > 0) {
+		if len(commandArgs) > 0 && (len(secretNames) > 0 || len(cfg.Tags) > 0) {
 			noMask := containsFlag(args, "--no-mask")
 			expandArgs := containsFlag(args, "--expand-args")
 			err := handleExecPatternDirect(
 				context.Background(),
 				secretNames, commandArgs,
 				ExecConfig{
-					JSONOut:    jsonOut,
-					Quiet:      quiet,
-					Global:     global,
-					Env:        env,
-					Tags:       tags,
+					JSONOut:    cfg.JSON,
+					Quiet:      cfg.Quiet,
+					Global:     cfg.Global,
+					Env:        cfg.Env,
+					Tags:       cfg.Tags,
 					NoMask:     noMask,
 					ExpandArgs: expandArgs,
 				},
@@ -92,20 +93,32 @@ func init() {
 	rootCmd.PersistentFlags().StringArray("tag", nil, "Filter by tag (repeatable)")
 }
 
-func getGlobalFlags(cmd *cobra.Command) (bool, bool, bool, string, []string) {
-	jsonOut, _ := cmd.Flags().GetBool("json")
-	quiet, _ := cmd.Flags().GetBool("quiet")
-	global, _ := cmd.Flags().GetBool("global")
-	env, _ := cmd.Flags().GetString("env")
-	tags, _ := cmd.Flags().GetStringArray("tag")
+type globalConfig struct {
+	JSON   bool
+	Quiet  bool
+	Global bool
+	Env    string
+	Tags   []string
+}
 
+func resolveEnvOverrides(cfg *globalConfig) {
 	if os.Getenv("PSST_GLOBAL") == "1" {
-		global = true
+		cfg.Global = true
 	}
-	if env == "" {
-		env = os.Getenv("PSST_ENV")
+	if cfg.Env == "" {
+		cfg.Env = os.Getenv("PSST_ENV")
 	}
-	return jsonOut, quiet, global, env, tags
+}
+
+func getGlobalFlags(cmd *cobra.Command) globalConfig {
+	cfg := globalConfig{}
+	cfg.JSON, _ = cmd.Flags().GetBool("json")
+	cfg.Quiet, _ = cmd.Flags().GetBool("quiet")
+	cfg.Global, _ = cmd.Flags().GetBool("global")
+	cfg.Env, _ = cmd.Flags().GetString("env")
+	cfg.Tags, _ = cmd.Flags().GetStringArray("tag")
+	resolveEnvOverrides(&cfg)
+	return cfg
 }
 
 func getFormatter(jsonOut, quiet bool) *output.Formatter {
@@ -164,14 +177,21 @@ func printAuthFailed(jsonOut, quiet bool) {
 }
 
 func withVault(cmd *cobra.Command, fn func(v vault.Interface, f *output.Formatter) error) error {
-	jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
-	v, err := getUnlockedVault(cmd.Context(), jsonOut, quiet, global, env)
+	cfg := getGlobalFlags(cmd)
+	v, err := getUnlockedVault(cmd.Context(), cfg.JSON, cfg.Quiet, cfg.Global, cfg.Env)
 	if err != nil {
 		return err
 	}
 	defer v.Close()
-	f := getFormatter(jsonOut, quiet)
+	f := getFormatter(cfg.JSON, cfg.Quiet)
 	return fn(v, f)
+}
+
+func zeroSecretMap(m map[string][]byte) {
+	for k, v := range m {
+		crypto.ZeroBytes(v)
+		delete(m, k)
+	}
 }
 
 func exitWithError(msg string) error {

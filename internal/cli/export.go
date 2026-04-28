@@ -20,6 +20,7 @@ var exportCmd = &cobra.Command{
 			if err != nil {
 				return exitWithError(err.Error())
 			}
+			defer zeroSecretMap(secrets)
 
 			strSecrets := make(map[string]string, len(secrets))
 			for name, val := range secrets {

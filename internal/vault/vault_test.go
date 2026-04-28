@@ -21,11 +21,11 @@ type testKeyProvider struct {
 	key []byte
 }
 
-func (t *testKeyProvider) GetRawKey(_, _ string) (string, error) {
+func (t *testKeyProvider) GetRawKey(_, _ string) ([]byte, error) {
 	if t.key == nil {
-		return "", errors.New("no key")
+		return nil, errors.New("no key")
 	}
-	return hex.EncodeToString(t.key), nil
+	return []byte(hex.EncodeToString(t.key)), nil
 }
 
 func (t *testKeyProvider) SetKey(_, _ string, key []byte) error {
@@ -303,7 +303,7 @@ func setupTestVaultV1(t *testing.T) *Vault {
 		t.Fatal(err)
 	}
 	v.key = v1Key
-	v.rawKey = rawKeyStr
+	v.rawKey = []byte(rawKeyStr)
 
 	ctx := context.Background()
 	if err = s.SetMeta(ctx, "kdf_version", "1"); err != nil {
@@ -350,13 +350,13 @@ func TestMigrateKDF(t *testing.T) {
 		if decodeErr != nil {
 			t.Fatal(decodeErr)
 		}
-		v2Key, deriveErr = v.enc.KeyToBufferV2WithSalt(rawKeyHex, salt)
+		v2Key, deriveErr = v.enc.KeyToBufferV2WithSalt(string(rawKeyHex), salt)
 	} else {
 		aesgcm, ok := v.enc.(*crypto.AESGCM)
 		if !ok {
 			t.Fatal("expected *crypto.AESGCM for legacy KeyToBufferV2")
 		}
-		v2Key, deriveErr = aesgcm.KeyToBufferV2(rawKeyHex) //nolint:staticcheck // testing legacy V2 KDF path
+		v2Key, deriveErr = aesgcm.KeyToBufferV2(string(rawKeyHex)) //nolint:staticcheck // testing legacy V2 KDF path
 	}
 	if deriveErr != nil {
 		t.Fatal(deriveErr)
@@ -1320,6 +1320,93 @@ func TestTagsPreservedAfterRollback(t *testing.T) {
 	}
 	if !tagSet["aws"] || !tagSet["prod"] {
 		t.Fatalf("expected aws+prod tags, got %v", sec.Tags)
+	}
+}
+
+func TestV1Vault_BlocksGetSecret(t *testing.T) {
+	v := setupTestVaultV1(t)
+	defer v.Close()
+	ctx := context.Background()
+
+	if err := v.SetSecret(ctx, "TEST", []byte("value"), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	v.mu.Lock()
+	v.v1KDF = true
+	v.mu.Unlock()
+
+	_, err := v.GetSecret(ctx, "TEST")
+	if err == nil {
+		t.Fatal("GetSecret on V1 vault should be blocked")
+	}
+	if !strings.Contains(err.Error(), "legacy KDF") {
+		t.Fatalf("expected legacy KDF error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "psst migrate") {
+		t.Fatalf("error should mention 'psst migrate', got: %v", err)
+	}
+
+	_, err = v.GetAllSecrets(ctx)
+	if err == nil {
+		t.Fatal("GetAllSecrets on V1 vault should be blocked")
+	}
+	if !strings.Contains(err.Error(), "legacy KDF") {
+		t.Fatalf("expected legacy KDF error for GetAllSecrets, got: %v", err)
+	}
+
+	err = v.SetSecret(ctx, "NEW", []byte("val"), nil)
+	if err == nil {
+		t.Fatal("SetSecret on V1 vault should be blocked")
+	}
+	if !strings.Contains(err.Error(), "legacy KDF") {
+		t.Fatalf("expected legacy KDF error for SetSecret, got: %v", err)
+	}
+}
+
+func TestUnlock_EmptyLegacyVaultRejected(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "vault.db")
+	enc := crypto.NewAESGCM()
+
+	rightKey, err := enc.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	kp := &testKeyProvider{enc: enc, key: rightKey}
+
+	ctx := context.Background()
+	if err = InitVault(ctx, dbPath, enc, kp, InitOptions{SkipKeychain: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := store.NewSQLite(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetMeta(ctx, "verify_data", "")
+	s.SetMeta(ctx, "verify_iv", "")
+	s.Close()
+
+	s2, err := store.NewSQLite(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+
+	v := New(enc, kp, s2)
+	defer v.Close()
+
+	err = v.Unlock(ctx)
+	if err == nil {
+		t.Fatal("empty legacy vault should reject unlock")
+	}
+	if !strings.Contains(err.Error(), "integrity check") {
+		t.Fatalf("expected integrity check error, got: %v", err)
+	}
+
+	if v.key != nil {
+		t.Fatal("v.key must remain nil after integrity check failure")
 	}
 }
 

@@ -622,12 +622,12 @@ func TestMigrate(t *testing.T) {
 	}()
 	cmd.CombinedOutput()
 
-	stdout, stderr, code := e.run("migrate")
+	_, stderr, code := e.run("migrate")
 	if code != 0 {
 		t.Skipf("migrate failed (known issue with EnvVarProvider: %s)", stderr)
 	}
 
-	stdout, _, code = e.run("get", "MIG_KEY")
+	stdout, _, code := e.run("get", "MIG_KEY")
 	if code != 0 {
 		t.Fatalf("get after migrate failed: %s", stdout)
 	}

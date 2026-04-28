@@ -291,6 +291,73 @@ func TestEncrypt_RejectsWrongKeySize(t *testing.T) {
 	}
 }
 
+func TestAESGCM_EncryptDecryptWithAAD(t *testing.T) {
+	enc := NewAESGCM()
+	key := make([]byte, 32)
+	plaintext := []byte("hello secret world")
+	aad := []byte("my-secret-name")
+
+	ciphertext, iv, err := enc.Encrypt(plaintext, key, aad)
+	if err != nil {
+		t.Fatalf("Encrypt failed: %v", err)
+	}
+
+	decrypted, err := enc.Decrypt(ciphertext, iv, key, aad)
+	if err != nil {
+		t.Fatalf("Decrypt failed: %v", err)
+	}
+	if string(decrypted) != string(plaintext) {
+		t.Fatalf("decrypted = %q, want %q", decrypted, plaintext)
+	}
+}
+
+func TestAESGCM_WrongAAD_FailsDecrypt(t *testing.T) {
+	enc := NewAESGCM()
+	key := make([]byte, 32)
+	plaintext := []byte("hello secret world")
+	aad := []byte("secret-a")
+
+	ciphertext, iv, _ := enc.Encrypt(plaintext, key, aad)
+
+	_, err := enc.Decrypt(ciphertext, iv, key, []byte("secret-b"))
+	if err == nil {
+		t.Fatal("decrypt with wrong AAD should fail")
+	}
+}
+
+func TestAESGCM_NoAADStillWorks(t *testing.T) {
+	enc := NewAESGCM()
+	key := make([]byte, 32)
+	plaintext := []byte("hello secret world")
+
+	ciphertext, iv, err := enc.Encrypt(plaintext, key)
+	if err != nil {
+		t.Fatalf("Encrypt failed: %v", err)
+	}
+
+	decrypted, err := enc.Decrypt(ciphertext, iv, key)
+	if err != nil {
+		t.Fatalf("Decrypt failed: %v", err)
+	}
+	if string(decrypted) != string(plaintext) {
+		t.Fatalf("decrypted = %q, want %q", decrypted, plaintext)
+	}
+}
+
+func TestAESGCM_EncryptWithAADDecryptWithout_Fails(t *testing.T) {
+	enc := NewAESGCM()
+	key := make([]byte, 32)
+	plaintext := []byte("hello secret world")
+	aad := []byte("secret-name")
+
+	ciphertext, iv, _ := enc.Encrypt(plaintext, key, aad)
+
+	_, err := enc.Decrypt(ciphertext, iv, key)
+	if err == nil {
+		t.Fatal("decrypt without AAD when encrypted with AAD should fail")
+	}
+}
+
 func TestDecrypt_RejectsWrongKeySize(t *testing.T) {
 	enc := NewAESGCM()
 

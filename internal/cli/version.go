@@ -13,8 +13,8 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Show psst version",
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		jsonOut, quiet, _, _, _ := getGlobalFlags(cmd)
-		f := getFormatter(jsonOut, quiet)
+		cfg := getGlobalFlags(cmd)
+		f := getFormatter(cfg.JSON, cfg.Quiet)
 		f.VersionInfo(output.VersionData{
 			Version:   version.Version,
 			Commit:    version.Commit,

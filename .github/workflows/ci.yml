@@ -38,5 +38,5 @@ jobs:
       - uses: actions/setup-go@0aaccfd150d50ccaeb589d267dfc8d1e7e9faa09 # v5.4.0
         with:
           go-version-file: go.mod
-      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
       - run: govulncheck ./...

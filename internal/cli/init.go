@@ -12,10 +12,10 @@ var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Create a new vault",
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
-		f := getFormatter(jsonOut, quiet)
+		cfg := getGlobalFlags(cmd)
+		f := getFormatter(cfg.JSON, cfg.Quiet)
 
-		vaultPath, err := vault.FindVaultPath(global, env)
+		vaultPath, err := vault.FindVaultPath(cfg.Global, cfg.Env)
 		if err != nil {
 			return exitWithError(err.Error())
 		}
@@ -34,8 +34,8 @@ var initCmd = &cobra.Command{
 		kp := keyring.NewProvider(enc)
 
 		opts := vault.InitOptions{
-			Global: global,
-			Env:    env,
+			Global: cfg.Global,
+			Env:    cfg.Env,
 		}
 
 		if initErr := vault.InitVault(cmd.Context(), vaultPath, enc, kp, opts); initErr != nil {

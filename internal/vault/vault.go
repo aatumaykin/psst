@@ -17,7 +17,8 @@ type Vault struct {
 	kp     keyring.KeyProvider
 	store  store.SecretStore
 	key    []byte
-	rawKey string
+	rawKey []byte
+	v1KDF  bool
 }
 
 const (
@@ -60,16 +61,23 @@ func (v *Vault) Close() error {
 	defer v.mu.Unlock()
 	crypto.ZeroBytes(v.key)
 	v.key = nil
-	v.rawKey = ""
+	crypto.ZeroBytes(v.rawKey)
+	v.rawKey = nil
 	return v.store.Close()
 }
 
-func (v *Vault) requireUnlock() error {
+func (v *Vault) withRLock(fn func() error) error {
 	v.mu.RLock()
-	unlocked := v.key != nil
-	v.mu.RUnlock()
-	if !unlocked {
+	defer v.mu.RUnlock()
+	if v.key == nil {
 		return errors.New("vault is locked: unlock required")
+	}
+	return fn()
+}
+
+func (v *Vault) checkKDFBlocking() error {
+	if v.v1KDF {
+		return errors.New("vault uses legacy KDF (V1): run 'psst migrate' to upgrade")
 	}
 	return nil
 }
@@ -77,6 +85,9 @@ func (v *Vault) requireUnlock() error {
 func (v *Vault) copyKey() ([]byte, error) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
+	if err := v.checkKDFBlocking(); err != nil {
+		return nil, err
+	}
 	if v.key == nil {
 		return nil, errors.New("vault is locked")
 	}

@@ -11,8 +11,8 @@ var listEnvsCmd = &cobra.Command{
 	Use:   "list-envs",
 	Short: "List all environments",
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		jsonOut, quiet, _, _, _ := getGlobalFlags(cmd)
-		f := getFormatter(jsonOut, quiet)
+		cfg := getGlobalFlags(cmd)
+		f := getFormatter(cfg.JSON, cfg.Quiet)
 
 		var envs []string
 

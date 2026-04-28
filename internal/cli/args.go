@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"os"
 	"slices"
 	"strings"
 )
@@ -32,45 +31,38 @@ func isKnownFlag(arg string) bool {
 	return false
 }
 
-func parseGlobalFlagsFromArgs(args []string) (bool, bool, bool, string, []string) {
-	var jsonOut, quiet, global bool
-	var env string
-	var tags []string
+func parseGlobalFlagsFromArgs(args []string) globalConfig {
+	cfg := globalConfig{}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--json":
-			jsonOut = true
+			cfg.JSON = true
 		case "--quiet", "-q":
-			quiet = true
+			cfg.Quiet = true
 		case "--global", "-g":
-			global = true
+			cfg.Global = true
 		case "--env":
 			i++
 			if i < len(args) {
-				env = args[i]
+				cfg.Env = args[i]
 			}
 		case "--tag":
 			i++
 			if i < len(args) {
-				tags = append(tags, args[i])
+				cfg.Tags = append(cfg.Tags, args[i])
 			}
 		default:
 			if v, found := strings.CutPrefix(args[i], "--env="); found {
-				env = v
+				cfg.Env = v
 				continue
 			}
 			if v, found := strings.CutPrefix(args[i], "--tag="); found {
-				tags = append(tags, v)
+				cfg.Tags = append(cfg.Tags, v)
 			}
 		}
 	}
-	if os.Getenv("PSST_GLOBAL") == "1" {
-		global = true
-	}
-	if env == "" {
-		env = os.Getenv("PSST_ENV")
-	}
-	return jsonOut, quiet, global, env, tags
+	resolveEnvOverrides(&cfg)
+	return cfg
 }
 
 func filterSecretNames(args []string) []string {

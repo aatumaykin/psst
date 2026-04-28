@@ -31,7 +31,7 @@ func NewAESGCM() *AESGCM {
 }
 
 // Encrypt encrypts plaintext using AES-256-GCM.
-func (a *AESGCM) Encrypt(plaintext []byte, key []byte) ([]byte, []byte, error) {
+func (a *AESGCM) Encrypt(plaintext []byte, key []byte, aad ...[]byte) ([]byte, []byte, error) {
 	if len(key) != aesKeySize {
 		return nil, nil, fmt.Errorf("invalid key size: %d bytes, expected %d", len(key), aesKeySize)
 	}
@@ -51,12 +51,16 @@ func (a *AESGCM) Encrypt(plaintext []byte, key []byte) ([]byte, []byte, error) {
 		return nil, nil, fmt.Errorf("generate IV: %w", err)
 	}
 
-	ciphertext := gcm.Seal(nil, iv, plaintext, nil)
+	var aadData []byte
+	if len(aad) > 0 {
+		aadData = aad[0]
+	}
+	ciphertext := gcm.Seal(nil, iv, plaintext, aadData)
 	return ciphertext, iv, nil
 }
 
 // Decrypt decrypts AES-256-GCM ciphertext using the given IV and key.
-func (a *AESGCM) Decrypt(ciphertext []byte, iv []byte, key []byte) ([]byte, error) {
+func (a *AESGCM) Decrypt(ciphertext []byte, iv []byte, key []byte, aad ...[]byte) ([]byte, error) {
 	if len(key) != aesKeySize {
 		return nil, fmt.Errorf("invalid key size: %d bytes, expected %d", len(key), aesKeySize)
 	}
@@ -71,7 +75,11 @@ func (a *AESGCM) Decrypt(ciphertext []byte, iv []byte, key []byte) ([]byte, erro
 		return nil, fmt.Errorf("create GCM: %w", err)
 	}
 
-	plaintext, err := gcm.Open(nil, iv, ciphertext, nil)
+	var aadData []byte
+	if len(aad) > 0 {
+		aadData = aad[0]
+	}
+	plaintext, err := gcm.Open(nil, iv, ciphertext, aadData)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt: %w", err)
 	}

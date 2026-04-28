@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"os"
 	"strings"
@@ -19,8 +20,8 @@ var setCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		if err := vault.ValidateSecretName(name); err != nil {
-			return exitWithError(fmt.Sprintf("Invalid secret name %q", name))
+		if err := requireValidName(name); err != nil {
+			return err
 		}
 
 		tags, _ := cmd.Flags().GetStringArray("tag")
@@ -40,7 +41,7 @@ var setCmd = &cobra.Command{
 				if readErr != nil {
 					return exitWithError(fmt.Sprintf("Failed to read password: %v", readErr))
 				}
-				value = strings.TrimSpace(string(passwordBytes))
+				value = string(bytes.TrimSpace(passwordBytes))
 				for i := range passwordBytes {
 					passwordBytes[i] = 0
 				}

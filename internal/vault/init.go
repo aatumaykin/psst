@@ -49,17 +49,18 @@ func InitVault(
 		return fmt.Errorf("set kdf salt: %w", err)
 	}
 
-	var rawKey string
+	var rawKey []byte
 	if !opts.SkipKeychain && !keyring.IsEnvProvider(kp) {
 		var key []byte
 		key, err = kp.GenerateKey()
 		if err != nil {
 			return fmt.Errorf("generate key: %w", err)
 		}
+		defer crypto.ZeroBytes(key)
 		if err = kp.SetKey(serviceName, accountName, key); err != nil {
 			return fmt.Errorf("store key in keychain: %w", err)
 		}
-		rawKey = hex.EncodeToString(key)
+		rawKey = []byte(hex.EncodeToString(key))
 	} else {
 		rawKey, err = kp.GetRawKey(serviceName, accountName)
 		if err != nil {
@@ -67,7 +68,7 @@ func InitVault(
 		}
 	}
 
-	derivedKey, deriveErr := enc.KeyToBufferV2WithSalt(rawKey, salt)
+	derivedKey, deriveErr := enc.KeyToBufferV2WithSalt(string(rawKey), salt)
 	if deriveErr != nil {
 		return fmt.Errorf("derive verification key: %w", deriveErr)
 	}

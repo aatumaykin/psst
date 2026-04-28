@@ -94,25 +94,25 @@ func TestParseGlobalFlagsFromArgs_EqualsSyntax(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			jsonOut, quiet, global, env, tags := parseGlobalFlagsFromArgs(tt.args)
-			if env != tt.wantEnv {
-				t.Errorf("env = %q, want %q", env, tt.wantEnv)
+			cfg := parseGlobalFlagsFromArgs(tt.args)
+			if cfg.Env != tt.wantEnv {
+				t.Errorf("env = %q, want %q", cfg.Env, tt.wantEnv)
 			}
-			if jsonOut != tt.wantJSON {
-				t.Errorf("jsonOut = %v, want %v", jsonOut, tt.wantJSON)
+			if cfg.JSON != tt.wantJSON {
+				t.Errorf("jsonOut = %v, want %v", cfg.JSON, tt.wantJSON)
 			}
-			if quiet != tt.wantQuiet {
-				t.Errorf("quiet = %v, want %v", quiet, tt.wantQuiet)
+			if cfg.Quiet != tt.wantQuiet {
+				t.Errorf("quiet = %v, want %v", cfg.Quiet, tt.wantQuiet)
 			}
-			if global != tt.wantGlobal {
-				t.Errorf("global = %v, want %v", global, tt.wantGlobal)
+			if cfg.Global != tt.wantGlobal {
+				t.Errorf("global = %v, want %v", cfg.Global, tt.wantGlobal)
 			}
-			if len(tags) != len(tt.wantTags) {
-				t.Fatalf("tags = %v, want %v", tags, tt.wantTags)
+			if len(cfg.Tags) != len(tt.wantTags) {
+				t.Fatalf("tags = %v, want %v", cfg.Tags, tt.wantTags)
 			}
-			for i := range tags {
-				if tags[i] != tt.wantTags[i] {
-					t.Errorf("tags[%d] = %q, want %q", i, tags[i], tt.wantTags[i])
+			for i := range cfg.Tags {
+				if cfg.Tags[i] != tt.wantTags[i] {
+					t.Errorf("tags[%d] = %q, want %q", i, cfg.Tags[i], tt.wantTags[i])
 				}
 			}
 		})

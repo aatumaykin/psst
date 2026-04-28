@@ -20,7 +20,7 @@ var importCmd = &cobra.Command{
 		useStdin, _ := cmd.Flags().GetBool("stdin")
 		fromEnv, _ := cmd.Flags().GetBool("from-env")
 
-		var entries map[string]string
+		var entries map[string][]byte
 		var err error
 
 		switch {
@@ -57,7 +57,7 @@ var importCmd = &cobra.Command{
 					}
 					continue
 				}
-				if setErr := v.SetSecret(cmd.Context(), name, []byte(value), nil); setErr != nil {
+				if setErr := v.SetSecret(cmd.Context(), name, value, nil); setErr != nil {
 					return exitWithError(fmt.Sprintf("Failed to set %s: %v", name, setErr))
 				}
 				count++
@@ -69,8 +69,8 @@ var importCmd = &cobra.Command{
 	},
 }
 
-func parseEnvFromReader(r io.Reader) (map[string]string, error) {
-	entries := make(map[string]string)
+func parseEnvFromReader(r io.Reader) (map[string][]byte, error) {
+	entries := make(map[string][]byte)
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -81,7 +81,7 @@ func parseEnvFromReader(r io.Reader) (map[string]string, error) {
 		if !ok {
 			continue
 		}
-		entries[name] = value
+		entries[name] = []byte(value)
 	}
 	return entries, scanner.Err()
 }
@@ -110,8 +110,8 @@ func parseEnvLine(line string) (string, string, bool) {
 	return name, value, true
 }
 
-func readFromEnv(prefix string) map[string]string {
-	entries := make(map[string]string)
+func readFromEnv(prefix string) map[string][]byte {
+	entries := make(map[string][]byte)
 	for _, e := range os.Environ() {
 		name, value, ok := strings.Cut(e, "=")
 		if !ok {
@@ -121,7 +121,7 @@ func readFromEnv(prefix string) map[string]string {
 			continue
 		}
 		if vault.ValidateSecretName(name) == nil {
-			entries[name] = value
+			entries[name] = []byte(value)
 		}
 	}
 	return entries

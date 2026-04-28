@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"os/exec"
@@ -35,6 +37,7 @@ var scanCmd = &cobra.Command{
 
 			byteSecrets := make(map[string][]byte, len(secrets))
 			maps.Copy(byteSecrets, secrets)
+			defer zeroSecretMap(byteSecrets)
 
 			files, err := getScanFiles(staged, scanPath)
 			if err != nil {
@@ -42,12 +45,17 @@ var scanCmd = &cobra.Command{
 			}
 
 			var results []output.ScanMatch
+			var allWarnings []string
 			for _, file := range files {
-				matches := scanFile(file, byteSecrets)
+				matches, warns := scanFile(file, byteSecrets)
 				results = append(results, matches...)
+				allWarnings = append(allWarnings, warns...)
 			}
 
 			f.ScanResults(results)
+			for _, w := range allWarnings {
+				fmt.Fprintf(os.Stderr, "Warning: %s\n", w)
+			}
 			if len(results) > 0 {
 				return &exitError{code: 1}
 			}
@@ -71,6 +79,10 @@ func getScanFiles(staged bool, scanPath string) ([]string, error) {
 		return files, nil
 	}
 
+	if _, lookupErr := exec.LookPath("git"); lookupErr != nil {
+		return nil, errors.New("git not found: install git or use --path flag")
+	}
+
 	if staged {
 		out, err := exec.CommandContext(
 			context.Background(), "git", "diff", "--cached", "--name-only",
@@ -90,19 +102,26 @@ func getScanFiles(staged bool, scanPath string) ([]string, error) {
 	return splitLines(string(out)), nil
 }
 
-func scanFile(path string, secrets map[string][]byte) []output.ScanMatch {
+func scanFile(path string, secrets map[string][]byte) ([]output.ScanMatch, []string) {
+	var warnings []string
+
 	info, err := os.Stat(path)
-	if err != nil || info.IsDir() || info.Size() > 1024*1024 {
-		return nil
+	if err != nil {
+		warnings = append(warnings, fmt.Sprintf("cannot stat %s: %v", path, err))
+		return nil, warnings
+	}
+	if info.IsDir() || info.Size() > 1024*1024 {
+		return nil, warnings
 	}
 
 	if isBinaryExtension(path) {
-		return nil
+		return nil, warnings
 	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil
+		warnings = append(warnings, fmt.Sprintf("cannot read %s: %v", path, err))
+		return nil, warnings
 	}
 
 	data = bytes.TrimPrefix(data, []byte("\xEF\xBB\xBF"))
@@ -113,7 +132,7 @@ func scanFile(path string, secrets map[string][]byte) []output.ScanMatch {
 		lineNum++
 		line = strings.TrimRight(line, "\r")
 		if strings.ContainsRune(line, 0) {
-			return nil
+			return nil, warnings
 		}
 		lineData := []byte(line)
 		for name, value := range secrets {
@@ -126,7 +145,7 @@ func scanFile(path string, secrets map[string][]byte) []output.ScanMatch {
 			}
 		}
 	}
-	return results
+	return results, warnings
 }
 
 func isBinaryExtension(path string) bool {

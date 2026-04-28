@@ -26,7 +26,7 @@ func (v *Vault) MigrateKDF(ctx context.Context) error {
 	v.mu.RLock()
 	rawKey := v.rawKey
 	v.mu.RUnlock()
-	if rawKey == "" {
+	if len(rawKey) == 0 {
 		return errors.New("vault not unlocked: no raw key available")
 	}
 
@@ -45,7 +45,7 @@ func (v *Vault) MigrateKDF(ctx context.Context) error {
 	if decodeErr != nil {
 		return fmt.Errorf("decode kdf_salt: %w", decodeErr)
 	}
-	newKey, err := v.enc.KeyToBufferV2WithSalt(rawKey, salt)
+	newKey, err := v.enc.KeyToBufferV2WithSalt(string(rawKey), salt)
 	if err != nil {
 		return fmt.Errorf("derive key with salt: %w", err)
 	}
@@ -53,15 +53,13 @@ func (v *Vault) MigrateKDF(ctx context.Context) error {
 	if txErr := v.store.ExecTx(func() error {
 		for _, s := range all {
 			var plaintext []byte
-			plaintext, err = v.enc.Decrypt(s.EncryptedValue, s.IV, key)
+			plaintext, err = v.enc.Decrypt(s.EncryptedValue, s.IV, key, []byte(s.Name))
 			if err != nil {
 				return fmt.Errorf("decrypt secret: %w", err)
 			}
 			var ciphertext, iv []byte
-			ciphertext, iv, err = v.enc.Encrypt(plaintext, newKey)
-			for i := range plaintext {
-				plaintext[i] = 0
-			}
+			ciphertext, iv, err = v.enc.Encrypt(plaintext, newKey, []byte(s.Name))
+			crypto.ZeroBytes(plaintext)
 			if err != nil {
 				return fmt.Errorf("encrypt secret: %w", err)
 			}

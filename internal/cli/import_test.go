@@ -62,16 +62,16 @@ KEY4=value4
 	if len(entries) != 4 {
 		t.Fatalf("expected 4 entries, got %d", len(entries))
 	}
-	if entries["KEY1"] != "value1" {
-		t.Errorf("KEY1 = %q, want %q", entries["KEY1"], "value1")
+	if string(entries["KEY1"]) != "value1" {
+		t.Errorf("KEY1 = %q, want %q", string(entries["KEY1"]), "value1")
 	}
-	if entries["KEY2"] != "quoted value" {
-		t.Errorf("KEY2 = %q, want %q", entries["KEY2"], "quoted value")
+	if string(entries["KEY2"]) != "quoted value" {
+		t.Errorf("KEY2 = %q, want %q", string(entries["KEY2"]), "quoted value")
 	}
-	if entries["KEY3"] != "single quoted" {
-		t.Errorf("KEY3 = %q, want %q", entries["KEY3"], "single quoted")
+	if string(entries["KEY3"]) != "single quoted" {
+		t.Errorf("KEY3 = %q, want %q", string(entries["KEY3"]), "single quoted")
 	}
-	if entries["KEY4"] != "value4" {
-		t.Errorf("KEY4 = %q, want %q", entries["KEY4"], "value4")
+	if string(entries["KEY4"]) != "value4" {
+		t.Errorf("KEY4 = %q, want %q", string(entries["KEY4"]), "value4")
 	}
 }

@@ -12,7 +12,7 @@ type KeyDeriver interface {
 
 // KeyProvider retrieves and stores encryption keys using the OS keychain or env vars.
 type KeyProvider interface {
-	GetRawKey(service, account string) (string, error)
+	GetRawKey(service, account string) ([]byte, error)
 	SetKey(service, account string, key []byte) error
 	IsAvailable() bool
 	GenerateKey() ([]byte, error)

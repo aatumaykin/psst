@@ -49,7 +49,7 @@ func (v *Vault) SetSecret(ctx context.Context, name string, value []byte, tags [
 			}
 		}
 
-		ciphertext, iv, encErr := v.enc.Encrypt(value, key)
+		ciphertext, iv, encErr := v.enc.Encrypt(value, key, []byte(name))
 		if encErr != nil {
 			return fmt.Errorf("encrypt: %w", encErr)
 		}
@@ -75,7 +75,7 @@ func (v *Vault) GetSecret(ctx context.Context, name string) (*Secret, error) {
 		return nil, ErrSecretNotFound
 	}
 
-	plaintext, err := v.enc.Decrypt(stored.EncryptedValue, stored.IV, key)
+	plaintext, err := v.enc.Decrypt(stored.EncryptedValue, stored.IV, key, []byte(name))
 	if err != nil {
 		return nil, fmt.Errorf("decrypt: %w", err)
 	}
@@ -90,34 +90,34 @@ func (v *Vault) GetSecret(ctx context.Context, name string) (*Secret, error) {
 }
 
 func (v *Vault) ListSecrets(ctx context.Context) ([]SecretMeta, error) {
-	if err := v.requireUnlock(); err != nil {
-		return nil, err
-	}
-	storeMetas, err := v.store.ListSecrets(ctx)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]SecretMeta, len(storeMetas))
-	for i, m := range storeMetas {
-		result[i] = SecretMeta{
-			Name:      m.Name,
-			Tags:      m.Tags,
-			CreatedAt: m.CreatedAt,
-			UpdatedAt: m.UpdatedAt,
+	var result []SecretMeta
+	err := v.withRLock(func() error {
+		storeMetas, listErr := v.store.ListSecrets(ctx)
+		if listErr != nil {
+			return listErr
 		}
-	}
-	return result, nil
+		result = make([]SecretMeta, len(storeMetas))
+		for i, m := range storeMetas {
+			result[i] = SecretMeta{
+				Name:      m.Name,
+				Tags:      m.Tags,
+				CreatedAt: m.CreatedAt,
+				UpdatedAt: m.UpdatedAt,
+			}
+		}
+		return nil
+	})
+	return result, err
 }
 
 func (v *Vault) DeleteSecret(ctx context.Context, name string) error {
-	if err := v.requireUnlock(); err != nil {
-		return err
-	}
-	return v.store.ExecTx(func() error {
-		if err := v.store.DeleteSecret(ctx, name); err != nil {
-			return err
-		}
-		return v.store.DeleteHistory(ctx, name)
+	return v.withRLock(func() error {
+		return v.store.ExecTx(func() error {
+			if err := v.store.DeleteSecret(ctx, name); err != nil {
+				return err
+			}
+			return v.store.DeleteHistory(ctx, name)
+		})
 	})
 }
 
@@ -136,7 +136,7 @@ func (v *Vault) GetAllSecrets(ctx context.Context) (map[string][]byte, error) {
 	result := make(map[string][]byte, len(all))
 	for _, s := range all {
 		var plaintext []byte
-		plaintext, err = v.enc.Decrypt(s.EncryptedValue, s.IV, key)
+		plaintext, err = v.enc.Decrypt(s.EncryptedValue, s.IV, key, []byte(s.Name))
 		if err != nil {
 			for k, v := range result {
 				crypto.ZeroBytes(v)
