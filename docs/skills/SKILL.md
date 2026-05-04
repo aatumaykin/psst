@@ -171,11 +171,19 @@ psst rollback <NAME> --to <version>  # Restore previous version
 | Check for leaks | `psst scan --staged` |
 | Check secret value | `psst verify NAME --expected "val"` or `--hash <sha256>` |
 
-## Common Mistakes
+## Agent Security Anti-Patterns
 
-| Mistake | Consequence | Fix |
-|---------|-------------|-----|
+These mistakes leak secret values into agent context, logs, or terminal history:
+
+| Anti-Pattern | Why It's Dangerous | Correct Approach |
+|--------------|-------------------|----------------|
+| `token=$(psst -g run -- printenv TOKEN)` | Secret value captured in agent context / shell variable | `psst -g run -- command-that-reads-env` |
+| `psst run -- printenv TOKEN` | Secret printed to stdout — visible in logs and chat history | Never print secrets. Pass them via env to subprocess only |
+| Writing secrets to temp files (`echo $TOKEN > /tmp/t`) | File persists on disk, readable by other processes | Use `psst run` to inject secrets directly into subprocess env |
+| `git push https://$TOKEN@github.com/...` in open shell | Token expanded by shell → visible in shell history and ps | Use `psst -g run -- bash -c 'git push https://$TOKEN@github.com/...'` |
 | Double quotes around `$VAR` | Empty string → auth failure | Use single quotes + `sh -c` |
 | `psst run -- curl -H "$KEY" url` | Outer shell expands → empty | `psst KEY -- sh -c 'curl -H "$KEY" url'` |
 | Using `psst get` | Blocked in non-TTY, requires confirmation in TTY | Use `psst verify` instead |
 | `psst run` without `--` | `run` is a subcommand, not exec pattern | Always use `psst run -- command` |
+
+**Rule for agents:** If you need a secret value in a command, always route it through `psst run` or `psst KEY -- command` so the subprocess reads it from its environment. Never extract the value into agent-visible variables, files, or output.
