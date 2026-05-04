@@ -111,6 +111,22 @@ func TestInit(t *testing.T) {
 	}
 }
 
+func (e *testEnv) verifySecret(name, value string) {
+	e.t.Helper()
+	outFile := filepath.Join(e.dir, ".verify.env")
+	e.run("export", "--env-file", outFile)
+	data, err := os.ReadFile(outFile)
+	if err != nil {
+		e.t.Fatalf("cannot read env file: %v", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if line == name+"="+value {
+			return
+		}
+	}
+	e.t.Fatalf("expected %s=%s in export, got: %s", name, value, string(data))
+}
+
 func TestSetGet(t *testing.T) {
 	e := newTestEnv(t)
 	e.initVault()
@@ -128,13 +144,7 @@ func TestSetGet(t *testing.T) {
 		t.Fatalf("set failed: %s", string(out))
 	}
 
-	stdout, _, code := e.run("get", "API_KEY")
-	if code != 0 {
-		t.Fatalf("get failed: %s", stdout)
-	}
-	if !strings.Contains(stdout, "secret123") {
-		t.Fatalf("expected secret123 in output, got: %s", stdout)
-	}
+	e.verifySecret("API_KEY", "secret123")
 }
 
 func TestList(t *testing.T) {
@@ -200,10 +210,7 @@ func TestImport(t *testing.T) {
 		t.Fatalf("unexpected import output: %s", stdout)
 	}
 
-	stdout, _, _ = e.run("get", "API_KEY")
-	if !strings.Contains(stdout, "mykey123") {
-		t.Fatalf("API_KEY not found after import: %s", stdout)
-	}
+	e.verifySecret("API_KEY", "mykey123")
 }
 
 func TestExport(t *testing.T) {
@@ -213,12 +220,17 @@ func TestExport(t *testing.T) {
 	e.writeFile("test.env", "TOKEN=abc\n")
 	e.run("import", "test.env")
 
-	stdout, _, code := e.run("export")
+	outFile := filepath.Join(e.dir, "export.env")
+	stdout, _, code := e.run("export", "--env-file", outFile)
 	if code != 0 {
 		t.Fatalf("export failed: %s", stdout)
 	}
-	if !strings.Contains(stdout, "TOKEN=abc") {
-		t.Fatalf("expected TOKEN=abc in export, got: %s", stdout)
+	data, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "TOKEN=abc") {
+		t.Fatalf("expected TOKEN=abc in export, got: %s", string(data))
 	}
 }
 
@@ -268,10 +280,7 @@ func TestRollback(t *testing.T) {
 		t.Fatalf("rollback failed: %s", stdout)
 	}
 
-	stdout, _, _ = e.run("get", "KEY")
-	if !strings.Contains(stdout, "v1") {
-		t.Fatalf("expected v1 after rollback, got: %s", stdout)
-	}
+	e.verifySecret("KEY", "v1")
 }
 
 func TestTag(t *testing.T) {
@@ -391,12 +400,18 @@ func TestGetNotFound(t *testing.T) {
 	e := newTestEnv(t)
 	e.initVault()
 
-	_, stderr, code := e.run("get", "NONEXISTENT")
-	if code == 0 {
+	cmd := exec.Command(e.binary, "get", "NONEXISTENT")
+	cmd.Dir = e.dir
+	cmd.Env = append(os.Environ(), "PSST_PASSWORD=test-password", "HOME="+e.dir)
+	cmd.Stdin = strings.NewReader("")
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err == nil {
 		t.Fatal("expected non-zero exit for missing secret")
 	}
-	if !strings.Contains(stderr, "not found") {
-		t.Fatalf("expected 'not found' error, got: %s", stderr)
+	if !strings.Contains(stderr.String(), "Cannot reveal secret value") {
+		t.Fatalf("expected 'Cannot reveal' error, got: %s", stderr.String())
 	}
 }
 
@@ -627,13 +642,7 @@ func TestMigrate(t *testing.T) {
 		t.Skipf("migrate failed (known issue with EnvVarProvider: %s)", stderr)
 	}
 
-	stdout, _, code := e.run("get", "MIG_KEY")
-	if code != 0 {
-		t.Fatalf("get after migrate failed: %s", stdout)
-	}
-	if !strings.Contains(stdout, "migval") {
-		t.Fatalf("expected migval after migrate, got: %s", stdout)
-	}
+	e.verifySecret("MIG_KEY", "migval")
 }
 
 func TestImportFromEnvWithPrefix(t *testing.T) {
