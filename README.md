@@ -85,7 +85,9 @@ psst run -- ./deploy.sh             # inject all secrets
 ```bash
 psst init [--global] [--env <name>]   # Create vault
 psst set <NAME> [--stdin] [--tag T]   # Add/update secret
-psst get <NAME>                       # Show value (debugging only)
+psst get <NAME>                       # Show value (interactive terminal only)
+psst verify <NAME> --expected <val>   # Verify value without revealing it
+psst verify <NAME> --hash <sha256>    # Verify via SHA-256 hash
 psst list [--tag T]                   # List secret names
 psst rm <NAME>                        # Delete secret + history
 psst migrate                          # Upgrade vault to latest KDF
@@ -104,7 +106,7 @@ psst <SECRET>... -- <command> [args...]    # Run with specific secrets
 psst import .env                      # Import from .env file
 psst import --stdin                   # Import from stdin
 psst import --from-env                # Import from environment variables
-psst export                           # Export to stdout (.env format)
+psst export                           # Export to stdout (interactive terminal only)
 psst export --env-file .env           # Export to file
 ```
 
@@ -178,6 +180,8 @@ Fallback environment variables: `PSST_GLOBAL=1`, `PSST_ENV=<name>`.
 - Encryption key stored in OS keychain (libsecret on Linux)
 - Secrets automatically redacted in command output (`[REDACTED]`)
 - Secrets never exposed to agent context
+- `psst get` and `psst export` require interactive terminal confirmation
+- `psst verify` for safe secret comparison without revealing values (constant-time)
 - `PSST_PASSWORD` removed from child process environment
 - Vault database file permissions set to `0600`
 - Best-effort memory zeroing for keys and plaintext

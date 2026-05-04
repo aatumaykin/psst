@@ -85,7 +85,9 @@ psst run -- ./deploy.sh             # внедрить все секреты
 ```bash
 psst init [--global] [--env <name>]   # Создать vault
 psst set <NAME> [--stdin] [--tag T]   # Добавить/обновить секрет
-psst get <NAME>                       # Показать значение (для отладки)
+psst get <NAME>                       # Показать значение (только интерактивный терминал)
+psst verify <NAME> --expected <val>   # Проверить значение без раскрытия
+psst verify <NAME> --hash <sha256>    # Проверить по SHA-256 хешу
 psst list [--tag T]                   # Список имён секретов
 psst rm <NAME>                        # Удалить секрет + историю
 psst migrate                          # Обновить vault до последней версии KDF
@@ -104,7 +106,7 @@ psst <СЕКРЕТ>... -- <команда> [аргументы] # Запусти
 psst import .env                      # Импорт из .env файла
 psst import --stdin                   # Импорт из stdin
 psst import --from-env                # Импорт из переменных окружения
-psst export                           # Экспорт в stdout (.env формат)
+psst export                           # Экспорт в stdout (только интерактивный терминал)
 psst export --env-file .env           # Экспорт в файл
 ```
 
@@ -178,6 +180,8 @@ psst list-envs                        # Список всех окружений
 - Ключ шифрования хранится в OS keychain (libsecret на Linux)
 - Секреты автоматически маскируются в выводе команд (`[REDACTED]`)
 - Секреты никогда не попадают в контекст агента
+- `psst get` и `psst export` требуют подтверждения в интерактивном терминале
+- `psst verify` для безопасного сравнения секретов без раскрытия значений (constant-time)
 - `PSST_PASSWORD` удаляется из окружения дочернего процесса
 - Права на файл vault БД установлены в `0600`
 - Best-effort обнуление ключей и plaintext в памяти
