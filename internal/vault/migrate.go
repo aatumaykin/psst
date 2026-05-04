@@ -83,7 +83,11 @@ func (v *Vault) MigrateKDF(ctx context.Context) error {
 		if metaErr := v.store.SetMeta(ctx, "verify_iv", base64.StdEncoding.EncodeToString(verifyIV)); metaErr != nil {
 			return fmt.Errorf("store verify_iv: %w", metaErr)
 		}
-		if metaErr := v.store.SetMeta(ctx, "verify_data", base64.StdEncoding.EncodeToString(verifyCiphertext)); metaErr != nil {
+		if metaErr := v.store.SetMeta(
+			ctx,
+			"verify_data",
+			base64.StdEncoding.EncodeToString(verifyCiphertext),
+		); metaErr != nil {
 			return fmt.Errorf("store verify_data: %w", metaErr)
 		}
 		return nil

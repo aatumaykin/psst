@@ -77,19 +77,16 @@ func (v *Vault) withRLock(fn func() error) error {
 	return fn()
 }
 
-func (v *Vault) checkKDFBlocking() error {
+func (v *Vault) checkKDFBlocking() {
 	if v.v1KDF {
 		fmt.Fprintln(os.Stderr, "Warning: vault uses legacy KDF (V1). Run 'psst migrate' to upgrade.")
 	}
-	return nil
 }
 
 func (v *Vault) copyKey() ([]byte, error) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	if err := v.checkKDFBlocking(); err != nil {
-		return nil, err
-	}
+	v.checkKDFBlocking()
 	if v.key == nil {
 		return nil, errors.New("vault is locked")
 	}

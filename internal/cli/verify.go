@@ -15,6 +15,8 @@ import (
 	"github.com/aatumaykin/psst/internal/vault"
 )
 
+const exitCodeError = 2
+
 type verifyOpts struct {
 	Expected string
 	Hash     string
@@ -27,16 +29,16 @@ func runVerify(ctx context.Context, v vault.Interface, name string, opts verifyO
 
 	if opts.Expected == "" && opts.Hash == "" {
 		fmt.Fprintf(os.Stderr, "✗ Exactly one of --expected or --hash is required\n")
-		return &exitError{code: 2}
+		return &exitError{code: exitCodeError}
 	}
 	if opts.Expected != "" && opts.Hash != "" {
 		fmt.Fprintf(os.Stderr, "✗ Cannot use both --expected and --hash\n")
-		return &exitError{code: 2}
+		return &exitError{code: exitCodeError}
 	}
 
 	sec, err := v.GetSecret(ctx, name)
 	if err != nil {
-		return &exitError{code: 2}
+		return &exitError{code: exitCodeError}
 	}
 	defer crypto.ZeroBytes(sec.Value)
 

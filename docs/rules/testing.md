@@ -65,7 +65,7 @@ type testKeyProvider struct {
     key []byte
 }
 
-func (t *testKeyProvider) GetKey(service, account string) ([]byte, error) {
+func (t *testKeyProvider) GetRawKey(service, account string) ([]byte, error) {
     return t.key, nil
 }
 // ... implement other interface methods

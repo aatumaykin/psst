@@ -65,7 +65,7 @@ func (v *Vault) decryptSecret(ciphertext, iv, key []byte, name string) ([]byte, 
 	return v.enc.Decrypt(ciphertext, iv, key, []byte(name))
 }
 
-func (v *Vault) encryptSecret(plaintext, key []byte, name string) (ciphertext, iv []byte, err error) {
+func (v *Vault) encryptSecret(plaintext, key []byte, name string) ([]byte, []byte, error) {
 	if v.legacyV2 {
 		return v.enc.Encrypt(plaintext, key)
 	}

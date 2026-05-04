@@ -35,23 +35,16 @@ Layered architecture with dependency injection via interfaces. Direction: `cli â
 ```go
 // crypto/crypto.go
 type Encryptor interface {
-    Encrypt(plaintext, key []byte) (ciphertext, iv []byte, err error)
-    Decrypt(ciphertext, iv, key []byte) ([]byte, error)
+    Encrypt(plaintext []byte, key []byte, aad ...[]byte) (ciphertext, iv []byte, err error)
+    Decrypt(ciphertext, iv []byte, key []byte, aad ...[]byte) ([]byte, error)
     KeyToBuffer(key string) ([]byte, error)
-    KeyToBufferV2(key string) ([]byte, error)
     KeyToBufferV2WithSalt(key string, salt []byte) ([]byte, error)
     GenerateKey() ([]byte, error)
 }
 
 // keyring/keyring.go
-type KeyDeriver interface {
-    KeyToBuffer(key string) ([]byte, error)
-    KeyToBufferV2(key string) ([]byte, error)
-    GenerateKey() ([]byte, error)
-}
-
 type KeyProvider interface {
-    GetRawKey(service, account string) (string, error)
+    GetRawKey(service, account string) ([]byte, error)
     SetKey(service, account string, key []byte) error
     IsAvailable() bool
     GenerateKey() ([]byte, error)
@@ -60,19 +53,19 @@ type KeyProvider interface {
 // store/store.go
 type SecretStore interface {
     InitSchema() error
-    GetSecret(name string) (*StoredSecret, error)
-    GetAllSecrets() ([]StoredSecret, error)
-    SetSecret(name string, encValue, iv []byte, tags []string) error
-    DeleteSecret(name string) error
-    DeleteHistory(name string) error
-    ListSecrets() ([]SecretMeta, error)
-    GetHistory(name string) ([]HistoryEntry, error)
-    AddHistory(name string, version int, encValue, iv []byte, tags []string) error
-    PruneHistory(name string, keepVersions int) error
+    GetSecret(ctx context.Context, name string) (*StoredSecret, error)
+    GetAllSecrets(ctx context.Context) ([]StoredSecret, error)
+    SetSecret(ctx context.Context, name string, encValue, iv []byte, tags []string) error
+    DeleteSecret(ctx context.Context, name string) error
+    DeleteHistory(ctx context.Context, name string) error
+    ListSecrets(ctx context.Context) ([]SecretMeta, error)
+    GetHistory(ctx context.Context, name string) ([]HistoryEntry, error)
+    AddHistory(ctx context.Context, name string, version int, encValue, iv []byte, tags []string) error
+    PruneHistory(ctx context.Context, name string, keepVersions int) error
     ExecTx(fn func() error) error
-    GetMeta(key string) (string, error)
-    SetMeta(key, value string) error
-    IncrementMetaInt(key string, increment int) (int, error)
+    GetMeta(ctx context.Context, key string) (string, error)
+    SetMeta(ctx context.Context, key, value string) error
+    IncrementMetaInt(ctx context.Context, key string, increment int) (int, error)
     Close() error
 }
 ```

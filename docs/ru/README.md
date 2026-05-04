@@ -91,6 +91,7 @@ psst verify <NAME> --hash <sha256>    # Проверить по SHA-256 хешу
 psst list [--tag T]                   # Список имён секретов
 psst rm <NAME>                        # Удалить секрет + историю
 psst migrate                          # Обновить vault до последней версии KDF
+psst completion <shell>               # Генерация скрипта автодополнения
 ```
 
 ### Использование секретов
@@ -219,22 +220,15 @@ internal/
 
 ```go
 type Encryptor interface {
-    Encrypt(plaintext, key []byte) (ciphertext, iv []byte, err error)
-    Decrypt(ciphertext, iv, key []byte) ([]byte, error)
+    Encrypt(plaintext []byte, key []byte, aad ...[]byte) (ciphertext, iv []byte, err error)
+    Decrypt(ciphertext, iv []byte, key []byte, aad ...[]byte) ([]byte, error)
     KeyToBuffer(key string) ([]byte, error)
-    KeyToBufferV2(key string) ([]byte, error)
     KeyToBufferV2WithSalt(key string, salt []byte) ([]byte, error)
     GenerateKey() ([]byte, error)
 }
 
-type KeyDeriver interface {
-    KeyToBuffer(key string) ([]byte, error)
-    KeyToBufferV2(key string) ([]byte, error)
-    GenerateKey() ([]byte, error)
-}
-
 type KeyProvider interface {
-    GetRawKey(service, account string) (string, error)
+    GetRawKey(service, account string) ([]byte, error)
     SetKey(service, account string, key []byte) error
     IsAvailable() bool
     GenerateKey() ([]byte, error)
@@ -242,9 +236,11 @@ type KeyProvider interface {
 
 type SecretStore interface {
     InitSchema() error
-    GetSecret(name string) (*StoredSecret, error)
-    GetAllSecrets() ([]StoredSecret, error)
-    SetSecret(name string, encValue, iv []byte, tags []string) error
+    GetSecret(ctx context.Context, name string) (*StoredSecret, error)
+    GetAllSecrets(ctx context.Context) ([]StoredSecret, error)
+    ListSecrets(ctx context.Context) ([]SecretMeta, error)
+    SetSecret(ctx context.Context, name string, encValue, iv []byte, tags []string) error
+    DeleteSecret(ctx context.Context, name string) error
     // ... (полный интерфейс в internal/store/store.go)
 }
 ```

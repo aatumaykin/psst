@@ -70,22 +70,7 @@ func (v *Vault) Unlock(ctx context.Context) error {
 	verified, hasData := v.tryVerify(ctx, key)
 
 	if !verified && hasData && kdfVersion == crypto.KDFVersion2 {
-		crypto.ZeroBytes(key)
-		legacyKey, legacyErr := v.tryLegacyV2Key(rawKey)
-		if legacyErr == nil && legacyKey != nil {
-			legacyVerified, _ := v.tryVerify(ctx, legacyKey)
-			if legacyVerified {
-				key = legacyKey
-				verified = true
-				v.mu.Lock()
-				v.legacyV2 = true
-				v.mu.Unlock()
-				fmt.Fprintln(os.Stderr,
-					"Warning: vault uses legacy encryption (pre-v1.3.0). Run 'psst migrate' to upgrade.")
-			} else {
-				crypto.ZeroBytes(legacyKey)
-			}
-		}
+		key, verified = v.tryLegacyV2Unlock(ctx, rawKey, key)
 	}
 
 	if !verified {
@@ -115,13 +100,31 @@ func (v *Vault) Unlock(ctx context.Context) error {
 	return nil
 }
 
+func (v *Vault) tryLegacyV2Unlock(ctx context.Context, rawKey, key []byte) ([]byte, bool) {
+	crypto.ZeroBytes(key)
+	legacyKey, legacyErr := v.tryLegacyV2Key(rawKey)
+	if legacyErr == nil && legacyKey != nil {
+		legacyVerified, _ := v.tryVerify(ctx, legacyKey)
+		if legacyVerified {
+			v.mu.Lock()
+			v.legacyV2 = true
+			v.mu.Unlock()
+			fmt.Fprintln(os.Stderr,
+				"Warning: vault uses legacy encryption (pre-v1.3.0). Run 'psst migrate' to upgrade.")
+			return legacyKey, true
+		}
+		crypto.ZeroBytes(legacyKey)
+	}
+	return key, false
+}
+
 func (v *Vault) hasVerifyData(ctx context.Context) bool {
 	verifyIV, _ := v.store.GetMeta(ctx, "verify_iv")
 	verifyData, _ := v.store.GetMeta(ctx, "verify_data")
 	return verifyIV != "" && verifyData != ""
 }
 
-func (v *Vault) tryVerify(ctx context.Context, key []byte) (verified bool, hasData bool) {
+func (v *Vault) tryVerify(ctx context.Context, key []byte) (bool, bool) {
 	verifyIV, ivErr := v.store.GetMeta(ctx, "verify_iv")
 	verifyData, dataErr := v.store.GetMeta(ctx, "verify_data")
 
@@ -149,12 +152,14 @@ func (v *Vault) tryVerify(ctx context.Context, key []byte) (verified bool, hasDa
 	return false, false
 }
 
+const legacyKeySize = 32
+
 func (v *Vault) tryLegacyV2Key(rawKey []byte) ([]byte, error) {
 	decoded, decodeErr := base64.StdEncoding.DecodeString(string(rawKey))
-	if decodeErr != nil || len(decoded) != 32 {
+	if decodeErr != nil || len(decoded) != legacyKeySize {
 		return nil, errors.New("not a legacy base64-encoded 32-byte key")
 	}
-	key := make([]byte, 32)
+	key := make([]byte, legacyKeySize)
 	copy(key, decoded)
 	return key, nil
 }

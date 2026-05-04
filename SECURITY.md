@@ -43,7 +43,7 @@ psst defends against:
 - AI agents accidentally reading secret values from stdout/logs.
 - Plaintext secrets committed to version control (`psst scan`).
 - Offline brute-force attacks on vault files (Argon2id KDF).
-- Ciphertext swapping between secrets (AAD binding, planned).
+- Ciphertext swapping between secrets (AAD binding via secret name).
 
 psst does **not** defend against:
 

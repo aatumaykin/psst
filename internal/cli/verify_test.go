@@ -3,7 +3,7 @@ package cli
 import (
 	"context"
 	"crypto/sha256"
-	"fmt"
+	"encoding/hex"
 	"testing"
 )
 
@@ -44,7 +44,7 @@ func TestVerifyExpected_NoMatch(t *testing.T) {
 func TestVerifyHash_Match(t *testing.T) {
 	secret := []byte("secret123")
 	hash := sha256.Sum256(secret)
-	hashHex := fmt.Sprintf("%x", hash[:])
+	hashHex := hex.EncodeToString(hash[:])
 
 	v := &mockVault{
 		secrets: map[string][]byte{

@@ -40,8 +40,8 @@ var exportCmd = &cobra.Command{
 				defer file.Close()
 				f.EnvListWriter(strSecrets, file)
 			} else {
-				if err := confirmReveal("all secret values"); err != nil {
-					return err
+				if confirmErr := confirmReveal("all secret values"); confirmErr != nil {
+					return confirmErr
 				}
 				f.EnvListWriter(strSecrets, os.Stdout)
 			}

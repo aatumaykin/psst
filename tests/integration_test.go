@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -119,10 +120,8 @@ func (e *testEnv) verifySecret(name, value string) {
 	if err != nil {
 		e.t.Fatalf("cannot read env file: %v", err)
 	}
-	for _, line := range strings.Split(string(data), "\n") {
-		if line == name+"="+value {
-			return
-		}
+	if slices.Contains(strings.Split(string(data), "\n"), name+"="+value) {
+		return
 	}
 	e.t.Fatalf("expected %s=%s in export, got: %s", name, value, string(data))
 }

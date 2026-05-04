@@ -22,11 +22,11 @@ func TestConfirmReveal_NonTTY(t *testing.T) {
 	oldStdin := os.Stdin
 	oldStderr := os.Stderr
 	t.Cleanup(func() {
-		os.Stdin = oldStdin
-		os.Stderr = oldStderr
+		os.Stdin = oldStdin   //nolint:reassign // restoring original streams after test
+		os.Stderr = oldStderr //nolint:reassign // restoring original streams after test
 	})
-	os.Stdin = r
-	os.Stderr = os.Stdout
+	os.Stdin = r          //nolint:reassign // mocking stdin for non-TTY test
+	os.Stderr = os.Stdout //nolint:reassign // capturing stderr for non-TTY test
 
 	err := confirmReveal("secret")
 	w.Close()
