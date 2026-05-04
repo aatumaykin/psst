@@ -58,6 +58,15 @@ This is a **security-critical** project — a secrets manager. Security rules ap
 - The `--no-mask` flag exists for debugging but must never be default.
 - `psst get <NAME>` reveals values — this is intentional for debugging. CLI warns about its purpose.
 
+## Reveal Guard
+
+- `psst get` and `psst export` (to stdout) require interactive terminal confirmation before revealing values.
+- In non-TTY contexts (headless, pipes, AI agents), these commands are blocked with an error pointing to `psst verify`.
+- `psst export --env-file` bypasses the guard — secrets are written to a file with `0600` permissions, not to stdout.
+- Use `psst verify <name> --expected <value>` for safe comparison without revealing the secret.
+- Use `psst verify <name> --hash <sha256>` for safer comparison (no plaintext in command history).
+- `psst verify` uses constant-time comparison (`crypto/subtle.ConstantTimeCompare`) to prevent timing attacks.
+
 ## Scanner (`psst scan`)
 
 - Scans git-tracked files for actual vault secret values (exact match, not regex).
@@ -84,6 +93,7 @@ This is a **security-critical** project — a secrets manager. Security rules ap
 - **Never** store vault key in plaintext file.
 - **Never** convert secret values to `string` — use `[]byte` and zero after use.
 - **Never** use hardcoded or shared KDF salt — every vault must have a unique random salt.
+- **Never** bypass `confirmReveal()` — if a new command reveals secret values, it must use the guard.
 
 ## Vulnerability Response
 
