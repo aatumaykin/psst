@@ -17,6 +17,9 @@ var getCmd = &cobra.Command{
 		if err := requireValidName(name); err != nil {
 			return err
 		}
+		if err := confirmReveal("secret value"); err != nil {
+			return err
+		}
 		return withVault(cmd, func(v vault.Interface, f *output.Formatter) error {
 			sec, err := v.GetSecret(cmd.Context(), name)
 			if err != nil {
