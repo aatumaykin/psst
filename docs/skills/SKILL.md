@@ -9,7 +9,7 @@ Encrypted vault (AES-256-GCM, SQLite). Agent manages secrets by **name only** �
 
 ## Cardinal Rule
 
-**Never call `psst get`** unless the user explicitly asks to see a value. Warn about leak risk even then. All other commands are safe — they never reveal values.
+**Never call `psst get` or `psst export`** — they are guarded by interactive terminal confirmation and will fail in non-TTY (agent) contexts. Use `psst verify` to check secret values without revealing them. All other commands are safe — they never reveal values.
 
 ## Secret Lifecycle
 
@@ -121,11 +121,25 @@ Tags use OR logic when multiple are specified.
 echo "value" | psst set API_KEY --stdin    # One secret
 psst import .env                            # Bulk import from .env file
 psst import --from-env                      # Import from current env vars
-psst export                                  # Export to stdout (WARNING: shows values)
+psst export --env-file .env                 # Export to file (safe)
+psst export                                  # Export to stdout (requires terminal confirmation)
 ```
 
-- `psst export` outputs **real values** — warn the user before using
+- `psst export` to stdout requires terminal confirmation — will fail for agents
+- Use `psst export --env-file <path>` to write secrets to a file
 - `psst import` does NOT delete the source `.env` — suggest cleanup after verification
+
+## Verifying Secrets
+
+```bash
+psst verify API_KEY --expected "my-key"    # Check against expected value
+psst verify API_KEY --hash <sha256_hex>    # Check against SHA-256 hash
+```
+
+- `--expected`: compares against plaintext. Warning: value visible in `/proc/PID/cmdline`
+- `--hash`: compares against SHA-256 hex digest. Safer for terminal history
+- Exit code: 0 = match, 1 = no match, 2 = error
+- Uses constant-time comparison — no timing side-channels
 
 ## Leak Scanner
 
@@ -155,7 +169,7 @@ psst rollback <NAME> --to <version>  # Restore previous version
 | API call with token | `psst TOKEN -- sh -c 'curl -H "Auth: Bearer $TOKEN" https://...'` |
 | CI/headless | `PSST_PASSWORD=x psst run -- ./deploy.sh` |
 | Check for leaks | `psst scan --staged` |
-| Debug value (last resort) | `psst get NAME` — **warn user first** |
+| Check secret value | `psst verify NAME --expected "val"` or `--hash <sha256>` |
 
 ## Common Mistakes
 
@@ -163,5 +177,5 @@ psst rollback <NAME> --to <version>  # Restore previous version
 |---------|-------------|-----|
 | Double quotes around `$VAR` | Empty string → auth failure | Use single quotes + `sh -c` |
 | `psst run -- curl -H "$KEY" url` | Outer shell expands → empty | `psst KEY -- sh -c 'curl -H "$KEY" url'` |
-| Using `psst get` casually | Secret leaks to agent context | Only when user explicitly asks |
+| Using `psst get` | Blocked in non-TTY, requires confirmation in TTY | Use `psst verify` instead |
 | `psst run` without `--` | `run` is a subcommand, not exec pattern | Always use `psst run -- command` |
