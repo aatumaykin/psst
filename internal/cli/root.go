@@ -198,3 +198,29 @@ func exitWithError(msg string) error {
 	fmt.Fprintf(os.Stderr, "✗ %s\n", msg)
 	return &exitError{code: 1}
 }
+
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
+
+func confirmReveal(label string) error {
+	if !isTerminal(os.Stdin) {
+		fmt.Fprintln(os.Stderr, "✗ Cannot reveal "+label+": not a terminal.")
+		fmt.Fprintln(os.Stderr, "  Use 'psst verify <name> --expected <value>' to check a specific secret.")
+		fmt.Fprintln(os.Stderr, "  Use 'psst verify <name> --hash <sha256>' for a safer check.")
+		return &exitError{code: 1}
+	}
+
+	fmt.Fprintf(os.Stderr, "? Reveal %s? [y/N] ", label)
+	var buf [1]byte
+	n, err := os.Stdin.Read(buf[:])
+	if err != nil || n != 1 || (buf[0] != 'y' && buf[0] != 'Y') {
+		fmt.Fprintln(os.Stderr, "✗ Reveal cancelled.")
+		return &exitError{code: 1}
+	}
+	return nil
+}
