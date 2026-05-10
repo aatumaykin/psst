@@ -14,6 +14,29 @@ func TestIsTerminal_PipeIsNotTerminal(t *testing.T) {
 	}
 }
 
+func TestResolveVaultPath_ExplicitPath(t *testing.T) {
+	cfg := globalConfig{VaultPath: "/custom/path"}
+	got, err := resolveVaultPath(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "/custom/path/vault.db"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestResolveVaultPath_Fallback(t *testing.T) {
+	cfg := globalConfig{Global: false, Env: ""}
+	got, err := resolveVaultPath(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == "" {
+		t.Error("expected non-empty path from fallback")
+	}
+}
+
 func TestConfirmReveal_NonTTY(t *testing.T) {
 	r, w, _ := os.Pipe()
 	defer r.Close()

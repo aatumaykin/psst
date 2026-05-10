@@ -12,7 +12,11 @@ func handleExecPatternDirect(
 	commandArgs []string,
 	cfg ExecConfig,
 ) error {
-	v, err := getUnlockedVault(ctx, cfg.JSONOut, cfg.Quiet, cfg.Global, cfg.Env)
+	v, err := getUnlockedVault(ctx, cfg.JSONOut, cfg.Quiet, globalConfig{
+		Global:    cfg.Global,
+		Env:       cfg.Env,
+		VaultPath: cfg.VaultPath,
+	})
 	if err != nil {
 		return err
 	}

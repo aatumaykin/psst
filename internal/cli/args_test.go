@@ -39,13 +39,14 @@ func TestParseGlobalFlagsFromArgs_EqualsSyntax(t *testing.T) {
 	os.Unsetenv("PSST_ENV")
 
 	tests := []struct {
-		name       string
-		args       []string
-		wantEnv    string
-		wantTags   []string
-		wantJSON   bool
-		wantQuiet  bool
-		wantGlobal bool
+		name          string
+		args          []string
+		wantEnv       string
+		wantTags      []string
+		wantJSON      bool
+		wantQuiet     bool
+		wantGlobal    bool
+		wantVaultPath string
 	}{
 		{
 			name:     "--env=equals",
@@ -90,6 +91,16 @@ func TestParseGlobalFlagsFromArgs_EqualsSyntax(t *testing.T) {
 			args:       []string{"-g", "KEY", "--", "echo"},
 			wantGlobal: true,
 		},
+		{
+			name:          "--vault-path equals",
+			args:          []string{"--vault-path=/custom/vault.db", "KEY", "--", "echo"},
+			wantVaultPath: "/custom/vault.db",
+		},
+		{
+			name:          "--vault-path space",
+			args:          []string{"--vault-path", "/custom/vault.db", "KEY", "--", "echo"},
+			wantVaultPath: "/custom/vault.db",
+		},
 	}
 
 	for _, tt := range tests {
@@ -106,6 +117,9 @@ func TestParseGlobalFlagsFromArgs_EqualsSyntax(t *testing.T) {
 			}
 			if cfg.Global != tt.wantGlobal {
 				t.Errorf("global = %v, want %v", cfg.Global, tt.wantGlobal)
+			}
+			if cfg.VaultPath != tt.wantVaultPath {
+				t.Errorf("vaultPath = %q, want %q", cfg.VaultPath, tt.wantVaultPath)
 			}
 			if len(cfg.Tags) != len(tt.wantTags) {
 				t.Fatalf("tags = %v, want %v", cfg.Tags, tt.wantTags)
@@ -154,6 +168,16 @@ func TestFilterSecretNames_EqualsSyntax(t *testing.T) {
 			name: "no flags",
 			args: []string{"KEY1", "KEY2"},
 			want: []string{"KEY1", "KEY2"},
+		},
+		{
+			name: "--vault-path filtered",
+			args: []string{"--vault-path=/custom/vault.db", "API_KEY", "--", "echo"},
+			want: []string{"API_KEY", "echo"},
+		},
+		{
+			name: "space --vault-path filtered",
+			args: []string{"--vault-path", "/custom/vault.db", "API_KEY", "--", "echo"},
+			want: []string{"API_KEY", "echo"},
 		},
 	}
 

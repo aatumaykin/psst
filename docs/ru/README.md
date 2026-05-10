@@ -83,7 +83,7 @@ psst run -- ./deploy.sh             # внедрить все секреты
 ### Управление секретами
 
 ```bash
-psst init [--global] [--env <name>]   # Создать vault
+psst init [--global] [--env <name>] [--vault-path <path>]   # Создать vault
 psst set <NAME> [--stdin] [--tag T]   # Добавить/обновить секрет
 psst get <NAME>                       # Показать значение (только интерактивный терминал)
 psst verify <NAME> --expected <val>   # Проверить значение без раскрытия
@@ -158,17 +158,31 @@ psst list-envs                        # Список всех окружений
 
 Хранятся в `.psst/envs/<name>/vault.db` (или `~/.psst/envs/<name>/` с `--global`).
 
+### Произвольный путь к vault
+
+Когда стандартное разрешение пути (локальный или глобальный) не подходит (например, cron-задачи или кастомная структура директорий), можно указать путь к директории vault напрямую. Файл vault всегда называется `vault.db`:
+
+```bash
+psst init --vault-path /opt/secrets
+psst --vault-path /opt/secrets set API_KEY --stdin
+psst --vault-path /opt/secrets list
+psst --vault-path /opt/secrets API_KEY -- curl ...
+```
+
+`--vault-path` имеет приоритет над `--global` и `--env`.
+
 ### Глобальные флаги
 
 Все команды поддерживают:
 
 ```
---json              Структурированный JSON-вывод
--q, --quiet         Минимальный вывод
--g, --global        Использовать глобальный vault (~/.psst/)
---env <name>        Использовать конкретное окружение
---tag <name>        Фильтр по тегу (повторяемый, логика OR)
---no-mask           Отключить маскирование вывода (для отладки)
+--json                 Структурированный JSON-вывод
+-q, --quiet            Минимальный вывод
+-g, --global           Использовать глобальный vault (~/.psst/)
+--env <name>           Использовать конкретное окружение
+--tag <name>           Фильтр по тегу (повторяемый, логика OR)
+--vault-path <path>    Путь к файлу базы данных vault
+--no-mask              Отключить маскирование вывода (для отладки)
 ```
 
 Резервные переменные окружения: `PSST_GLOBAL=1`, `PSST_ENV=<name>`.

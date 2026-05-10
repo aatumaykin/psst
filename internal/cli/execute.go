@@ -15,6 +15,7 @@ type execConfig struct {
 	Global     bool
 	Env        string
 	Tags       []string
+	VaultPath  string
 	NoMask     bool
 	ExpandArgs bool
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -60,6 +61,7 @@ func Execute() error {
 					Global:     cfg.Global,
 					Env:        cfg.Env,
 					Tags:       cfg.Tags,
+					VaultPath:  cfg.VaultPath,
 					NoMask:     noMask,
 					ExpandArgs: expandArgs,
 				},
@@ -91,14 +93,16 @@ func init() {
 	rootCmd.PersistentFlags().BoolP("global", "g", false, "Use global vault")
 	rootCmd.PersistentFlags().String("env", "", "Environment name")
 	rootCmd.PersistentFlags().StringArray("tag", nil, "Filter by tag (repeatable)")
+	rootCmd.PersistentFlags().String("vault-path", "", "Path to vault database file")
 }
 
 type globalConfig struct {
-	JSON   bool
-	Quiet  bool
-	Global bool
-	Env    string
-	Tags   []string
+	JSON      bool
+	Quiet     bool
+	Global    bool
+	Env       string
+	Tags      []string
+	VaultPath string
 }
 
 func resolveEnvOverrides(cfg *globalConfig) {
@@ -117,6 +121,7 @@ func getGlobalFlags(cmd *cobra.Command) globalConfig {
 	cfg.Global, _ = cmd.Flags().GetBool("global")
 	cfg.Env, _ = cmd.Flags().GetString("env")
 	cfg.Tags, _ = cmd.Flags().GetStringArray("tag")
+	cfg.VaultPath, _ = cmd.Flags().GetString("vault-path")
 	resolveEnvOverrides(&cfg)
 	return cfg
 }
@@ -134,8 +139,15 @@ const (
 	ExitAuthFailed = 5
 )
 
-func getUnlockedVault(ctx context.Context, jsonOut, quiet, global bool, env string) (vault.Interface, error) {
-	vaultPath, err := vault.FindVaultPath(global, env)
+func resolveVaultPath(cfg globalConfig) (string, error) {
+	if cfg.VaultPath != "" {
+		return filepath.Join(cfg.VaultPath, "vault.db"), nil
+	}
+	return vault.FindVaultPath(cfg.Global, cfg.Env)
+}
+
+func getUnlockedVault(ctx context.Context, jsonOut, quiet bool, cfg globalConfig) (vault.Interface, error) {
+	vaultPath, err := resolveVaultPath(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +190,7 @@ func printAuthFailed(jsonOut, quiet bool) {
 
 func withVault(cmd *cobra.Command, fn func(v vault.Interface, f *output.Formatter) error) error {
 	cfg := getGlobalFlags(cmd)
-	v, err := getUnlockedVault(cmd.Context(), cfg.JSON, cfg.Quiet, cfg.Global, cfg.Env)
+	v, err := getUnlockedVault(cmd.Context(), cfg.JSON, cfg.Quiet, cfg)
 	if err != nil {
 		return err
 	}

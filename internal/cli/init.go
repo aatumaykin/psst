@@ -15,7 +15,7 @@ var initCmd = &cobra.Command{
 		cfg := getGlobalFlags(cmd)
 		f := getFormatter(cfg.JSON, cfg.Quiet)
 
-		vaultPath, err := vault.FindVaultPath(cfg.Global, cfg.Env)
+		vaultPath, err := resolveVaultPath(cfg)
 		if err != nil {
 			return exitWithError(err.Error())
 		}

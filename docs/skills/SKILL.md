@@ -14,7 +14,7 @@ Encrypted vault (AES-256-GCM, SQLite). Agent manages secrets by **name only** â€
 ## Secret Lifecycle
 
 ```bash
-psst init [--global] [--env <name>]   # Create encrypted vault
+psst init [--global] [--env <name>] [--vault-path <dir>]   # Create encrypted vault
 psst set <NAME> [--stdin] [--tag T]   # Add/update secret (prompts if no --stdin)
 psst list [--tag T]                   # List names only (no values)
 psst rm <NAME>                        # Delete secret and its history
@@ -86,11 +86,15 @@ psst init --env prod                    # Create named vault
 psst --env prod list                    # Use prod vault
 psst --env prod run -- ./deploy.sh      # Run with prod secrets
 psst list-envs                          # List all environments
+
+psst init --vault-path /opt/secrets     # Create vault at custom path
+psst --vault-path /opt/secrets list     # Use custom path vault
 ```
 
 - Project vault: `.psst/vault.db`
 - Global vault: `~/.psst/vault.db` (`--global` or `PSST_GLOBAL=1`)
 - Named env: `.psst/envs/<name>/vault.db`
+- Custom directory: `--vault-path <dir>` (vault file always named `vault.db` inside that directory)
 
 ## Headless / CI Environments
 
@@ -168,6 +172,7 @@ psst rollback <NAME> --to <version>  # Restore previous version
 | Run with all secrets | `psst run -- ./script.sh` |
 | API call with token | `psst TOKEN -- sh -c 'curl -H "Auth: Bearer $TOKEN" https://...'` |
 | CI/headless | `PSST_PASSWORD=x psst run -- ./deploy.sh` |
+| Custom vault path | `psst --vault-path /opt/secrets run -- ./deploy.sh` |
 | Check for leaks | `psst scan --staged` |
 | Check secret value | `psst verify NAME --expected "val"` or `--hash <sha256>` |
 

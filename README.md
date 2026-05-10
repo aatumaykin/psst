@@ -83,7 +83,7 @@ psst run -- ./deploy.sh             # inject all secrets
 ### Managing Secrets
 
 ```bash
-psst init [--global] [--env <name>]   # Create vault
+psst init [--global] [--env <name>] [--vault-path <path>]   # Create vault
 psst set <NAME> [--stdin] [--tag T]   # Add/update secret
 psst get <NAME>                       # Show value (interactive terminal only)
 psst verify <NAME> --expected <val>   # Verify value without revealing it
@@ -158,17 +158,31 @@ psst list-envs                        # List all environments
 
 Stored in `.psst/envs/<name>/vault.db` (or `~/.psst/envs/<name>/` with `--global`).
 
+### Custom Vault Path
+
+When the default local/global path resolution doesn't fit (e.g. cron jobs, custom directory layouts), specify the vault directory directly. The vault file is always named `vault.db`:
+
+```bash
+psst init --vault-path /opt/secrets
+psst --vault-path /opt/secrets set API_KEY --stdin
+psst --vault-path /opt/secrets list
+psst --vault-path /opt/secrets API_KEY -- curl ...
+```
+
+`--vault-path` takes precedence over `--global` and `--env`.
+
 ### Global Flags
 
 All commands support:
 
 ```
---json              Structured JSON output
--q, --quiet         Minimal output
--g, --global        Use global vault (~/.psst/)
---env <name>        Use specific environment
---tag <name>        Filter by tag (repeatable, OR logic)
---no-mask           Disable output masking (debugging only)
+--json                 Structured JSON output
+-q, --quiet            Minimal output
+-g, --global           Use global vault (~/.psst/)
+--env <name>           Use specific environment
+--tag <name>           Filter by tag (repeatable, OR logic)
+--vault-path <path>    Path to vault database file
+--no-mask              Disable output masking (debugging only)
 ```
 
 Fallback environment variables: `PSST_GLOBAL=1`, `PSST_ENV=<name>`.

@@ -17,6 +17,7 @@ var globalFlags = []flagDef{
 	{Name: "--global", Short: "-g"},
 	{Name: "--env", HasValue: true},
 	{Name: "--tag", HasValue: true},
+	{Name: "--vault-path", HasValue: true},
 }
 
 func isKnownFlag(arg string) bool {
@@ -51,6 +52,11 @@ func parseGlobalFlagsFromArgs(args []string) globalConfig {
 			if i < len(args) {
 				cfg.Tags = append(cfg.Tags, args[i])
 			}
+		case "--vault-path":
+			i++
+			if i < len(args) {
+				cfg.VaultPath = args[i]
+			}
 		default:
 			if v, found := strings.CutPrefix(args[i], "--env="); found {
 				cfg.Env = v
@@ -58,6 +64,9 @@ func parseGlobalFlagsFromArgs(args []string) globalConfig {
 			}
 			if v, found := strings.CutPrefix(args[i], "--tag="); found {
 				cfg.Tags = append(cfg.Tags, v)
+			}
+			if v, found := strings.CutPrefix(args[i], "--vault-path="); found {
+				cfg.VaultPath = v
 			}
 		}
 	}
