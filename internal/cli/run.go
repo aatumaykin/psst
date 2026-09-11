@@ -17,7 +17,7 @@ var runCmd = &cobra.Command{
 		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
 		noMask, _ := cmd.Flags().GetBool("no-mask")
 
-		v, err := getUnlockedVault(jsonOut, quiet, global, env)
+		v, err := getUnlockedVault(cmd, jsonOut, quiet, global, env)
 		if err != nil {
 			exitWithError(err.Error())
 		}

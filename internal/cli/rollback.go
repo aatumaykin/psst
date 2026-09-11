@@ -24,7 +24,7 @@ var rollbackCmd = &cobra.Command{
 			exitWithError("Specify version with --to <number>")
 		}
 
-		v, err := getUnlockedVault(jsonOut, quiet, global, env)
+		v, err := getUnlockedVault(cmd, jsonOut, quiet, global, env)
 		if err != nil {
 			exitWithError(err.Error())
 		}

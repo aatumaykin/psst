@@ -15,7 +15,7 @@ var migrateCmd = &cobra.Command{
 		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
 		f := getFormatter(jsonOut, quiet)
 
-		v, err := getUnlockedVault(jsonOut, quiet, global, env)
+		v, err := getUnlockedVault(cmd, jsonOut, quiet, global, env)
 		if err != nil {
 			exitWithError(err.Error())
 		}

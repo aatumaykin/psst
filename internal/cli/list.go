@@ -14,7 +14,7 @@ var listCmd = &cobra.Command{
 		jsonOut, quiet, global, env, tags := getGlobalFlags(cmd)
 		f := getFormatter(jsonOut, quiet)
 
-		v, err := getUnlockedVault(jsonOut, quiet, global, env)
+		v, err := getUnlockedVault(cmd, jsonOut, quiet, global, env)
 		if err != nil {
 			exitWithError(err.Error())
 		}
