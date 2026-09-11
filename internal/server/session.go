@@ -35,6 +35,29 @@ func sessionCookieHeader(id string, maxAge int) *http.Cookie {
 	}
 }
 
+func (s *Server) apiHandler(unlockRequired bool, h func(w http.ResponseWriter, r *http.Request, sess *session)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess := s.sessionFromRequest(r)
+		if sess == nil {
+			writeErr(w, http.StatusUnauthorized, "not authenticated")
+			return
+		}
+		if !(r.Method == http.MethodGet && r.URL.Path == "/api/session") {
+			s.touch(sess)
+		}
+		if unlockRequired {
+			s.sessMu.RLock()
+			unlocked := sess.vault != nil && sess.unlockExpiresAt.After(s.cfg.Now())
+			s.sessMu.RUnlock()
+			if !unlocked {
+				writeErr(w, http.StatusForbidden, "vault is locked")
+				return
+			}
+		}
+		h(w, r, sess)
+	}
+}
+
 func (s *Server) serveSessionState(w http.ResponseWriter, sess *session, resp map[string]any) {
 	now := s.cfg.Now()
 	s.sessMu.RLock()

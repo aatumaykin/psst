@@ -47,6 +47,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("GET /api/session", s.handleSession)
 	mux.HandleFunc("POST /api/logout", s.handleLogout)
+	mux.HandleFunc("POST /api/unlock", s.apiHandler(false, s.handleUnlock))
+	mux.HandleFunc("GET /api/secrets", s.apiHandler(false, func(w http.ResponseWriter, _ *http.Request, _ *session) {
+		writeJSON(w, http.StatusOK, map[string]any{"secrets": []any{}})
+	}))
 	return s.recoverMW(s.logMW(s.hostMW(s.originMW(mux))))
 }
 
