@@ -25,10 +25,9 @@ import (
 var errNoVault = errors.New("no vault found")
 
 const (
-	defaultListen       = "127.0.0.1:7788"
-	defaultServeTimeout = 30 * time.Minute
-	minServeTimeout     = time.Minute
-	sessionTTL          = 24 * time.Hour
+	defaultListen   = "127.0.0.1:7788"
+	minServeTimeout = time.Minute
+	sessionTTL      = 24 * time.Hour
 )
 
 func isLoopbackHost(host string) bool {

@@ -173,7 +173,13 @@ func OpenVaultStore(envDir, storage, remote string, allowInsecure bool) (store.S
 		}
 		loadPins := func() *store.Pin {
 			cur, err := LoadVaultConfig(envDir)
-			if err != nil || cur.PinSalt == "" {
+			if err != nil {
+				if cfg.PinSalt == "" {
+					return nil
+				}
+				return &store.Pin{SaltB64: cfg.PinSalt, Params: cfg.PinKDF}
+			}
+			if cur.PinSalt == "" {
 				return nil
 			}
 			return &store.Pin{SaltB64: cur.PinSalt, Params: cur.PinKDF}

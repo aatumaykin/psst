@@ -120,6 +120,15 @@ func TestSessionEndpoints(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("logout = %d", rec.Code)
 	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "psst_session" && c.MaxAge != -1 {
+			t.Fatalf("logout cookie max-age = %d, want -1", c.MaxAge)
+		}
+	}
+	rec = do(t, h, http.MethodGet, "/api/secrets/API_KEY/value", "", ck)
+	if rec.Code != 401 {
+		t.Fatalf("value after logout = %d, want 401", rec.Code)
+	}
 	rec = do(t, h, http.MethodGet, "/api/session", "", ck)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"authenticated":false`) {
 		t.Fatalf("session after logout = %d %s", rec.Code, rec.Body.String())
@@ -271,6 +280,7 @@ func TestSessionExpiry(t *testing.T) {
 
 func TestWriteStoreErrorMapping(t *testing.T) {
 	s, _ := newTestServer(t)
+	h := s.Handler()
 	w := httptest.NewRecorder()
 	s.writeStoreError(w, fmt.Errorf("%w; change is in the local clone, run `psst sync` later: %w", store.ErrPushFailed, errors.New("boom")))
 	if w.Code != 409 || !strings.Contains(w.Body.String(), "psst sync") {
@@ -281,6 +291,25 @@ func TestWriteStoreErrorMapping(t *testing.T) {
 	if w.Code != 500 {
 		t.Fatalf("salt = %d", w.Code)
 	}
+
+	ck1 := loginOK(t, h)
+	ck2 := loginOK(t, h)
+	for _, ck := range []string{ck1, ck2} {
+		if rec := unlockVault(t, h, ck, "test-password"); rec.Code != 200 {
+			t.Fatalf("unlock %s: %d", ck, rec.Code)
+		}
+	}
+	w = httptest.NewRecorder()
+	s.writeStoreError(w, fmt.Errorf("meta: %w", store.ErrSaltChanged))
+	if w.Code != 500 {
+		t.Fatalf("salt = %d", w.Code)
+	}
+	for _, ck := range []string{ck1, ck2} {
+		rec := do(t, h, http.MethodGet, "/api/session", "", ck)
+		if !strings.Contains(rec.Body.String(), `"unlocked":false`) {
+			t.Fatalf("session %s must lose its unlock: %s", ck, rec.Body.String())
+		}
+	}
 }
 
 func TestBodyLimit413(t *testing.T) {
@@ -290,6 +319,37 @@ func TestBodyLimit413(t *testing.T) {
 	rec := do(t, h, http.MethodPost, "/api/login", big, "")
 	if rec.Code != 413 {
 		t.Fatalf("oversized login = %d", rec.Code)
+	}
+}
+
+func TestBodyLimitsTable(t *testing.T) {
+	s, _ := newTestServer(t)
+	h := s.Handler()
+	ck := loginOK(t, h)
+	if rec := unlockVault(t, h, ck, "test-password"); rec.Code != 200 {
+		t.Fatalf("unlock = %d", rec.Code)
+	}
+	bigRollback := `{"version":1,"pad":"` + strings.Repeat("x", 65*1024) + `"}`
+	rec := do(t, h, http.MethodPost, "/api/secrets/API_KEY/rollback", bigRollback, ck)
+	if rec.Code != 413 {
+		t.Fatalf("oversized rollback = %d, want 413", rec.Code)
+	}
+	bigSet := `{"value":"` + strings.Repeat("x", 1025*1024) + `"}`
+	rec = do(t, h, http.MethodPost, "/api/secrets/API_KEY", bigSet, ck)
+	if rec.Code != 413 {
+		t.Fatalf("oversized set = %d, want 413", rec.Code)
+	}
+}
+
+func TestAPICatchAllNotFound(t *testing.T) {
+	s, _ := newTestServer(t)
+	h := s.Handler()
+	rec := do(t, h, http.MethodGet, "/api/nope", "", "")
+	if rec.Code != 404 {
+		t.Fatalf("unknown api path = %d, want 404", rec.Code)
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Fatalf("cache-control = %q, want no-store", cc)
 	}
 }
 
@@ -574,6 +634,139 @@ func TestRemoteMetaChangedRecovery(t *testing.T) {
 	rec = do(t, h, http.MethodPost, "/api/secrets/NEW_KEY", `{"value":"x"}`, ck1)
 	if rec.Code != 200 {
 		t.Fatalf("write after re-unlock = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRemoteMetaChangedRecoveryPrecheck(t *testing.T) {
+	remote := newBareRemote(t)
+	repo := filepath.Join(t.TempDir(), "repo")
+	gs, err := store.NewGitStore(repo, store.GitOptions{Remote: remote})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	if err := gs.InitSchema(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	seed := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, gs)
+	if err := seed.Unlock(); err != nil {
+		t.Fatalf("seed unlock: %v", err)
+	}
+	if err := seed.SetSecret("API_KEY", []byte("secret123"), nil); err != nil {
+		t.Fatalf("seed set (pushes): %v", err)
+	}
+
+	digest := sha256.Sum256([]byte(testToken))
+	s := New(Config{
+		Store: gs, Enc: crypto.NewAESGCM(),
+		Host: "127.0.0.1", Port: "7788", TokenDigest: digest,
+		UnlockTimeout: 30 * time.Minute, SessionTTL: 24 * time.Hour,
+		Now: time.Now, Log: log.New(io.Discard, "", 0),
+	})
+	t.Cleanup(s.Close)
+	h := s.Handler()
+	ck1 := loginOK(t, h)
+	if rec := unlockVault(t, h, ck1, "test-password"); rec.Code != 200 {
+		t.Fatalf("unlock1: %d", rec.Code)
+	}
+	ck2 := loginOK(t, h)
+	if rec := unlockVault(t, h, ck2, "test-password"); rec.Code != 200 {
+		t.Fatalf("unlock2: %d", rec.Code)
+	}
+
+	repo2 := filepath.Join(t.TempDir(), "repo2")
+	other, err := store.CloneGitVault(remote, repo2, store.GitOptions{Remote: remote})
+	if err != nil {
+		t.Fatalf("other: %v", err)
+	}
+	oldV := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, other)
+	if err := oldV.Unlock(); err != nil {
+		t.Fatalf("old unlock: %v", err)
+	}
+	got, err := oldV.GetSecret("API_KEY")
+	if err != nil {
+		t.Fatalf("old-key decrypt: %v", err)
+	}
+	if err := other.SetMeta("kdf_time", "4"); err != nil {
+		t.Fatalf("strengthen: %v", err)
+	}
+	fresh, err := store.NewGitStore(repo2, store.GitOptions{Remote: remote})
+	if err != nil {
+		t.Fatalf("fresh: %v", err)
+	}
+	mig := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, fresh)
+	if err := mig.Unlock(); err != nil {
+		t.Fatalf("mig unlock: %v", err)
+	}
+	if err := mig.SetSecret("API_KEY", got.Value, got.Tags); err != nil {
+		t.Fatalf("mig re-encrypt+push: %v", err)
+	}
+
+	rec := do(t, h, http.MethodGet, "/api/secrets/API_KEY/value", "", ck1)
+	if rec.Code != 409 || !strings.Contains(rec.Body.String(), "reunlock") {
+		t.Fatalf("stale precheck reveal = %d %s, want 409 reunlock", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodGet, "/api/session", "", ck1)
+	if strings.Contains(rec.Body.String(), `"unlocked":true`) {
+		t.Fatal("requesting session must lose its unlock")
+	}
+	rec = do(t, h, http.MethodGet, "/api/session", "", ck2)
+	if strings.Contains(rec.Body.String(), `"unlocked":true`) {
+		t.Fatal("EVERY session must lose its unlock after recovery")
+	}
+	rec = unlockVault(t, h, ck1, "test-password")
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"verified":true`) {
+		t.Fatalf("re-unlock after recovery = %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodGet, "/api/secrets/API_KEY/value", "", ck1)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "secret123") {
+		t.Fatalf("reveal after re-unlock = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDivergedWarning(t *testing.T) {
+	remote := newBareRemote(t)
+	repo := filepath.Join(t.TempDir(), "repo")
+	gs, err := store.CloneGitVault(remote, repo, store.GitOptions{Remote: remote})
+	if err != nil {
+		t.Fatalf("clone: %v", err)
+	}
+	if err := gs.InitSchema(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	seedGitSecret(t, gs)
+	repo2 := filepath.Join(t.TempDir(), "repo2")
+	other, err := store.CloneGitVault(remote, repo2, store.GitOptions{Remote: remote})
+	if err != nil {
+		t.Fatalf("other: %v", err)
+	}
+	otherV := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, other)
+	if err := otherV.Unlock(); err != nil {
+		t.Fatalf("other unlock: %v", err)
+	}
+	if err := otherV.SetSecret("OTHER_KEY", []byte("other-secret123"), nil); err != nil {
+		t.Fatalf("other set (pushes): %v", err)
+	}
+	if out, err := exec.Command("git", "-C", repo, "commit", "--allow-empty", "-m", "local-only").CombinedOutput(); err != nil {
+		t.Fatalf("local commit: %v\n%s", err, out)
+	}
+
+	digest := sha256.Sum256([]byte(testToken))
+	s := New(Config{
+		Store: gs, Enc: crypto.NewAESGCM(),
+		Host: "127.0.0.1", Port: "7788", TokenDigest: digest,
+		UnlockTimeout: 30 * time.Minute, SessionTTL: 24 * time.Hour,
+		Now: time.Now, Log: log.New(io.Discard, "", 0),
+	})
+	t.Cleanup(s.Close)
+	h := s.Handler()
+	ck := loginOK(t, h)
+	rec := do(t, h, http.MethodGet, "/api/secrets", "", ck)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "unpushed changes") {
+		t.Fatalf("list warning = %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodGet, "/api/secrets/API_KEY/history", "", ck)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "unpushed changes") {
+		t.Fatalf("history warning = %d %s", rec.Code, rec.Body.String())
 	}
 }
 

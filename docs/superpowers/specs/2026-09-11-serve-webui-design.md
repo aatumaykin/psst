@@ -125,7 +125,7 @@ All requests/responses are JSON (`Content-Type: application/json; charset=utf-8`
 | `GET /api/secrets` | ✔ | — | — | `{"secrets": [SecretItem], "warning"?: string}` |
 | `POST /api/secrets/{name}` | ✔ | ✔ | `{"value"?: string, "tag"?: string}` | `{"ok": true, "warning"?: string}` |
 | `DELETE /api/secrets/{name}` | ✔ | ✔ | — | `{"ok": true}` |
-| `GET /api/secrets/{name}/history` | ✔ | — | — | `{"history": [HistoryItem]}` |
+| `GET /api/secrets/{name}/history` | ✔ | — | — | `{"history": [HistoryItem], "warning"?: string}` |
 | `POST /api/secrets/{name}/rollback` | ✔ | ✔ | `{"version": number}` | `{"ok": true}` |
 | `GET /api/secrets/{name}/value` | ✔ | ✔ | — | `{"value": string}` |
 
