@@ -1,6 +1,8 @@
 package store
 
 import (
+	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -207,6 +209,224 @@ func TestGitStoreSetMetaKDFParams(t *testing.T) {
 	}
 	if m.Params.Time != 4 {
 		t.Fatalf("persisted time = %d", m.Params.Time)
+	}
+}
+
+func newSeededStore(t *testing.T, remote string) *GitStore {
+	t.Helper()
+	repo := filepath.Join(t.TempDir(), "repo")
+	g, err := NewGitStore(repo, GitOptions{Remote: remote})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	if err := g.InitSchema(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	return g
+}
+
+func cloneVault(t *testing.T, remote string) *GitStore {
+	t.Helper()
+	repo := filepath.Join(t.TempDir(), "clone")
+	g, err := CloneGitVault(remote, repo, GitOptions{Remote: remote})
+	if err != nil {
+		t.Fatalf("clone: %v", err)
+	}
+	if err := g.InitSchema(); err != nil {
+		t.Fatalf("init clone: %v", err)
+	}
+	return g
+}
+
+func TestGitStoreSyncRoundTrip(t *testing.T) {
+	remote := newBareRemote(t)
+	g1 := newSeededStore(t, remote)
+	iv := make([]byte, 12)
+	if err := g1.SetSecret("KEY", []byte("ct"), iv, nil); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	g2 := cloneVault(t, remote)
+	if err := g2.Sync(); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	sec, err := g2.GetSecret("KEY")
+	if err != nil || sec == nil {
+		t.Fatalf("get after sync: %v %v", sec, err)
+	}
+}
+
+func TestGitStoreConflictFailsClosed(t *testing.T) {
+	remote := newBareRemote(t)
+	g1 := newSeededStore(t, remote)
+	g2 := cloneVault(t, remote)
+	iv := make([]byte, 12)
+	if err := g1.SetSecret("KEY", []byte("one"), iv, nil); err != nil {
+		t.Fatalf("set one: %v", err)
+	}
+	if err := g2.Sync(); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if err := g2.SetSecret("KEY", []byte("two"), iv, nil); err != nil {
+		t.Fatalf("set two: %v", err)
+	}
+	err := g1.SetSecret("KEY", []byte("three"), iv, nil)
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("same-key race must fail closed with ErrConflict, got %v", err)
+	}
+}
+
+func TestGitStoreDifferentKeysRebase(t *testing.T) {
+	remote := newBareRemote(t)
+	g1 := newSeededStore(t, remote)
+	g2 := cloneVault(t, remote)
+	iv := make([]byte, 12)
+	if err := g1.SetSecret("A1", []byte("x"), iv, nil); err != nil {
+		t.Fatalf("set A1: %v", err)
+	}
+	if err := g2.SetSecret("B2", []byte("y"), iv, nil); err != nil {
+		t.Fatalf("set B2 must succeed after rebase: %v", err)
+	}
+	g3 := cloneVault(t, remote)
+	if _, err := g3.GetSecret("A1"); err != nil {
+		t.Fatalf("A1 lost: %v", err)
+	}
+	if _, err := g3.GetSecret("B2"); err != nil {
+		t.Fatalf("B2 lost: %v", err)
+	}
+}
+
+func TestGitStoreDiscardLocalRecovers(t *testing.T) {
+	remote := newBareRemote(t)
+	g1 := newSeededStore(t, remote)
+	g2 := cloneVault(t, remote)
+	iv := make([]byte, 12)
+	if err := g1.SetSecret("KEY", []byte("local"), iv, nil); err != nil {
+		t.Fatalf("set local: %v", err)
+	}
+	if err := g2.SetSecret("KEY", []byte("remote"), iv, nil); err != nil {
+		t.Fatalf("set remote: %v", err)
+	}
+	err := g1.SetSecret("OTHER", []byte("z"), iv, nil)
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("expected conflict deadlock, got %v", err)
+	}
+	if err := g1.DiscardLocal(); err != nil {
+		t.Fatalf("discard: %v", err)
+	}
+	if err := g1.SetSecret("OTHER", []byte("z"), iv, nil); err != nil {
+		t.Fatalf("recovered: %v", err)
+	}
+}
+
+func TestGitStoreStaleKeyAborts(t *testing.T) {
+	remote := newBareRemote(t)
+	g1 := newSeededStore(t, remote)
+	iv := make([]byte, 12)
+	if err := g1.SetSecret("KEY", []byte("ct"), iv, nil); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	g1.SetUnlockedFingerprint(g1.FingerprintOfCurrent())
+
+	g2 := cloneVault(t, remote)
+	if err := g2.SetMeta("kdf_time", "4"); err != nil {
+		t.Fatalf("migrate params remotely: %v", err)
+	}
+
+	err := g1.SetSecret("KEY2", []byte("ct"), iv, nil)
+	if !errors.Is(err, ErrRemoteMetaChanged) {
+		t.Fatalf("stale write = %v, want ErrRemoteMetaChanged", err)
+	}
+}
+
+func TestGitStoreSyncConflictErrors(t *testing.T) {
+	remote := newBareRemote(t)
+	g1 := newSeededStore(t, remote)
+	g2 := cloneVault(t, remote)
+	iv := make([]byte, 12)
+	_ = g1.SetSecret("KEY", []byte("a"), iv, nil)
+	_ = g2.SetSecret("KEY", []byte("b"), iv, nil)
+	if err := g1.Sync(); !errors.Is(err, ErrConflict) {
+		t.Fatalf("sync on conflicted clone = %v, want ErrConflict", err)
+	}
+}
+
+func TestGitStoreSyncNoRemote(t *testing.T) {
+	g, _ := newGitStore(t)
+	if err := g.Sync(); !errors.Is(err, ErrNoRemote) {
+		t.Fatalf("local-only sync = %v, want ErrNoRemote", err)
+	}
+}
+
+func TestGitStoreGetHistory(t *testing.T) {
+	g, _ := newGitStore(t)
+	iv := make([]byte, 12)
+	_ = g.SetSecret("KEY", []byte("v1"), iv, nil)
+	_ = g.SetSecret("KEY", []byte("v2"), iv, nil)
+	_ = g.SetSecret("KEY", []byte("v3"), iv, nil)
+	h, err := g.GetHistory("KEY")
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	if len(h) != 2 {
+		t.Fatalf("entries = %d, want 2 (HEAD excluded)", len(h))
+	}
+	if h[0].Version != 2 || h[1].Version != 1 {
+		t.Fatalf("versions = %d,%d want 2,1 (DESC, oldest-based)", h[0].Version, h[1].Version)
+	}
+	if !bytes.Equal(h[1].EncryptedValue, []byte("v1")) {
+		t.Fatal("oldest entry must carry v1 ciphertext")
+	}
+	if h[0].Author == "" {
+		t.Fatal("author populated")
+	}
+	if h[0].ID != 0 {
+		t.Fatal("ID zero for git")
+	}
+}
+
+func TestGitStoreOfflineRead(t *testing.T) {
+	remote := newBareRemote(t)
+	g := newSeededStore(t, remote)
+	iv := make([]byte, 12)
+	_ = g.SetSecret("KEY", []byte("ct"), iv, nil)
+	if _, err := NewGitRunner(g.repoDir).Run("config", "remote.origin.url", "/nonexistent/remote.git"); err != nil {
+		t.Fatal(err)
+	}
+	sec, err := g.GetSecret("KEY")
+	if err != nil || sec == nil {
+		t.Fatalf("offline read must work: %v %v", sec, err)
+	}
+}
+
+func TestGitStoreDates(t *testing.T) {
+	g, _ := newGitStore(t)
+	iv := make([]byte, 12)
+	_ = g.SetSecret("KEY", []byte("ct"), iv, nil)
+	metas, err := g.ListSecrets()
+	if err != nil || len(metas) != 1 {
+		t.Fatalf("list: %v %v", metas, err)
+	}
+	if metas[0].CreatedAt.IsZero() || metas[0].UpdatedAt.IsZero() {
+		t.Fatalf("dates must be populated: %+v", metas[0])
+	}
+	sec, _ := g.GetSecret("KEY")
+	if sec.CreatedAt.IsZero() {
+		t.Fatal("GetSecret dates populated")
+	}
+}
+
+func TestCloneEmptyRemoteOnboarding(t *testing.T) {
+	remote := newBareRemote(t)
+	repo := filepath.Join(t.TempDir(), "repo")
+	g, err := CloneGitVault(remote, repo, GitOptions{Remote: remote})
+	if err != nil {
+		t.Fatalf("clone empty: %v", err)
+	}
+	if err := g.InitSchema(); err != nil {
+		t.Fatalf("onboarding init must create vault: %v", err)
+	}
+	if g2 := cloneVault(t, remote); g2 == nil {
+		t.Fatal("second machine sees vault")
 	}
 }
 
