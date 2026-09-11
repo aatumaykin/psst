@@ -26,6 +26,10 @@ func NewAESGCM() *AESGCM {
 }
 
 func (a *AESGCM) Encrypt(plaintext []byte, key []byte) ([]byte, []byte, error) {
+	return a.EncryptWithAAD(plaintext, key, nil)
+}
+
+func (a *AESGCM) EncryptWithAAD(plaintext []byte, key []byte, aad []byte) ([]byte, []byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create cipher: %w", err)
@@ -41,11 +45,15 @@ func (a *AESGCM) Encrypt(plaintext []byte, key []byte) ([]byte, []byte, error) {
 		return nil, nil, fmt.Errorf("generate IV: %w", err)
 	}
 
-	ciphertext := gcm.Seal(nil, iv, plaintext, nil)
+	ciphertext := gcm.Seal(nil, iv, plaintext, aad)
 	return ciphertext, iv, nil
 }
 
 func (a *AESGCM) Decrypt(ciphertext []byte, iv []byte, key []byte) ([]byte, error) {
+	return a.DecryptWithAAD(ciphertext, iv, key, nil)
+}
+
+func (a *AESGCM) DecryptWithAAD(ciphertext []byte, iv []byte, key []byte, aad []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, fmt.Errorf("create cipher: %w", err)
@@ -56,12 +64,16 @@ func (a *AESGCM) Decrypt(ciphertext []byte, iv []byte, key []byte) ([]byte, erro
 		return nil, fmt.Errorf("create GCM: %w", err)
 	}
 
-	plaintext, err := gcm.Open(nil, iv, ciphertext, nil)
+	plaintext, err := gcm.Open(nil, iv, ciphertext, aad)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt: %w", err)
 	}
 
 	return plaintext, nil
+}
+
+func (a *AESGCM) DeriveKeyFromPassword(password string, salt []byte, params KDFParams) ([]byte, error) {
+	return argon2.IDKey([]byte(password), salt, params.Time, params.Memory, params.Threads, aesKeySize), nil
 }
 
 func (a *AESGCM) KeyToBuffer(key string) ([]byte, error) {

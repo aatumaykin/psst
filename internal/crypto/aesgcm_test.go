@@ -1,6 +1,8 @@
 package crypto
 
 import (
+	"bytes"
+	"crypto/rand"
 	"encoding/base64"
 	"testing"
 )
@@ -192,5 +194,76 @@ func TestKeyToBufferV2WithSalt_Base64Passthrough(t *testing.T) {
 	}
 	if result[0] != 99 {
 		t.Fatalf("first byte = %d, want 99", result[0])
+	}
+}
+
+func TestDeriveKeyFromPasswordNoPassthrough(t *testing.T) {
+	a := NewAESGCM()
+	salt := []byte("0123456789abcdef")
+
+	key44 := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	k1, err := a.DeriveKeyFromPassword(key44, salt, DefaultKDFParams())
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	decoded, _ := base64.StdEncoding.DecodeString(key44)
+	if bytes.Equal(k1, decoded) {
+		t.Fatal("base64-shaped password must not bypass Argon2")
+	}
+	if len(k1) != 32 {
+		t.Fatalf("key length = %d, want 32", len(k1))
+	}
+
+	k2, _ := a.DeriveKeyFromPassword(key44, salt, DefaultKDFParams())
+	if !bytes.Equal(k1, k2) {
+		t.Fatal("derivation must be deterministic")
+	}
+	k3, _ := a.DeriveKeyFromPassword(key44, []byte("other-salt-16byt"), DefaultKDFParams())
+	if bytes.Equal(k1, k3) {
+		t.Fatal("different salt must yield different key")
+	}
+}
+
+func TestDeriveKeyFromPasswordMatchesV2WithSalt(t *testing.T) {
+	a := NewAESGCM()
+	salt := []byte("0123456789abcdef")
+	password := "test-password"
+	legacy, err := a.KeyToBufferV2WithSalt(password, salt)
+	if err != nil {
+		t.Fatalf("legacy derive: %v", err)
+	}
+	typed, err := a.DeriveKeyFromPassword(password, salt, DefaultKDFParams())
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	if !bytes.Equal(legacy, typed) {
+		t.Fatal("DefaultKDFParams must equal compiled constants")
+	}
+}
+
+func TestEncryptWithAAD(t *testing.T) {
+	a := NewAESGCM()
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatal(err)
+	}
+	aad := []byte("psst:v1:argon2id:c2FsdA==")
+
+	ct, iv, err := a.EncryptWithAAD([]byte("secret123"), key, aad)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	pt, err := a.DecryptWithAAD(ct, iv, key, aad)
+	if err != nil {
+		t.Fatalf("decrypt: %v", err)
+	}
+	if string(pt) != "secret123" {
+		t.Fatalf("plaintext = %q", pt)
+	}
+	if _, err = a.DecryptWithAAD(ct, iv, key, []byte("psst:v1:argon2id:other")); err == nil {
+		t.Fatal("wrong AAD must fail authentication")
+	}
+	if _, err = a.DecryptWithAAD(ct, iv, key, nil); err == nil {
+		t.Fatal("nil AAD must fail against AAD-bound ciphertext")
 	}
 }
