@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aatumaykin/psst/internal/crypto"
+	"github.com/aatumaykin/psst/internal/kdf"
 )
 
 var (
@@ -86,6 +86,26 @@ func (g *GitStore) FingerprintOfCurrent() string {
 	return g.meta.Fingerprint()
 }
 
+func (g *GitStore) ensureIdentityLocked() error {
+	host, _ := os.Hostname()
+	if _, err := g.git.Run("config", "user.name", "psst/"+host); err != nil {
+		return fmt.Errorf("git config user.name: %w", err)
+	}
+	if _, err := g.git.Run("config", "user.email", "psst@"+host); err != nil {
+		return fmt.Errorf("git config user.email: %w", err)
+	}
+	return nil
+}
+
+func (g *GitStore) ensureIdentity() error {
+	lock, err := LockRepo(g.repoDir)
+	if err != nil {
+		return err
+	}
+	defer lock.Unlock()
+	return g.ensureIdentityLocked()
+}
+
 func (g *GitStore) InitSchema() error {
 	if g.metaErr != nil {
 		return fmt.Errorf("vault metadata missing or invalid; refusing to regenerate (salt would invalidate all secrets): %w", g.metaErr)
@@ -115,6 +135,9 @@ func (g *GitStore) InitSchema() error {
 				}
 			}
 		}
+		if err := g.ensureIdentity(); err != nil {
+			return err
+		}
 		return nil
 	}
 	if gitErr == nil && g.hasCommits() {
@@ -141,19 +164,15 @@ func (g *GitStore) InitSchema() error {
 			}
 		}
 	}
-	host, _ := os.Hostname()
-	if _, err := g.git.Run("config", "user.name", "psst/"+host); err != nil {
-		return fmt.Errorf("git config user.name: %w", err)
-	}
-	if _, err := g.git.Run("config", "user.email", "psst@"+host); err != nil {
-		return fmt.Errorf("git config user.email: %w", err)
+	if err := g.ensureIdentityLocked(); err != nil {
+		return err
 	}
 	salt := make([]byte, 16)
 	if _, err := rand.Read(salt); err != nil {
 		return fmt.Errorf("generate salt: %w", err)
 	}
 	g.mu.Lock()
-	g.meta = NewVaultMeta(base64.StdEncoding.EncodeToString(salt), crypto.DefaultKDFParams())
+	g.meta = NewVaultMeta(base64.StdEncoding.EncodeToString(salt), kdf.Default())
 	g.mu.Unlock()
 	metaPath := filepath.Join(g.repoDir, "psst.yaml")
 	if err := os.WriteFile(metaPath, g.meta.Encode(), 0o600); err != nil {
@@ -421,10 +440,18 @@ func (g *GitStore) pushAll() error {
 }
 
 func (g *GitStore) SyncPullRead() (bool, error) {
-	if !g.hasUpstream() {
+	g.mu.Lock()
+	inTx := g.txDepth > 0
+	g.mu.Unlock()
+	if inTx || !g.hasUpstream() {
 		return false, nil
 	}
-	_, err := g.git.Run("pull", "--ff-only")
+	lock, err := LockRepoWait(g.repoDir, 3*time.Second)
+	if err != nil {
+		return false, nil
+	}
+	defer lock.Unlock()
+	_, err = g.git.Run("pull", "--ff-only")
 	if err == nil {
 		if rerr := g.reloadMetaAndCheck(); rerr != nil {
 			return false, rerr
@@ -555,15 +582,18 @@ func (g *GitStore) commit(msg string) error {
 		return nil
 	}
 	_, err := g.git.Run("commit", "-m", msg)
-	g.mu.Lock()
-	g.dirty = false
-	g.mu.Unlock()
 	if err != nil {
 		if strings.Contains(err.Error(), "nothing to commit") {
+			g.mu.Lock()
+			g.dirty = false
+			g.mu.Unlock()
 			return nil
 		}
 		return fmt.Errorf("git commit: %w", err)
 	}
+	g.mu.Lock()
+	g.dirty = false
+	g.mu.Unlock()
 	return nil
 }
 
@@ -912,7 +942,11 @@ func (g *GitStore) SetMeta(key, value string) error {
 		}
 		return fmt.Errorf("vault metadata missing or invalid")
 	}
-	n, err := strconv.ParseUint(value, 10, 32)
+	bits := 32
+	if key == "kdf_threads" {
+		bits = 8
+	}
+	n, err := strconv.ParseUint(value, 10, bits)
 	if err != nil {
 		g.mu.Unlock()
 		return fmt.Errorf("invalid %s value %q: %w", key, value, err)

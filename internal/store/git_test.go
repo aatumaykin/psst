@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/aatumaykin/psst/internal/crypto"
+	"github.com/aatumaykin/psst/internal/kdf"
 )
 
 func newGitStore(t *testing.T) (*GitStore, string) {
@@ -449,4 +449,4 @@ func countNonEmptyLines(s string) int {
 	return n
 }
 
-var _ = crypto.DefaultKDFParams
+var _ = kdf.Default

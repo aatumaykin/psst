@@ -91,7 +91,16 @@ func TestRemoteSchemePolicy(t *testing.T) {
 	if err := ValidateRemoteScheme("https://host/vault.git", false); err != nil {
 		t.Fatalf("https: %v", err)
 	}
-	if err := ValidateRemoteScheme("/path/to/vault.git", false); err != nil {
+	if err := ValidateRemoteScheme(t.TempDir(), false); err != nil {
 		t.Fatalf("local path: %v", err)
+	}
+	if err := ValidateRemoteScheme("/nonexistent/vault.git", false); err == nil {
+		t.Fatal("nonexistent path must be rejected")
+	}
+	if err := ValidateRemoteScheme("ext::sh -c id", false); err == nil {
+		t.Fatal("ext:: must be rejected")
+	}
+	if err := ValidateRemoteScheme("ftp://host/vault.git", false); err == nil {
+		t.Fatal("unknown scheme must be rejected")
 	}
 }

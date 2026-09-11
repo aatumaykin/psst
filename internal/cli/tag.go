@@ -96,6 +96,9 @@ var untagCmd = &cobra.Command{
 				if len(sec.Tags) == 1 {
 					tag = sec.Tags[0]
 				}
+				if tag == "" {
+					exitWithError(fmt.Sprintf("secret %s has no tag", name))
+				}
 			}
 			if tagErr := v.RetagSecret(name, nil); tagErr != nil {
 				exitWithError(tagErr.Error())

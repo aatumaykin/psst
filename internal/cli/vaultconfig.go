@@ -142,12 +142,20 @@ func ValidateRemoteScheme(remote string, allowInsecure bool) error {
 		return nil
 	}
 	switch {
+	case strings.HasPrefix(remote, "ssh://"), strings.HasPrefix(remote, "https://"), strings.HasPrefix(remote, "git@"):
+		return nil
+	case strings.HasPrefix(remote, "http://"):
+		if allowInsecure {
+			return nil
+		}
+		return errors.New("http:// remote requires --allow-insecure-remote")
 	case strings.HasPrefix(remote, "git://"):
 		return errors.New("git:// remote is not allowed (plaintext transport)")
-	case strings.HasPrefix(remote, "http://") && !allowInsecure:
-		return errors.New("http:// remote requires --allow-insecure-remote")
 	}
-	return nil
+	if statExists(remote) {
+		return nil
+	}
+	return fmt.Errorf("unsupported remote %q: allowed are ssh://, https://, git@host:path, http:// (with --allow-insecure-remote) and existing filesystem paths", remote)
 }
 
 func OpenVaultStore(envDir, storage, remote string, allowInsecure bool) (store.SecretStore, *store.GitStore, error) {

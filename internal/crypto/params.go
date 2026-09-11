@@ -1,11 +1,9 @@
 package crypto
 
-type KDFParams struct {
-	Time    uint32
-	Memory  uint32
-	Threads uint8
-}
+import "github.com/aatumaykin/psst/internal/kdf"
+
+type KDFParams = kdf.Params
 
 func DefaultKDFParams() KDFParams {
-	return KDFParams{Time: argon2Iterations, Memory: argon2Memory, Threads: argon2Threads}
+	return kdf.Default()
 }

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aatumaykin/psst/internal/crypto"
+	"github.com/aatumaykin/psst/internal/kdf"
 )
 
 func validMetaYAML() string {
@@ -23,7 +23,7 @@ func TestParseVaultMetaRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if m.Params != crypto.DefaultKDFParams() {
+	if m.Params != kdf.Default() {
 		t.Fatalf("params = %+v", m.Params)
 	}
 	again, err := ParseVaultMeta(m.Encode())
@@ -64,15 +64,15 @@ func TestCheckPinned(t *testing.T) {
 	if err := CheckPinned(meta, same); err != nil {
 		t.Fatalf("same pin: %v", err)
 	}
-	stronger := &Pin{SaltB64: meta.SaltB64, Params: crypto.KDFParams{Time: 2, Memory: 65536, Threads: 4}}
+	stronger := &Pin{SaltB64: meta.SaltB64, Params: kdf.Params{Time: 2, Memory: 65536, Threads: 4}}
 	if err := CheckPinned(meta, stronger); err != nil {
 		t.Fatalf("strengthening must be accepted: %v", err)
 	}
-	weaker := &Pin{SaltB64: meta.SaltB64, Params: crypto.KDFParams{Time: 4, Memory: 65536, Threads: 4}}
+	weaker := &Pin{SaltB64: meta.SaltB64, Params: kdf.Params{Time: 4, Memory: 65536, Threads: 4}}
 	if err := CheckPinned(meta, weaker); err == nil {
 		t.Fatal("weakening must be rejected")
 	}
-	mixed := &Pin{SaltB64: meta.SaltB64, Params: crypto.KDFParams{Time: 5, Memory: 32768, Threads: 4}}
+	mixed := &Pin{SaltB64: meta.SaltB64, Params: kdf.Params{Time: 5, Memory: 32768, Threads: 4}}
 	if err := CheckPinned(meta, mixed); err == nil {
 		t.Fatal("mixed change must be rejected")
 	}

@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/aatumaykin/psst/internal/crypto"
+	"github.com/aatumaykin/psst/internal/kdf"
 )
 
 var (
@@ -22,17 +22,17 @@ var (
 type VaultMeta struct {
 	Version int
 	KDFAlgo string
-	Params  crypto.KDFParams
+	Params  kdf.Params
 	SaltB64 string
 	Cipher  string
 }
 
 type Pin struct {
 	SaltB64 string
-	Params  crypto.KDFParams
+	Params  kdf.Params
 }
 
-func NewVaultMeta(saltB64 string, params crypto.KDFParams) *VaultMeta {
+func NewVaultMeta(saltB64 string, params kdf.Params) *VaultMeta {
 	return &VaultMeta{Version: 1, KDFAlgo: "argon2id", Params: params, SaltB64: saltB64, Cipher: "aes-256-gcm"}
 }
 
