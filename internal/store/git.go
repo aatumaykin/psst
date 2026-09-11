@@ -324,8 +324,18 @@ func (g *GitStore) checkIncomingChanges(oldHead string) error {
 		return nil
 	}
 	g.mu.Lock()
-	written := g.written
+	written := make(map[string]bool, len(g.written))
+	for p := range g.written {
+		written[p] = true
+	}
 	g.mu.Unlock()
+	if out, err := g.git.Run("show", "--name-only", "--format=", oldHead); err == nil {
+		for _, line := range strings.Split(out, "\n") {
+			if p := strings.TrimSpace(line); strings.HasPrefix(p, "secrets/") {
+				written[p] = true
+			}
+		}
+	}
 	if len(written) == 0 {
 		return nil
 	}

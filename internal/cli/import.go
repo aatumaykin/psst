@@ -59,17 +59,23 @@ var importCmd = &cobra.Command{
 		}
 
 		count := 0
-		for name, value := range entries {
-			if !validName.MatchString(name) {
-				if !quiet {
-					fmt.Fprintf(os.Stderr, "Skipping invalid name: %s\n", name)
+		batchErr := v.Batch(func() error {
+			for name, value := range entries {
+				if !validName.MatchString(name) {
+					if !quiet {
+						fmt.Fprintf(os.Stderr, "Skipping invalid name: %s\n", name)
+					}
+					continue
 				}
-				continue
+				if setErr := v.SetSecret(name, []byte(value), nil); setErr != nil {
+					return fmt.Errorf("Failed to set %s: %v", name, setErr)
+				}
+				count++
 			}
-			if setErr := v.SetSecret(name, []byte(value), nil); setErr != nil {
-				exitWithError(fmt.Sprintf("Failed to set %s: %v", name, setErr))
-			}
-			count++
+			return nil
+		})
+		if batchErr != nil {
+			exitWithError(batchErr.Error())
 		}
 
 		f.Success(fmt.Sprintf("Imported %d secret(s)", count))
