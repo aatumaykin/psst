@@ -18,7 +18,7 @@ The git vault needs a UI for browsing, editing, and auditing secrets across mach
 | Origin policy | Strict: every mutating request MUST carry a matching `Origin` header; absent → 403 (curl/tests add the header explicitly) |
 | UI structure | SPA: static `index.html` + `app.js` + `style.css` behind `go:embed`; zero server-side rendering of secret data |
 | Unlock model | Per-session `vault.Vault` instance over ONE shared `GitStore`; password verified by a decrypt probe when the vault is non-empty |
-| Concurrency | One server-level mutex serializes every vault/store operation (phase-1 review: flock protects between processes, not between goroutines) |
+| Concurrency | One server-level mutex serializes every vault/store operation (`Vault` is not goroutine-safe; GitStore's multi-step git sequences assume one logical caller — phase-1 review) |
 | Dependencies | None. `net/http` (stdlib, Go 1.22+ mux patterns), `go:embed`, `crypto/subtle`, `crypto/sha256`, vanilla JS |
 
 ## 1. Process model and CLI
@@ -38,7 +38,7 @@ psst serve [--listen 127.0.0.1:7788] [--token <tok>] [--timeout 30m]
   ```
 
   With `--token` supplied by the user, the token is not echoed (the user already has it); only the URL line prints.
-- Token: `--token <tok>` value, or 32 bytes from `crypto/rand` encoded as base64url (43 chars). Only the SHA-256 digest is retained in memory.
+- Token: `--token <tok>` value, the `PSST_SERVE_TOKEN` env var, or 32 bytes from `crypto/rand` encoded as base64url (43 chars). Precedence: flag > env > generated. Only the SHA-256 digest is retained in memory. A token passed via `--token` is visible in `/proc/<pid>/cmdline` to other local users on multi-user hosts — the exact adversary the mandatory token defends against; the README documents this and recommends `PSST_SERVE_TOKEN` or the generated token instead.
 - `--listen`: parsed with `net.SplitHostPort`; default `127.0.0.1:7788`. If the host part is not a loopback address (`127.0.0.1`, `localhost`, `::1`) → explicit stderr warning: `warning: listening on a non-loopback interface; expose only via SSH tunnel (ssh -L 7788:127.0.0.1:7788)`. An empty host (`:7788`) means all interfaces → same warning.
 - `--timeout`: unlock inactivity timeout; default `30m` (per §2). Minimum accepted value `1m`; smaller values are rejected at startup.
 - Graceful shutdown: SIGINT/SIGTERM → `http.Server.Shutdown` with a 5s context, then every session vault is closed (keys zeroed) and the session map cleared.
@@ -66,12 +66,12 @@ psst serve [--listen 127.0.0.1:7788] [--token <tok>] [--timeout 30m]
 
 ### 2.2 Barrier 2: vault password unlock
 
-- `POST /api/unlock` `{"password": "..."}` (session required). Under the operation mutex:
-  1. Read KDF metadata from the shared GitStore (`kdf_*`, `vault_aad` via `GetMeta`).
+- `POST /api/unlock` `{"password": "..."}` (session required). An empty password → `400` (master spec: empty password is rejected at init and unlock). Under the operation mutex:
+  1. **The metadata snapshot is store-global.** The shared GitStore caches `psst.yaml` and carries a single unlocked-fingerprint slot; all live sessions must derive from the same snapshot (the recovery protocol in 3.2 maintains this invariant). A new unlock reads the current cached `kdf_*`/`vault_aad` through `GetMeta`.
   2. Build a per-session key provider that returns exactly this password (a fixed-value `keyring.KeyProvider` implementation living in `internal/server`; `vault.Unlock()` takes it through the existing `GetRawKey` path — the vault package is not modified for this).
-  3. `vault.New(enc, provider, sharedGitStore)` + `Unlock()` → Argon2id key in memory, AAD bound, fingerprint pinned on the store (existing phase-1 logic).
+  3. `vault.New(enc, provider, sharedGitStore)` + `Unlock()` → Argon2id key in memory, AAD bound, fingerprint recorded on the store (existing phase-1 logic).
   4. **Verification (decrypt probe).** Argon2id never fails on a wrong password — an unverified key would let a typo'd session encrypt under the wrong key and push undecryptable ciphertext. When the vault has ≥1 secret: pick the first name from `ListSecrets` and `GetSecret` it; decryption failure → close the vault (key zeroed) and return `401 {"error": "wrong password or undecryptable secret <NAME>"}`. When the vault is empty: the key is accepted unverified (`verified: false` in the response; UI shows a notice). This mirrors CLI behavior for empty vaults and is documented as the residual risk.
-- Unlock state per session: the `*vault.Vault` + `expiresAt`. **Inactivity timeout 30m, sliding**: every request from the session refreshes `expiresAt = now + timeout`. A background sweeper (1 tick/min) closes expired unlocks (keys zeroed) and deletes expired sessions.
+- Unlock state per session: the `*vault.Vault` + `expiresAt`. **Inactivity timeout 30m, sliding**: every request from the session EXCEPT `GET /api/session` refreshes `expiresAt = now + timeout` (a polling countdown tab must not keep the key alive forever; the UI counts down locally from `unlockExpiresAt` and re-syncs only on real actions). A background sweeper (1 tick/min) closes expired unlocks (keys zeroed) and deletes expired sessions.
 - `POST /api/logout`: close the session vault (key zeroed), delete the session, expire the cookie. The token barrier and the unlock die together.
 - After unlock expiry the session itself stays valid (token barrier) — writes/reveal return `403 {"error": "vault is locked"}` until re-unlock; the UI re-shows the unlock form.
 
@@ -83,27 +83,34 @@ psst serve [--listen 127.0.0.1:7788] [--token <tok>] [--timeout 30m]
 4. **Origin check on mutations** (POST/PUT/PATCH/DELETE): `Origin` header is REQUIRED and must be exactly `http://127.0.0.1:<port>`, `http://localhost:<port>`, or `http://[::1]:<port>` (the same hosts the Host check permits). Absent → `403`. Mismatched → `403`. (Maintainer decision: strict; non-browser clients set the header explicitly.)
 5. **Unlock check** — mutations and `/value` additionally require a live unlock → else `403 {"error": "vault is locked"}`.
 
-Every `/api/*` response carries `Cache-Control: no-store`. Static responses carry `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-cache`.
+Every `/api/*` response carries `Cache-Control: no-store`. Static responses carry `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-cache`.
 
 ## 3. Concurrency and store access
 
 - The `Server` holds one `sync.Mutex` (`opMu`). **Every** handler section that touches the shared GitStore or a session vault holds it — reads, writes, unlock (Argon2id ~0.5s under the lock: acceptable, requests serialize), sweep-driven closes.
-- Rationale (phase-1 review finding): the repo `flock` serializes *processes*, not goroutines. GitStore's in-memory state (`txDepth`, `dirty`, `written`, `meta`) is mutex-protected per field, but two interleaved git command sequences from the same process could stage/commit each other's files. The server is long-lived, so it serializes itself.
+- Rationale (phase-1 review finding): `vault.Vault` is not goroutine-safe (plain `key`/`aad` fields, no internal locking), and GitStore's multi-step git sequences assume one logical caller — two concurrent handler goroutines could interleave `ExecTx` nesting and staging state, and would contend on the repo `flock` with wait timeouts against the server's own requests. (The `flock` does serialize same-process callers too — each `LockRepo` opens its own file descriptor — but waiting on ourselves is a failure mode, not a design.) The server is long-lived, so it serializes itself with `opMu`.
 - The session registry has its own `sync.RWMutex` (session lookup does not need `opMu`).
 - The server is just another client of the clone: a concurrent CLI process on the same machine interleaves through the repo `flock` exactly as in phase 1 (CLI write while serve holds the flock waits; vice versa).
 
 ### 3.1 Git-store error mapping
 
-| Store error | HTTP | Effect on session |
+| Store error | HTTP | Effect |
 |---|---|---|
-| `store.ErrRemoteMetaChanged` | `409 {"error": "...", "reunlock": true}` | Unlock invalidated: the session key derives from stale parameters → vault closed, key zeroed; UI drops to the unlock form |
-| `store.ErrConflict` | `409 {"error": <phase-1 message>` (re-set the value or `psst sync --discard-local`) | unchanged |
-| `store.ErrSaltChanged` / `store.ErrKDFWeakened` (pin violation) | `500 {"error": ...}` — server must be restarted against the re-pinned vault | session kept |
-| Push failure | `409 {"error": "push failed; change is in the local clone; run 'psst sync' from the CLI"}` | unchanged |
-| No remote configured | success + `{"warning": "no remote configured; change is local"}` | unchanged |
-| Diverged read (`SyncPullRead` → unpushed local commits) | success + `"warning": "local clone has unpushed changes; run psst sync"` on `GET /api/secrets` | unchanged |
+| `store.ErrRemoteMetaChanged` | `409 {"error": "vault parameters changed remotely", "reunlock": true}` | Global unlock invalidation — see 3.2; the failing session AND every other session lose their unlock (keys zeroed) |
+| `store.ErrConflict` | `409 {"error": "<phase-1 message>"}` (re-set the value or `psst sync --discard-local`) | unchanged |
+| `store.ErrPushFailed` (new sentinel, 7.3) | `409 {"error": "<store message: push failed; change is in the local clone, run 'psst sync' later>"}` | unchanged |
+| `store.ErrSaltChanged` / `store.ErrKDFWeakened` (pin violation) | `500 {"error": "<phase-1 message>"}`; all session unlocks closed | No auto-recovery — pin violation means tampering; manual rotation procedure required |
+| No remote configured (`GitStore.HasRemote() == false`, 7.3) | success + `{"warning": "no remote configured; change is local"}` | unchanged |
 
-Stale reads are never silent (§1.3 of the master spec): every warning the store prints to stderr in CLI mode is surfaced as a `warning` field on the JSON response.
+Stale reads are never silent (§1.3 of the master spec). The store's `ListSecrets`/`GetHistory` discard the divergence flag internally, so the server calls the concrete `SyncPullRead()` on the shared GitStore under `opMu` before answering `GET /api/secrets` and `GET .../history`, and copies a `true` flag into the response's `warning` field (`"local clone has unpushed changes; run psst sync"`). `GET .../value` keeps the store's existing stderr print (visible in the server log) — its schema deliberately has no `warning` field.
+
+### 3.2 Metadata epoch — global unlock invalidation
+
+The unlocked-fingerprint slot is store-global by design (one clone, one key epoch; a per-session slot cannot be expressed through the phase-1 `SecretStore` contract). The server therefore enforces centrally, under `opMu`:
+
+- **On `store.ErrRemoteMetaChanged` from ANY operation** (read or write): close EVERY session vault — a session still holding a key derived from old parameters must never encrypt through a fingerprint slot another unlock refreshed — then `SetUnlockedFingerprint("")` and refresh the metadata cache by calling `SyncPullRead()` (with the slot empty, `reloadMetaAndCheck` accepts the incoming parameters and updates the cache; KDF strengthening also updates the local pin through the existing `SavePins` hook). The failed request returns the 3.1 `409` with `reunlock: true`. Afterwards reads work again and new unlocks derive from the fresh parameters — **no server restart needed**.
+- **On `store.ErrSaltChanged` / `store.ErrKDFWeakened`**: close all session vaults, return `500`; recovery is the manual rotation procedure.
+- The same close-all applies on graceful shutdown.
 
 ## 4. REST API
 
@@ -126,10 +133,10 @@ All requests/responses are JSON (`Content-Type: application/json; charset=utf-8`
 
 Semantics:
 
-- `POST /api/secrets/{name}` — create or update. Fields are optional and independently meaningful:
+- `POST /api/secrets/{name}` — create or update. Fields are optional and independently meaningful; the server maps JSON `tag: ""` to an empty/nil tags slice (GitStore rejects a one-element slice containing `""` as `invalid tag ""`):
   - `value` present and non-empty + `tag` absent → `SetSecret(name, value, <current tags>)` (keep the existing tag; looked up via `ListSecrets`).
-  - `value` present and non-empty + `tag` present (may be `""` = untag) → `SetSecret(name, value, [tag])`.
-  - `value` absent/empty + `tag` present → `RetagSecret(name, [tag])` — tag move **without knowing the value** (ciphertext is relocated; this is the phase-1 `git mv` path).
+  - `value` present and non-empty + `tag` present (may be `""` = untag) → `SetSecret(name, value, tags)` with the mapped slice.
+  - `value` absent/empty + `tag` present → `RetagSecret(name, tags)` with the mapped slice — tag move **without knowing the value** (ciphertext is relocated; this is the phase-1 `git mv` path).
   - both absent → `400 {"error": "nothing to set"}`.
   - Editing a secret never requires revealing it: the UI value field is empty by default ("leave empty to keep the current value").
 - `DELETE /api/secrets/{name}` — `404` if the secret does not exist. Unlock required: every state change sits behind both barriers (an attacker holding only the token must not be able to wipe secrets).
@@ -165,7 +172,8 @@ Behavior: locked sessions see names/tags/dates/authors only (list + history full
 
 1. `store.SecretMeta` and `vault.SecretMeta` gain `UpdatedBy string` — git: author of the latest commit touching the file (folded into the existing `entryTimes` git-log call); SQLite: empty string. Required because §2 puts "commit author as changed-by machine" on the **list** screen, and `ListSecrets` currently returns no author. No `SecretStore` interface signature changes; CLI output is untouched (author remains visible in `psst history`; the CLI list does not print `UpdatedBy`).
 2. No changes to `vault.Vault` (unlock-through-provider reuses `GetRawKey`; per-session close reuses `Vault.Close`, which zeroes the key and calls the no-op `GitStore.Close`).
-3. No new dependencies.
+3. Additive `internal/store/git.go` changes (no interface changes, CLI error text unchanged): export `func (g *GitStore) HasRemote() bool` (wraps the existing unexported `hasRemote`) and add `var ErrPushFailed` wrapped into both push error paths (`fmt.Errorf("...: %w", ...)`), so the server can classify push failures with `errors.Is` instead of string matching (the store currently swallows `ErrNoRemote` inside `mutate`/`ExecTx`).
+4. No new dependencies.
 
 ## 8. Documentation updates (ship in the same PR)
 
@@ -180,15 +188,18 @@ Standard `testing` + `net/http/httptest`, real temporary git repositories (bare 
 - Token: login success/failure (401, generic body); cookie flags (HttpOnly, SameSite=Strict, Path=/, Max-Age).
 - Host middleware: foreign Host → 403; `127.0.0.1:port`, `localhost:port` pass; wrong port → 403.
 - Origin: mutation without Origin → 403; wrong Origin → 403; correct Origin passes; GET without Origin passes.
+- Static: CSP/nosniff/no-referrer headers; assets served from the embedded FS; traversal/encoded paths (`/../../etc/passwd`, `/%2e%2e/`) resolve inside the embedded FS only → 404, never the host filesystem.
 - Locked mode: `GET /api/secrets` and `/history` work without unlock; response bytes must not contain the plaintext of any seeded secret.
-- Unlock: wrong password (vault with a seeded secret) → 401 and no unlock; correct password → reveal works; empty vault → `verified: false`.
-- Full API cycle against a real repo with a bare remote: create → list (names, tags, dates, updatedBy) → edit value → retag via tag-only POST → history grows → rollback → value round-trips → delete → 404.
+- Unlock: wrong password (vault with a seeded secret) → 401 and no unlock; empty password → 400; correct password → reveal works; empty vault → `verified: false`.
+- Full API cycle against a real repo with a bare remote: create → list (names, tags, dates, updatedBy) → edit value → retag via tag-only POST → **untag via `{"tag": ""}`** → history grows → rollback → value round-trips → delete → 404.
 - Reveal gating: locked → 403; unlocked → 200 with `Cache-Control: no-store`; value absent from every other endpoint's payload.
-- Timeout: unlock expiry (injected clock) → reveal 403, session still authenticated; session expiry (24h) → 401.
+- Timeout: unlock expiry (injected clock) → reveal 403, session still authenticated; `GET /api/session` polling does NOT refresh the unlock; session expiry (24h) → 401.
 - Logout: subsequent reveal 403; cookie expired.
-- `ErrRemoteMetaChanged`: KDF params strengthened behind the server's back via a second store instance → next write → 409 with `reunlock`, unlock dropped.
+- `ErrRemoteMetaChanged` recovery (3.2): KDF params strengthened behind the server's back via a second store instance → next operation → 409 with `reunlock`, **every** session's unlock dropped; a previously-unlocked stale session cannot push old-key ciphertext afterwards; re-unlock succeeds with the fresh parameters without a server restart.
+- `ErrSaltChanged`: salt tampering via a second store instance → 500, all unlocks closed.
+- Push failure (non-fast-forward remote) → 409 with the store message; write to a repo without a remote → 200 + `warning`.
+- Request body limits: oversized login/rollback (> 64 KiB) and secret value (> 1 MiB) → 413.
 - SQLite vault → `serve` startup error mentions `psst migrate storage`.
-- Static: CSP/nosniff/no-referrer headers; assets served from the embedded FS.
 - Concurrency smoke: parallel list + write + reveal requests under `-race`.
 
 ## 10. Non-goals
