@@ -167,6 +167,23 @@ psst sync
 Migration from SQLite: `psst migrate kdf` first if the vault is on the legacy
 KDF, then `psst migrate storage --to git --remote <url>`.
 
+### Web UI
+
+```bash
+psst serve [--listen 127.0.0.1:7788] [--token <tok>] [--timeout 30m]
+# psst server:  http://127.0.0.1:7788
+# auth token:   <generated>   (shown once)
+```
+
+Requires git storage (`psst migrate storage --to git`). The token is generated at
+startup and printed once; pass one via `--token` (visible in `ps` output on
+multi-user hosts) or `PSST_SERVE_TOKEN`. The vault password is entered in the UI
+(unlock, 30-minute inactivity timeout). Secret values are shown only through the
+explicit reveal action.
+
+Remote access: `ssh -L 7788:127.0.0.1:7788 <host>`, then open
+`http://127.0.0.1:7788` locally.
+
 ### Global Flags
 
 All commands support:
