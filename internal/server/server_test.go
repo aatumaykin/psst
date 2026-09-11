@@ -291,6 +291,58 @@ func TestBodyLimit413(t *testing.T) {
 	}
 }
 
+func TestListLockedNoValues(t *testing.T) {
+	s, gs := newTestServer(t)
+	seedGitSecret(t, gs)
+	h := s.Handler()
+	ck := loginOK(t, h)
+	rec := do(t, h, http.MethodGet, "/api/secrets", "", ck)
+	if rec.Code != 200 {
+		t.Fatalf("list = %d %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "secret123") {
+		t.Fatal("plaintext leaked into list response")
+	}
+	if !strings.Contains(rec.Body.String(), `"name":"API_KEY"`) || !strings.Contains(rec.Body.String(), `"updatedBy"`) {
+		t.Fatalf("list payload: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"tag":"prod"`) && !strings.Contains(rec.Body.String(), `"tags":["prod"]`) {
+		t.Fatalf("tags missing: %s", rec.Body.String())
+	}
+}
+
+func TestHistoryLockedNoValues(t *testing.T) {
+	s, gs := newTestServer(t)
+	seedGitSecret(t, gs)
+	v := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, gs)
+	if err := v.Unlock(); err != nil {
+		t.Fatalf("unlock: %v", err)
+	}
+	if err := v.SetSecret("API_KEY", []byte("secret456"), []string{"prod"}); err != nil {
+		t.Fatalf("set2: %v", err)
+	}
+	h := s.Handler()
+	ck := loginOK(t, h)
+	rec := do(t, h, http.MethodGet, "/api/secrets/API_KEY/history", "", ck)
+	if rec.Code != 200 {
+		t.Fatalf("history = %d %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "secret123") || strings.Contains(rec.Body.String(), "secret456") {
+		t.Fatal("plaintext leaked into history response")
+	}
+	if !strings.Contains(rec.Body.String(), `"version"`) || !strings.Contains(rec.Body.String(), `"author"`) {
+		t.Fatalf("history payload: %s", rec.Body.String())
+	}
+	rec = do(t, h, http.MethodGet, "/api/secrets/NOPE/history", "", ck)
+	if rec.Code != 404 {
+		t.Fatalf("missing history = %d", rec.Code)
+	}
+	rec = do(t, h, http.MethodGet, "/api/secrets/bad_name/history", "", ck)
+	if rec.Code != 400 {
+		t.Fatalf("invalid name = %d", rec.Code)
+	}
+}
+
 func TestOriginMiddleware(t *testing.T) {
 	s, _ := newTestServer(t)
 	h := s.Handler()
