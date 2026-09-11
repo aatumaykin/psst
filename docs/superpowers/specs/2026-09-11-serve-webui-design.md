@@ -1,7 +1,7 @@
 # `psst serve` — Web UI (Phase 2) Design
 
 Date: 2026-09-11
-Status: draft (pending subagent review)
+Status: reviewed — round 1: 4 major / 6 minor / 2 nit, all addressed; round 2 control: 12/12 fixes verified, 1 major / 2 nit new findings, addressed (pin advancement via `InitSchema`, recovery retry, upstream-tracking caveat)
 Scope: phase 2 of the git-storage master spec (`docs/superpowers/specs/2026-09-11-git-storage-webui-render-design.md` §2). This document details §2 into a full implementation contract. Phase 1 (GitStore) is merged; the server is another *client* of the same git repository.
 
 ## Problem
@@ -100,7 +100,7 @@ Every `/api/*` response carries `Cache-Control: no-store`. Static responses carr
 | `store.ErrConflict` | `409 {"error": "<phase-1 message>"}` (re-set the value or `psst sync --discard-local`) | unchanged |
 | `store.ErrPushFailed` (new sentinel, 7.3) | `409 {"error": "<store message: push failed; change is in the local clone, run 'psst sync' later>"}` | unchanged |
 | `store.ErrSaltChanged` / `store.ErrKDFWeakened` (pin violation) | `500 {"error": "<phase-1 message>"}`; all session unlocks closed | No auto-recovery — pin violation means tampering; manual rotation procedure required |
-| No remote configured (`GitStore.HasRemote() == false`, 7.3) | success + `{"warning": "no remote configured; change is local"}` | unchanged |
+| No remote configured (`GitStore.HasRemote() == false`, 7.3) | success + `{"warning": "no remote configured; change is local"}` | unchanged. Known cosmetic gap: a repo with a remote configured but no upstream tracking also stays local without a warning (the warning keys on `remote.origin.url`; the store's push gate keys on upstream tracking) — accepted, a failed push still maps to `ErrPushFailed` |
 
 Stale reads are never silent (§1.3 of the master spec). The store's `ListSecrets`/`GetHistory` discard the divergence flag internally, so the server calls the concrete `SyncPullRead()` on the shared GitStore under `opMu` before answering `GET /api/secrets` and `GET .../history`, and copies a `true` flag into the response's `warning` field (`"local clone has unpushed changes; run psst sync"`). `GET .../value` keeps the store's existing stderr print (visible in the server log) — its schema deliberately has no `warning` field.
 
@@ -108,7 +108,7 @@ Stale reads are never silent (§1.3 of the master spec). The store's `ListSecret
 
 The unlocked-fingerprint slot is store-global by design (one clone, one key epoch; a per-session slot cannot be expressed through the phase-1 `SecretStore` contract). The server therefore enforces centrally, under `opMu`:
 
-- **On `store.ErrRemoteMetaChanged` from ANY operation** (read or write): close EVERY session vault — a session still holding a key derived from old parameters must never encrypt through a fingerprint slot another unlock refreshed — then `SetUnlockedFingerprint("")` and refresh the metadata cache by calling `SyncPullRead()` (with the slot empty, `reloadMetaAndCheck` accepts the incoming parameters and updates the cache; KDF strengthening also updates the local pin through the existing `SavePins` hook). The failed request returns the 3.1 `409` with `reunlock: true`. Afterwards reads work again and new unlocks derive from the fresh parameters — **no server restart needed**.
+- **On `store.ErrRemoteMetaChanged` from ANY operation** (read or write): close EVERY session vault — a session still holding a key derived from old parameters must never encrypt through a fingerprint slot another unlock refreshed — then `SetUnlockedFingerprint("")` and refresh the metadata snapshot: `SyncPullRead()` (with the slot empty, `reloadMetaAndCheck` accepts the incoming parameters and updates the cache) followed by `InitSchema()` on the shared store. `InitSchema` is the same path every CLI command runs: it re-checks the pin against the refreshed cache and **advances the local pin on KDF strengthening via the existing `SavePins` hook** — without this step the serve host would keep a stale pin, and a later parameter revert would pass `CheckPinned` as `equal`, silently undoing the strengthening (`reloadMetaAndCheck` itself never persists pins). If the refresh cannot complete (repo lock busy, no upstream), the `409` is still returned and the next request retries the recovery; transient staleness self-heals. The failed request returns the 3.1 `409` with `reunlock: true`. Afterwards reads work again and new unlocks derive from the fresh parameters — **no server restart needed**.
 - **On `store.ErrSaltChanged` / `store.ErrKDFWeakened`**: close all session vaults, return `500`; recovery is the manual rotation procedure.
 - The same close-all applies on graceful shutdown.
 
