@@ -47,7 +47,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("GET /api/session", s.handleSession)
 	mux.HandleFunc("POST /api/logout", s.handleLogout)
-	return mux
+	return s.recoverMW(s.logMW(s.hostMW(s.originMW(mux))))
 }
 
 func (s *Server) Close() {

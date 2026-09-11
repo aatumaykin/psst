@@ -120,3 +120,58 @@ func TestSessionEndpoints(t *testing.T) {
 		t.Fatalf("session after logout = %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestHostMiddleware(t *testing.T) {
+	s, _ := newTestServer(t)
+	h := s.Handler()
+	rec := do(t, h, http.MethodGet, "/api/session", "", "")
+	if rec.Code != 200 {
+		t.Fatalf("loopback host = %d", rec.Code)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/session", nil)
+	req.Host = "evil.example.com:7788"
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, req)
+	if rec2.Code != 403 {
+		t.Fatalf("foreign host = %d", rec2.Code)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/api/session", nil)
+	req.Host = "127.0.0.1:9999"
+	rec3 := httptest.NewRecorder()
+	h.ServeHTTP(rec3, req)
+	if rec3.Code != 403 {
+		t.Fatalf("wrong port = %d", rec3.Code)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/api/session", nil)
+	req.Host = "localhost:7788"
+	rec4 := httptest.NewRecorder()
+	h.ServeHTTP(rec4, req)
+	if rec4.Code != 200 {
+		t.Fatalf("localhost host = %d", rec4.Code)
+	}
+}
+
+func TestOriginMiddleware(t *testing.T) {
+	s, _ := newTestServer(t)
+	h := s.Handler()
+	ck := loginOK(t, h)
+	rec := do(t, h, http.MethodPost, "/api/logout", "", ck)
+	if rec.Code != 200 {
+		t.Fatalf("mutation with origin = %d", rec.Code)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"token":"x"}`))
+	req.Host = "127.0.0.1:7788"
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, req)
+	if rec2.Code != 403 {
+		t.Fatalf("mutation without origin = %d", rec2.Code)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"token":"x"}`))
+	req.Host = "127.0.0.1:7788"
+	req.Header.Set("Origin", "https://evil.example.com")
+	rec3 := httptest.NewRecorder()
+	h.ServeHTTP(rec3, req)
+	if rec3.Code != 403 {
+		t.Fatalf("foreign origin = %d", rec3.Code)
+	}
+}
