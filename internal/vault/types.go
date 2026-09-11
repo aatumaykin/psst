@@ -22,6 +22,7 @@ type SecretMeta struct {
 type SecretHistoryEntry struct {
 	Version    int
 	Tags       []string
+	Author     string
 	ArchivedAt time.Time
 }
 

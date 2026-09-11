@@ -14,7 +14,7 @@ var exportCmd = &cobra.Command{
 		f := getFormatter(jsonOut, quiet)
 		envFile, _ := cmd.Flags().GetString("env-file")
 
-		v, err := getUnlockedVault(jsonOut, quiet, global, env)
+		v, err := getUnlockedVault(cmd, jsonOut, quiet, global, env)
 		if err != nil {
 			exitWithError(err.Error())
 		}

@@ -3,9 +3,30 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strings"
+
+	"github.com/spf13/cobra"
 
 	"github.com/aatumaykin/psst/internal/runner"
 )
+
+func execStubCmd() *cobra.Command {
+	c := &cobra.Command{}
+	storage := os.Getenv("PSST_STORAGE")
+	for i, a := range os.Args {
+		if a == "--" {
+			break
+		}
+		if strings.HasPrefix(a, "--storage=") {
+			storage = strings.TrimPrefix(a, "--storage=")
+		}
+		if a == "--storage" && i+1 < len(os.Args) {
+			storage = os.Args[i+1]
+		}
+	}
+	c.Flags().String("storage", storage, "")
+	return c
+}
 
 func handleExecPatternDirect(
 	secretNames []string,
@@ -15,7 +36,7 @@ func handleExecPatternDirect(
 	tags []string,
 	noMask bool,
 ) int {
-	v, err := getUnlockedVault(jsonOut, quiet, global, env)
+	v, err := getUnlockedVault(execStubCmd(), jsonOut, quiet, global, env)
 	if err != nil {
 		exitWithError(err.Error())
 	}

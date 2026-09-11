@@ -263,21 +263,32 @@ func (s *SQLiteStore) Close() error {
 
 func (s *SQLiteStore) ExecTx(fn func() error) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	if s.currentTx != nil {
+		s.mu.Unlock()
+		return fn()
+	}
 
 	tx, err := s.db.BeginTx(context.Background(), nil)
 	if err != nil {
+		s.mu.Unlock()
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 
 	s.currentTx = tx
-	defer func() { s.currentTx = nil }()
+	s.mu.Unlock()
 
 	if fnErr := fn(); fnErr != nil {
 		_ = tx.Rollback()
+		s.mu.Lock()
+		s.currentTx = nil
+		s.mu.Unlock()
 		return fnErr
 	}
-	return tx.Commit()
+	err = tx.Commit()
+	s.mu.Lock()
+	s.currentTx = nil
+	s.mu.Unlock()
+	return err
 }
 
 func (s *SQLiteStore) GetMeta(key string) (string, error) {

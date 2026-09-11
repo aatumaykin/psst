@@ -27,6 +27,9 @@ var setCmd = &cobra.Command{
 		}
 
 		tags, _ := cmd.Flags().GetStringArray("tag")
+		if len(tags) > 1 && storageIsGit(cmd, global, env) {
+			exitWithError("git vault supports a single tag")
+		}
 		useStdin, _ := cmd.Flags().GetBool("stdin")
 
 		var value string
@@ -55,7 +58,7 @@ var setCmd = &cobra.Command{
 			exitWithError("Value cannot be empty")
 		}
 
-		v, err := getUnlockedVault(jsonOut, quiet, global, env)
+		v, err := getUnlockedVault(cmd, jsonOut, quiet, global, env)
 		if err != nil {
 			exitWithError(err.Error())
 		}

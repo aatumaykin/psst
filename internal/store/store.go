@@ -25,6 +25,7 @@ type HistoryEntry struct {
 	EncryptedValue []byte
 	IV             []byte
 	Tags           []string
+	Author         string
 	ArchivedAt     time.Time
 }
 

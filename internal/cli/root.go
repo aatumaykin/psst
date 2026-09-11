@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -58,6 +60,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolP("global", "g", false, "Use global vault")
 	rootCmd.PersistentFlags().String("env", "", "Environment name")
 	rootCmd.PersistentFlags().StringArray("tag", nil, "Filter by tag (repeatable)")
+	rootCmd.PersistentFlags().String("storage", "", "Storage backend: sqlite or git")
 }
 
 func getGlobalFlags(cmd *cobra.Command) (bool, bool, bool, string, []string) {
@@ -90,35 +93,81 @@ func createDependencies() (crypto.Encryptor, keyring.KeyProvider) {
 	return enc, kp
 }
 
-func getUnlockedVault(jsonOut, quiet, global bool, env string) (*vault.Vault, error) {
-	vaultPath, err := vault.FindVaultPath(global, env)
+func getStorageFlag(cmd *cobra.Command) string {
+	storage, _ := cmd.Flags().GetString("storage")
+	if storage == "" {
+		storage = os.Getenv("PSST_STORAGE")
+	}
+	return storage
+}
+
+func storageIsGit(cmd *cobra.Command, global bool, env string) bool {
+	envDir, err := vault.FindVaultDir(global, env)
+	if err != nil {
+		return false
+	}
+	storage, err := ResolveStorage(getStorageFlag(cmd), envDir)
+	return err == nil && storage == "git"
+}
+
+func getUnlockedVault(cmd *cobra.Command, jsonOut, quiet bool, global bool, env string) (*vault.Vault, error) {
+	envDir, err := vault.FindVaultDir(global, env)
+	if err != nil {
+		return nil, err
+	}
+
+	storage, err := ResolveStorage(getStorageFlag(cmd), envDir)
 	if err != nil {
 		return nil, err
 	}
 
 	//nolint:gosec // user-provided path is intentional for CLI tool
-	if _, statErr := os.Stat(vaultPath); os.IsNotExist(statErr) {
+	dbExists := statExists(vault.SQLitePath(envDir))
+	gitMarkerExists := statExists(filepath.Join(envDir, "repo", "psst.yaml")) ||
+		statExists(filepath.Join(envDir, "repo", ".git"))
+	if storage == "git" {
+		if !statExists(filepath.Join(envDir, "repo", ".git")) {
+			printNoVault(jsonOut, quiet)
+			//nolint:mnd // exit code for missing vault
+			os.Exit(3)
+		}
+	} else if !dbExists && !gitMarkerExists {
 		printNoVault(jsonOut, quiet)
 		//nolint:mnd // exit code for missing vault
 		os.Exit(3)
 	}
 
-	enc, kp := createDependencies()
+	enc := crypto.NewAESGCM()
 
-	s, err := store.NewSQLite(vaultPath)
+	s, _, err := OpenVaultStore(envDir, storage, "", false)
 	if err != nil {
 		return nil, fmt.Errorf("open vault: %w", err)
 	}
 
 	if schemaErr := s.InitSchema(); schemaErr != nil {
 		_ = s.Close()
+		if errors.Is(schemaErr, store.ErrSaltChanged) || errors.Is(schemaErr, store.ErrKDFWeakened) {
+			exitWithError(fmt.Sprintf("vault metadata changed since last open: %v; see rotation procedure in docs", schemaErr))
+		}
 		return nil, fmt.Errorf("init schema: %w", schemaErr)
+	}
+
+	var kp keyring.KeyProvider
+	if storage == "git" {
+		kp = keyring.NewPasswordProvider(enc, true)
+	} else {
+		kp = keyring.NewProvider(enc)
 	}
 
 	v := vault.New(enc, kp, s)
 	if unlockErr := v.Unlock(); unlockErr != nil {
 		_ = s.Close()
-		printAuthFailed(jsonOut, quiet)
+		if storage == "git" {
+			f := output.NewFormatter(jsonOut, quiet)
+			f.Error("Failed to unlock vault. Set PSST_PASSWORD or run in a terminal")
+		} else {
+			printAuthFailed(jsonOut, quiet)
+		}
 		//nolint:mnd // exit code for auth failure
 		os.Exit(5)
 	}

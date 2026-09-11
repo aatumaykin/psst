@@ -19,7 +19,7 @@ var historyCmd = &cobra.Command{
 		f := getFormatter(jsonOut, quiet)
 		name := args[0]
 
-		v, err := getUnlockedVault(jsonOut, quiet, global, env)
+		v, err := getUnlockedVault(cmd, jsonOut, quiet, global, env)
 		if err != nil {
 			exitWithError(err.Error())
 		}
@@ -47,6 +47,7 @@ func toHistoryItems(entries []vault.SecretHistoryEntry) []output.HistoryItem {
 		items[i] = output.HistoryItem{
 			Version:    e.Version,
 			Tags:       e.Tags,
+			Author:     e.Author,
 			ArchivedAt: e.ArchivedAt,
 		}
 	}

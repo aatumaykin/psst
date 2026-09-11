@@ -148,6 +148,25 @@ psst list-envs                        # List all environments
 
 Stored in `.psst/envs/<name>/vault.db` (or `~/.psst/envs/<name>/` with `--global`).
 
+### Git Storage (multi-machine)
+
+```bash
+psst init --storage git --remote git@github.com:me/psst-vault.git
+# or a local bare repo: --remote /path/to/vault.git
+echo "sk-live-abc" | psst set STRIPE_KEY --stdin
+psst sync
+```
+
+- Every command pulls before reading and rebases+pushes on writes.
+- Reads work offline; writes require the remote (or warn on local-only repos).
+- One file per secret, tags are directories (`secrets/prod/DB_PASS.enc`), a
+  single tag per secret; history is git history.
+- Same `PSST_PASSWORD` on every machine (or the interactive prompt).
+- `psst migrate storage --to git` converts an existing SQLite vault.
+
+Migration from SQLite: `psst migrate kdf` first if the vault is on the legacy
+KDF, then `psst migrate storage --to git --remote <url>`.
+
 ### Global Flags
 
 All commands support:

@@ -22,7 +22,7 @@ var scanCmd = &cobra.Command{
 		staged, _ := cmd.Flags().GetBool("staged")
 		scanPath, _ := cmd.Flags().GetString("path")
 
-		v, err := getUnlockedVault(jsonOut, quiet, global, env)
+		v, err := getUnlockedVault(cmd, jsonOut, quiet, global, env)
 		if err != nil {
 			exitWithError(err.Error())
 		}

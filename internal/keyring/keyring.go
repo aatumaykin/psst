@@ -2,11 +2,15 @@ package keyring
 
 import (
 	"os"
+
+	"github.com/aatumaykin/psst/internal/crypto"
 )
 
 type KeyDeriver interface {
 	KeyToBuffer(key string) ([]byte, error)
 	KeyToBufferV2(key string) ([]byte, error)
+	KeyToBufferV2WithSalt(key string, salt []byte) ([]byte, error)
+	DeriveKeyFromPassword(password string, salt []byte, params crypto.KDFParams) ([]byte, error)
 	GenerateKey() ([]byte, error)
 }
 

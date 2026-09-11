@@ -50,12 +50,23 @@ This is a **security-critical** project — a secrets manager. Security rules ap
 - OS keychain stores base64-encoded 32-byte key.
 - Key never written to disk outside keychain.
 
+## Git Storage
+
+- One file per secret: `secrets/[tag/]NAME.enc` = base64(IV ‖ AES-256-GCM ciphertext).
+- `psst.yaml` is untrusted input: strict validation, salt strictly immutable,
+  KDF parameters only monotonically strengthened (pins in `.psst/config.yaml`).
+- All git invocations run with `core.hooksPath=/dev/null`, `GIT_TERMINAL_PROMPT=0`,
+  `GIT_CONFIG_NOSYSTEM=1`, an empty `GIT_CONFIG_GLOBAL`, and a subcommand allowlist.
+- Git vaults derive keys strictly from the password via Argon2id — no base64
+  passthrough, no OS keychain.
+- A repo lock (`flock`) serializes all git mutations on a clone.
+
 ## What NOT To Do
 
 - **Never** add a `--verbose` flag that prints secret values.
 - **Never** cache decrypted values in package-level variables.
 - **Never** expose secrets in JSON output unless explicitly requested via `psst get`.
-- **Never** send secrets over network — psst is local-only by design.
+- **Never** send plaintext secrets over network. The git remote of a git-storage vault contains only AES-256-GCM ciphertext (AAD-bound to vault metadata); secret names are visible as file names by design. The web UI (future phase) binds to localhost with a mandatory token. Plaintext egress inventory: the child process environment (runner) is the existing channel; `psst render` (future phase) adds a 0600 file channel. `psst get` and `psst export` remain explicit operator-initiated exceptions.
 - **Never** add telemetry or crash reporting that could include secret values.
 - **Never** use `log.Printf` with secret-containing structs.
 - **Never** store vault key in plaintext file.

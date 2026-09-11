@@ -38,9 +38,13 @@ func scanEnvDir(dir string) []string {
 	var envs []string
 	for _, e := range entries {
 		if e.IsDir() {
-			dbPath := filepath.Join(dir, e.Name(), "vault.db")
-			if _, statErr := os.Stat(dbPath); statErr == nil {
-				envs = append(envs, e.Name())
+			name := e.Name()
+			dbPath := filepath.Join(dir, name, "vault.db")
+			yamlPath := filepath.Join(dir, name, "repo", "psst.yaml")
+			if _, dbErr := os.Stat(dbPath); dbErr == nil {
+				envs = append(envs, name)
+			} else if _, yamlErr := os.Stat(yamlPath); yamlErr == nil {
+				envs = append(envs, name)
 			}
 		}
 	}
