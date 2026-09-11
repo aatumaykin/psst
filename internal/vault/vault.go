@@ -32,7 +32,7 @@ func New(enc crypto.Encryptor, kp keyring.KeyProvider, s store.SecretStore) *Vau
 	return &Vault{enc: enc, kp: kp, store: s}
 }
 
-func FindVaultPath(global bool, env string) (string, error) {
+func FindVaultDir(global bool, env string) (string, error) {
 	baseDir := ".psst"
 	if global {
 		home, err := os.UserHomeDir()
@@ -46,7 +46,19 @@ func FindVaultPath(global bool, env string) (string, error) {
 		baseDir = filepath.Join(baseDir, "envs", env)
 	}
 
-	return filepath.Join(baseDir, "vault.db"), nil
+	return baseDir, nil
+}
+
+func SQLitePath(dir string) string {
+	return filepath.Join(dir, "vault.db")
+}
+
+func FindVaultPath(global bool, env string) (string, error) {
+	dir, err := FindVaultDir(global, env)
+	if err != nil {
+		return "", err
+	}
+	return SQLitePath(dir), nil
 }
 
 func InitVault(vaultPath string, _ crypto.Encryptor, kp keyring.KeyProvider, opts InitOptions) error {
