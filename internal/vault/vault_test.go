@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/aatumaykin/psst/internal/crypto"
+	"github.com/aatumaykin/psst/internal/keyring"
 	"github.com/aatumaykin/psst/internal/store"
 )
 
@@ -419,5 +420,122 @@ func TestPerVaultSalt(t *testing.T) {
 
 	if salt1 == salt2 {
 		t.Fatal("two different vaults should have different salts")
+	}
+}
+
+func newTestGitVault(t *testing.T) *Vault {
+	t.Helper()
+	repo := filepath.Join(t.TempDir(), "repo")
+	s, err := store.NewGitStore(repo, store.GitOptions{})
+	if err != nil {
+		t.Fatalf("git store: %v", err)
+	}
+	if err := s.InitSchema(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	enc := crypto.NewAESGCM()
+	kp := keyring.NewPasswordProvider(nil, false)
+	t.Setenv("PSST_PASSWORD", "test-password")
+	return New(enc, kp, s)
+}
+
+func TestVaultGitUnlockAADRoundTrip(t *testing.T) {
+	v := newTestGitVault(t)
+	defer v.Close()
+	if err := v.Unlock(); err != nil {
+		t.Fatalf("unlock: %v", err)
+	}
+	if err := v.SetSecret("KEY", []byte("secret123"), []string{"prod"}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	got, err := v.GetSecret("KEY")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if string(got.Value) != "secret123" {
+		t.Fatalf("value = %q", got.Value)
+	}
+	if len(got.Tags) != 1 || got.Tags[0] != "prod" {
+		t.Fatalf("tags = %v", got.Tags)
+	}
+	all, err := v.GetAllSecrets()
+	if err != nil || len(all) != 1 {
+		t.Fatalf("all: %v %v", all, err)
+	}
+}
+
+func TestVaultGitAADActuallyBinds(t *testing.T) {
+	v := newTestGitVault(t)
+	defer v.Close()
+	_ = v.Unlock()
+	_ = v.SetSecret("KEY", []byte("secret123"), nil)
+	salt, _ := v.store.GetMeta("kdf_salt")
+	if salt == "" {
+		t.Fatal("salt")
+	}
+	forgedKey, err := v.enc.DeriveKeyFromPassword("test-password", []byte("othersalt-16byt"), crypto.DefaultKDFParams())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := v.store.GetSecret("KEY")
+	if _, err = v.enc.DecryptWithAAD(stored.EncryptedValue, stored.IV, forgedKey, []byte("psst:v1:argon2id:"+salt)); err == nil {
+		t.Fatal("wrong key must fail via AAD+GCM")
+	}
+}
+
+func TestVaultRetagSecret(t *testing.T) {
+	v := newTestGitVault(t)
+	defer v.Close()
+	_ = v.Unlock()
+	_ = v.SetSecret("KEY", []byte("secret123"), []string{"prod"})
+	if err := v.RetagSecret("KEY", []string{"test"}); err != nil {
+		t.Fatalf("retag: %v", err)
+	}
+	got, _ := v.GetSecret("KEY")
+	if got.Tags[0] != "test" {
+		t.Fatalf("tag = %v", got.Tags)
+	}
+	if err := v.RetagSecret("KEY", nil); err != nil {
+		t.Fatalf("untag: %v", err)
+	}
+	got, _ = v.GetSecret("KEY")
+	if len(got.Tags) != 0 {
+		t.Fatalf("tags after untag = %v", got.Tags)
+	}
+}
+
+func TestVaultRollbackReencrypts(t *testing.T) {
+	v := newTestGitVault(t)
+	defer v.Close()
+	_ = v.Unlock()
+	_ = v.SetSecret("KEY", []byte("v1"), nil)
+	_ = v.SetSecret("KEY", []byte("v2"), nil)
+	if err := v.Rollback("KEY", 1); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	got, _ := v.GetSecret("KEY")
+	if string(got.Value) != "v1" {
+		t.Fatalf("value = %q, want v1", got.Value)
+	}
+}
+
+func TestVaultBatchSingleCommit(t *testing.T) {
+	v := newTestGitVault(t)
+	defer v.Close()
+	_ = v.Unlock()
+	err := v.Batch(func() error {
+		for _, n := range []string{"A1", "B2"} {
+			if err := v.SetSecret(n, []byte("x"), nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("batch: %v", err)
+	}
+	metas, _ := v.ListSecrets()
+	if len(metas) != 2 {
+		t.Fatalf("metas = %d", len(metas))
 	}
 }

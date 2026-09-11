@@ -20,6 +20,7 @@ type Vault struct {
 	kp    keyring.KeyProvider
 	store store.SecretStore
 	key   []byte
+	aad   []byte
 }
 
 const (
@@ -109,8 +110,34 @@ func (v *Vault) Unlock() error {
 		return fmt.Errorf("unlock vault: %w", err)
 	}
 
-	kdfVersion := v.readKDFVersion()
 	var key []byte
+	if timeStr, _ := v.store.GetMeta("kdf_time"); timeStr != "" {
+		saltB64, _ := v.store.GetMeta("kdf_salt")
+		salt, decodeErr := base64.StdEncoding.DecodeString(saltB64)
+		if decodeErr != nil {
+			return fmt.Errorf("decode kdf_salt: %w", decodeErr)
+		}
+		params := crypto.KDFParams{
+			Time:    uint32(metaAtoi(v.store, "kdf_time")),
+			Memory:  uint32(metaAtoi(v.store, "kdf_memory")),
+			Threads: uint8(metaAtoi(v.store, "kdf_threads")),
+		}
+		key, err = v.enc.DeriveKeyFromPassword(rawKey, salt, params)
+		if err != nil {
+			return fmt.Errorf("derive key: %w", err)
+		}
+		v.key = key
+		if aadStr, _ := v.store.GetMeta("vault_aad"); aadStr != "" {
+			v.aad = []byte(aadStr)
+		}
+		if gs, ok := v.store.(*store.GitStore); ok {
+			gs.SetUnlockedFingerprint(saltB64 + "|" + timeStr + "|" +
+				strconv.FormatUint(uint64(params.Memory), 10) + "|" + strconv.FormatUint(uint64(params.Threads), 10))
+		}
+		return nil
+	}
+
+	kdfVersion := v.readKDFVersion()
 	switch kdfVersion {
 	case crypto.KDFVersion2:
 		saltB64, _ := v.store.GetMeta("kdf_salt")
@@ -132,6 +159,29 @@ func (v *Vault) Unlock() error {
 
 	v.key = key
 	return nil
+}
+
+func metaAtoi(s store.SecretStore, key string) int {
+	val, _ := s.GetMeta(key)
+	n, err := strconv.Atoi(val)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+func (v *Vault) encrypt(plaintext []byte) ([]byte, []byte, error) {
+	if v.aad != nil {
+		return v.enc.EncryptWithAAD(plaintext, v.key, v.aad)
+	}
+	return v.enc.Encrypt(plaintext, v.key)
+}
+
+func (v *Vault) decrypt(ciphertext, iv []byte) ([]byte, error) {
+	if v.aad != nil {
+		return v.enc.DecryptWithAAD(ciphertext, iv, v.key, v.aad)
+	}
+	return v.enc.Decrypt(ciphertext, iv, v.key)
 }
 
 func (v *Vault) readKDFVersion() int {
@@ -174,7 +224,7 @@ func (v *Vault) SetSecret(name string, value []byte, tags []string) error {
 			}
 		}
 
-		ciphertext, iv, err := v.enc.Encrypt(value, v.key)
+		ciphertext, iv, err := v.encrypt(value)
 		if err != nil {
 			return fmt.Errorf("encrypt: %w", err)
 		}
@@ -198,7 +248,7 @@ func (v *Vault) GetSecret(name string) (*Secret, error) {
 		return nil, ErrSecretNotFound
 	}
 
-	plaintext, err := v.enc.Decrypt(stored.EncryptedValue, stored.IV, v.key)
+	plaintext, err := v.decrypt(stored.EncryptedValue, stored.IV)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt: %w", err)
 	}
@@ -282,13 +332,35 @@ func (v *Vault) Rollback(name string, version int) error {
 		return fmt.Errorf("version %d not found", version)
 	}
 
+	plaintext, err := v.decrypt(target.EncryptedValue, target.IV)
+	if err != nil {
+		return fmt.Errorf("version %d predates a KDF migration", version)
+	}
+
 	return v.store.ExecTx(func() error {
 		newVersion := len(history) + 1
 		if err = v.store.AddHistory(name, newVersion, current.EncryptedValue, current.IV, current.Tags); err != nil {
 			return fmt.Errorf("archive history: %w", err)
 		}
-		return v.store.SetSecret(name, target.EncryptedValue, target.IV, target.Tags)
+		return v.SetSecret(name, plaintext, target.Tags)
 	})
+}
+
+func (v *Vault) RetagSecret(name string, tags []string) error {
+	sec, err := v.store.GetSecret(name)
+	if err != nil {
+		return err
+	}
+	if sec == nil {
+		return fmt.Errorf("secret %q not found", name)
+	}
+	return v.store.ExecTx(func() error {
+		return v.store.SetSecret(name, sec.EncryptedValue, sec.IV, tags)
+	})
+}
+
+func (v *Vault) Batch(fn func() error) error {
+	return v.store.ExecTx(fn)
 }
 
 func (v *Vault) AddTag(name string, tag string) error {
@@ -361,7 +433,7 @@ func (v *Vault) GetAllSecrets() (map[string][]byte, error) {
 	result := make(map[string][]byte, len(all))
 	for _, s := range all {
 		var plaintext []byte
-		plaintext, err = v.enc.Decrypt(s.EncryptedValue, s.IV, v.key)
+		plaintext, err = v.decrypt(s.EncryptedValue, s.IV)
 		if err != nil {
 			return nil, fmt.Errorf("decrypt %s: %w", s.Name, err)
 		}
@@ -410,6 +482,53 @@ func (v *Vault) MigrateKDF() error {
 		return fmt.Errorf("derive new key: %w", err)
 	}
 
+	if timeStr, _ := v.store.GetMeta("kdf_time"); timeStr != "" {
+		saltB64, _ := v.store.GetMeta("kdf_salt")
+		salt, decodeErr := base64.StdEncoding.DecodeString(saltB64)
+		if decodeErr != nil {
+			return fmt.Errorf("decode kdf_salt: %w", decodeErr)
+		}
+		newKey, deriveErr := v.enc.DeriveKeyFromPassword(rawKey, salt, crypto.DefaultKDFParams())
+		if deriveErr != nil {
+			return fmt.Errorf("derive key: %w", deriveErr)
+		}
+		return v.store.ExecTx(func() error {
+			for _, s := range all {
+				plaintext, decryptErr := v.decrypt(s.EncryptedValue, s.IV)
+				if decryptErr != nil {
+					return fmt.Errorf("decrypt %s: %w", s.Name, decryptErr)
+				}
+				var ciphertext, iv []byte
+				var encryptErr error
+				if v.aad != nil {
+					ciphertext, iv, encryptErr = v.enc.EncryptWithAAD(plaintext, newKey, v.aad)
+				} else {
+					ciphertext, iv, encryptErr = v.enc.Encrypt(plaintext, newKey)
+				}
+				for i := range plaintext {
+					plaintext[i] = 0
+				}
+				if encryptErr != nil {
+					return fmt.Errorf("encrypt %s: %w", s.Name, encryptErr)
+				}
+				if err = v.store.SetSecret(s.Name, ciphertext, iv, s.Tags); err != nil {
+					return fmt.Errorf("update %s: %w", s.Name, err)
+				}
+			}
+			if err = v.store.SetMeta("kdf_time", strconv.Itoa(int(crypto.DefaultKDFParams().Time))); err != nil {
+				return err
+			}
+			if err = v.store.SetMeta("kdf_memory", strconv.Itoa(int(crypto.DefaultKDFParams().Memory))); err != nil {
+				return err
+			}
+			if err = v.store.SetMeta("kdf_threads", strconv.Itoa(int(crypto.DefaultKDFParams().Threads))); err != nil {
+				return err
+			}
+			v.key = newKey
+			return nil
+		})
+	}
+
 	saltB64, _ := v.store.GetMeta("kdf_salt")
 	if saltB64 != "" {
 		salt, decodeErr := base64.StdEncoding.DecodeString(saltB64)
@@ -425,7 +544,7 @@ func (v *Vault) MigrateKDF() error {
 	return v.store.ExecTx(func() error {
 		for _, s := range all {
 			var plaintext []byte
-			plaintext, err = v.enc.Decrypt(s.EncryptedValue, s.IV, v.key)
+			plaintext, err = v.decrypt(s.EncryptedValue, s.IV)
 			if err != nil {
 				return fmt.Errorf("decrypt %s: %w", s.Name, err)
 			}
