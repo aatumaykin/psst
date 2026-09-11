@@ -588,3 +588,32 @@ func TestNoRemoteWarning(t *testing.T) {
 		t.Fatalf("no-remote write = %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestReveal(t *testing.T) {
+	s, gs := newTestServer(t)
+	seedGitSecret(t, gs)
+	h := s.Handler()
+	ck := loginOK(t, h)
+	rec := do(t, h, http.MethodGet, "/api/secrets/API_KEY/value", "", ck)
+	if rec.Code != 403 {
+		t.Fatalf("locked reveal = %d", rec.Code)
+	}
+	if rec := unlockVault(t, h, ck, "test-password"); rec.Code != 200 {
+		t.Fatalf("unlock: %d", rec.Code)
+	}
+	rec = do(t, h, http.MethodGet, "/api/secrets/API_KEY/value", "", ck)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "secret123") {
+		t.Fatalf("reveal = %d %s", rec.Code, rec.Body.String())
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Fatalf("cache-control = %q", cc)
+	}
+	rec = do(t, h, http.MethodGet, "/api/secrets/NOPE/value", "", ck)
+	if rec.Code != 404 {
+		t.Fatalf("missing reveal = %d", rec.Code)
+	}
+	rec = do(t, h, http.MethodGet, "/api/secrets/API_KEY/history", "", ck)
+	if strings.Contains(rec.Body.String(), "secret123") {
+		t.Fatal("history must not contain values")
+	}
+}

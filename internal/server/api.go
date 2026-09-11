@@ -241,6 +241,26 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request, sess *sess
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func (s *Server) handleValue(w http.ResponseWriter, r *http.Request, sess *session) {
+	name := r.PathValue("name")
+	if !validNameOr400(w, name) {
+		return
+	}
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if !s.secretExists(name) {
+		writeErr(w, http.StatusNotFound, "secret "+name+" not found")
+		return
+	}
+	sec, err := sess.vault.GetSecret(name)
+	if err != nil {
+		s.writeStoreError(w, err)
+		return
+	}
+	s.cfg.Log.Printf("reveal %s", name)
+	writeJSON(w, http.StatusOK, map[string]string{"value": string(sec.Value)})
+}
+
 func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request, sess *session) {
 	name := r.PathValue("name")
 	if !validNameOr400(w, name) {

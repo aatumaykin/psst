@@ -53,6 +53,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/secrets/{name}", s.apiHandler(true, s.handleSet))
 	mux.HandleFunc("DELETE /api/secrets/{name}", s.apiHandler(true, s.handleDelete))
 	mux.HandleFunc("POST /api/secrets/{name}/rollback", s.apiHandler(true, s.handleRollback))
+	mux.HandleFunc("GET /api/secrets/{name}/value", s.apiHandler(true, s.handleValue))
 	return s.recoverMW(s.logMW(s.hostMW(s.originMW(mux))))
 }
 
