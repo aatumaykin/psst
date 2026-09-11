@@ -148,6 +148,25 @@ psst list-envs                        # Список всех окружений
 
 Хранятся в `.psst/envs/<name>/vault.db` (или `~/.psst/envs/<name>/` с `--global`).
 
+### Git-хранилище (несколько машин)
+
+```bash
+psst init --storage git --remote git@github.com:me/psst-vault.git
+# или локальный bare-репозиторий: --remote /path/to/vault.git
+echo "sk-live-abc" | psst set STRIPE_KEY --stdin
+psst sync
+```
+
+- Каждая команда делает pull перед чтением и rebase+push при записи.
+- Чтение работает оффлайн; запись требует доступности remote (local-only репо — предупреждение).
+- Один файл на секрет, теги — каталоги (`secrets/prod/DB_PASS.enc`), ровно
+  один тег на секрет; история — это git-история.
+- Один и тот же `PSST_PASSWORD` на всех машинах (или интерактивный промпт).
+- `psst migrate storage --to git` конвертирует существующий SQLite-vault.
+
+Миграция с SQLite: сначала `psst migrate kdf`, если vault на устаревшем KDF,
+затем `psst migrate storage --to git --remote <url>`.
+
 ### Глобальные флаги
 
 Все команды поддерживают:
