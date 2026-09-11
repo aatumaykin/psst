@@ -27,6 +27,7 @@ type SecretItem struct {
 type HistoryItem struct {
 	Version    int       `json:"version"`
 	Tags       []string  `json:"tags"`
+	Author     string    `json:"author,omitempty"`
 	ArchivedAt time.Time `json:"archived_at"`
 }
 
@@ -109,6 +110,10 @@ func (f *Formatter) HistoryEntries(name string, entries []HistoryItem) {
 	fmt.Fprintf(f.stdout, "\nHistory for %s:\n\n", name)
 	fmt.Fprintf(f.stdout, "  ● current (active)\n")
 	for _, e := range entries {
+		if e.Author != "" {
+			fmt.Fprintf(f.stdout, "  ● v%d  %s  by %s\n", e.Version, e.ArchivedAt.Format("01/02/2006 15:04"), e.Author)
+			continue
+		}
 		fmt.Fprintf(f.stdout, "  ● v%d  %s\n", e.Version, e.ArchivedAt.Format("01/02/2006 15:04"))
 	}
 	fmt.Fprintf(f.stdout, "\n  %d previous version(s)\n", len(entries))

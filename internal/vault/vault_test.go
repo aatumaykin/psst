@@ -136,6 +136,31 @@ func TestHistoryAndRollback(t *testing.T) {
 	}
 }
 
+func TestGetHistoryMapsAuthor(t *testing.T) {
+	v := setupTestVault(t)
+	defer v.Close()
+
+	if err := v.SetSecret("API_KEY", []byte("secret123"), nil); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	if err := v.SetSecret("API_KEY", []byte("secret456"), nil); err != nil {
+		t.Fatalf("set2: %v", err)
+	}
+	entries, err := v.GetHistory("API_KEY")
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	if entries[0].Author != "" {
+		t.Fatalf("sqlite author = %q, want empty", entries[0].Author)
+	}
+	if entries[0].Version != 1 {
+		t.Fatalf("version = %d, want 1", entries[0].Version)
+	}
+}
+
 func TestTags(t *testing.T) {
 	v := setupTestVault(t)
 	defer v.Close()

@@ -234,6 +234,7 @@ func (v *Vault) GetHistory(name string) ([]SecretHistoryEntry, error) {
 		result[i] = SecretHistoryEntry{
 			Version:    e.Version,
 			Tags:       e.Tags,
+			Author:     e.Author,
 			ArchivedAt: e.ArchivedAt,
 		}
 	}

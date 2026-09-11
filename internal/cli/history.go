@@ -47,6 +47,7 @@ func toHistoryItems(entries []vault.SecretHistoryEntry) []output.HistoryItem {
 		items[i] = output.HistoryItem{
 			Version:    e.Version,
 			Tags:       e.Tags,
+			Author:     e.Author,
 			ArchivedAt: e.ArchivedAt,
 		}
 	}
