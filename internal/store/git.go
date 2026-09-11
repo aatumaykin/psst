@@ -21,6 +21,7 @@ var (
 	ErrNoRemote          = errors.New("no remote configured")
 	ErrRemoteMetaChanged = errors.New("vault parameters changed remotely; re-run the command")
 	ErrConflict          = errors.New("key changed remotely; re-set the value or run `psst sync --discard-local`")
+	ErrPushFailed        = errors.New("push failed")
 )
 
 type GitOptions struct {
@@ -217,6 +218,10 @@ func (g *GitStore) hasCommits() bool {
 func (g *GitStore) hasRemote() bool {
 	out, err := g.git.Run("config", "--get", "remote.origin.url")
 	return err == nil && strings.TrimSpace(out) != ""
+}
+
+func (g *GitStore) HasRemote() bool {
+	return g.hasRemote()
 }
 
 type gitEntry struct {
@@ -424,7 +429,7 @@ func (g *GitStore) push() error {
 		return ErrNoRemote
 	}
 	if _, err := g.git.Run("push"); err != nil {
-		return fmt.Errorf("push failed; change is in the local clone, run `psst sync` later: %w", err)
+		return fmt.Errorf("%w; change is in the local clone, run `psst sync` later: %w", ErrPushFailed, err)
 	}
 	return nil
 }
@@ -434,7 +439,7 @@ func (g *GitStore) pushAll() error {
 		return ErrNoRemote
 	}
 	if _, err := g.git.Run("push", "-u", "origin", "HEAD"); err != nil {
-		return fmt.Errorf("push failed; change is in the local clone, run `psst sync` later: %w", err)
+		return fmt.Errorf("%w; change is in the local clone, run `psst sync` later: %w", ErrPushFailed, err)
 	}
 	return nil
 }

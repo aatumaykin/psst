@@ -449,6 +449,53 @@ func TestGitStoreListUpdatedBy(t *testing.T) {
 	}
 }
 
+func newClonedStore(t *testing.T, remote string) *GitStore {
+	t.Helper()
+	repo := filepath.Join(t.TempDir(), "repo")
+	g, err := NewGitStore(repo, GitOptions{Remote: remote})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	if err := g.InitSchema(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if err := g.pushAll(); err != nil {
+		t.Fatalf("push: %v", err)
+	}
+	return g
+}
+
+func TestGitStoreHasRemote(t *testing.T) {
+	g := newClonedStore(t, newBareRemote(t))
+	if !g.HasRemote() {
+		t.Fatal("cloned store must report remote")
+	}
+	local, _ := newGitStore(t)
+	if local.HasRemote() {
+		t.Fatal("local-only store must not report remote")
+	}
+}
+
+func TestGitStorePushFailedSentinel(t *testing.T) {
+	remote := newBareRemote(t)
+	g := newClonedStore(t, remote)
+	if err := os.Chmod(remote, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(remote, 0o755) })
+	iv := make([]byte, 12)
+	err := g.SetSecret("KEY", []byte("ct"), iv, nil)
+	if err == nil {
+		t.Fatal("push to read-only remote must fail")
+	}
+	if !errors.Is(err, ErrPushFailed) {
+		t.Fatalf("err = %v, want ErrPushFailed", err)
+	}
+	if !strings.Contains(err.Error(), "run `psst sync` later") {
+		t.Fatalf("message text changed: %v", err)
+	}
+}
+
 func countNonEmptyLines(s string) int {
 	n := 0
 	line := ""

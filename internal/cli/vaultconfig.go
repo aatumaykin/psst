@@ -172,10 +172,11 @@ func OpenVaultStore(envDir, storage, remote string, allowInsecure bool) (store.S
 			effRemote = cfg.Remote
 		}
 		loadPins := func() *store.Pin {
-			if cfg.PinSalt == "" {
+			cur, err := LoadVaultConfig(envDir)
+			if err != nil || cur.PinSalt == "" {
 				return nil
 			}
-			return &store.Pin{SaltB64: cfg.PinSalt, Params: cfg.PinKDF}
+			return &store.Pin{SaltB64: cur.PinSalt, Params: cur.PinKDF}
 		}
 		savePins := func(p store.Pin) error {
 			cur, err := LoadVaultConfig(envDir)

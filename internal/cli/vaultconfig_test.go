@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/aatumaykin/psst/internal/crypto"
+	"github.com/aatumaykin/psst/internal/store"
 )
 
 func mustParams(t *testing.T) crypto.KDFParams {
@@ -69,6 +71,34 @@ func TestResolveStorage(t *testing.T) {
 	}
 	if _, err := ResolveStorage("bogus", dir2); err == nil {
 		t.Fatal("invalid flag value must error")
+	}
+}
+
+func TestOpenVaultStoreLoadPinsFresh(t *testing.T) {
+	envDir := filepath.Join(t.TempDir(), "env")
+	repo := filepath.Join(envDir, "repo")
+	gs, err := store.NewGitStore(repo, store.GitOptions{})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	if err := gs.InitSchema(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	s, _, err := OpenVaultStore(envDir, "git", "", false)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	cfg, err := LoadVaultConfig(envDir)
+	if err != nil {
+		t.Fatalf("cfg: %v", err)
+	}
+	cfg.PinSalt = "AAAAAAAAAAAAAAAAAAAAAA=="
+	if err := SaveVaultConfig(envDir, *cfg); err != nil {
+		t.Fatalf("save cfg: %v", err)
+	}
+	err = s.InitSchema()
+	if !errors.Is(err, store.ErrSaltChanged) {
+		t.Fatalf("InitSchema after pin tamper = %v, want ErrSaltChanged", err)
 	}
 }
 
