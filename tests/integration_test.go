@@ -12,6 +12,7 @@ import (
 var binary string
 
 func TestMain(m *testing.M) {
+	os.Setenv("PSST_NO_KEYCHAIN", "1")
 	tmpDir, err := os.MkdirTemp("", "psst-test")
 	if err != nil {
 		os.Stderr.WriteString("cannot create temp dir: " + err.Error())

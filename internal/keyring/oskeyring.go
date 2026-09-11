@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
 
 	keyring "github.com/zalando/go-keyring"
 )
@@ -26,6 +27,9 @@ func (o *OSKeyring) SetKey(service, account string, key []byte) error {
 }
 
 func (o *OSKeyring) IsAvailable() bool {
+	if os.Getenv("PSST_NO_KEYCHAIN") == "1" {
+		return false
+	}
 	const testSvc = "psst-avail-check"
 	const testAcc = "test"
 	const testVal = "psst-availability-probe"

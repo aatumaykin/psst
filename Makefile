@@ -16,7 +16,7 @@ build:
 	go build -ldflags "$(LDFLAGS)" -o psst ./cmd/psst/
 
 test:
-	go test ./... -v
+	PSST_NO_KEYCHAIN=1 go test ./... -v
 
 lint:
 ifndef GOLANGCI_LINT
