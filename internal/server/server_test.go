@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -365,5 +366,225 @@ func TestOriginMiddleware(t *testing.T) {
 	h.ServeHTTP(rec3, req)
 	if rec3.Code != 403 {
 		t.Fatalf("foreign origin = %d", rec3.Code)
+	}
+}
+
+func TestWriteCycle(t *testing.T) {
+	s, gs := newTestServer(t)
+	seedGitSecret(t, gs)
+	h := s.Handler()
+	ck := loginOK(t, h)
+	if rec := unlockVault(t, h, ck, "test-password"); rec.Code != 200 {
+		t.Fatalf("unlock: %d", rec.Code)
+	}
+	rec := do(t, h, http.MethodPost, "/api/secrets/NEW_KEY", `{"value":"new-secret123","tag":"prod"}`, ck)
+	if rec.Code != 200 {
+		t.Fatalf("create = %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodPost, "/api/secrets/NEW_KEY", `{"value":"v2-secret123","tag":"stage"}`, ck)
+	if rec.Code != 200 {
+		t.Fatalf("edit+retag = %d %s", rec.Code, rec.Body.String())
+	}
+	metas, _ := gs.ListSecrets()
+	for _, m := range metas {
+		if m.Name == "NEW_KEY" && (len(m.Tags) != 1 || m.Tags[0] != "stage") {
+			t.Fatalf("retag = %+v", m.Tags)
+		}
+	}
+	rec = do(t, h, http.MethodPost, "/api/secrets/NEW_KEY", `{"tag":"prod2"}`, ck)
+	if rec.Code != 200 {
+		t.Fatalf("tag-only move = %d %s", rec.Code, rec.Body.String())
+	}
+	metas, _ = gs.ListSecrets()
+	for _, m := range metas {
+		if m.Name == "NEW_KEY" && (len(m.Tags) != 1 || m.Tags[0] != "prod2") {
+			t.Fatalf("tag-only = %+v", m.Tags)
+		}
+	}
+	rec = do(t, h, http.MethodPost, "/api/secrets/NEW_KEY", `{"tag":""}`, ck)
+	if rec.Code != 200 {
+		t.Fatalf("untag = %d %s", rec.Code, rec.Body.String())
+	}
+	metas, _ = gs.ListSecrets()
+	for _, m := range metas {
+		if m.Name == "NEW_KEY" && len(m.Tags) != 0 {
+			t.Fatalf("untag left tags: %+v", m)
+		}
+	}
+	rec = do(t, h, http.MethodPost, "/api/secrets/NEW_KEY", `{}`, ck)
+	if rec.Code != 400 {
+		t.Fatalf("empty body = %d", rec.Code)
+	}
+	rec = do(t, h, http.MethodPost, "/api/secrets/bad_name", `{"value":"x"}`, ck)
+	if rec.Code != 400 {
+		t.Fatalf("bad name = %d", rec.Code)
+	}
+	rec = do(t, h, http.MethodPost, "/api/secrets/NEW_KEY", `{"value":"x","tag":"Bad"}`, ck)
+	if rec.Code != 400 {
+		t.Fatalf("bad tag = %d", rec.Code)
+	}
+	rec = do(t, h, http.MethodDelete, "/api/secrets/API_KEY", "", ck)
+	if rec.Code != 200 {
+		t.Fatalf("delete = %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodDelete, "/api/secrets/API_KEY", "", ck)
+	if rec.Code != 404 {
+		t.Fatalf("delete missing = %d", rec.Code)
+	}
+}
+
+func TestRollbackEndpoint(t *testing.T) {
+	s, gs := newTestServer(t)
+	seedGitSecret(t, gs)
+	v := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, gs)
+	if err := v.Unlock(); err != nil {
+		t.Fatalf("unlock: %v", err)
+	}
+	if err := v.SetSecret("API_KEY", []byte("secret456"), []string{"prod"}); err != nil {
+		t.Fatalf("set2: %v", err)
+	}
+	h := s.Handler()
+	ck := loginOK(t, h)
+	if rec := unlockVault(t, h, ck, "test-password"); rec.Code != 200 {
+		t.Fatalf("unlock: %d", rec.Code)
+	}
+	rec := do(t, h, http.MethodPost, "/api/secrets/API_KEY/rollback", `{"version":1}`, ck)
+	if rec.Code != 200 {
+		t.Fatalf("rollback = %d %s", rec.Code, rec.Body.String())
+	}
+	got, err := v.GetSecret("API_KEY")
+	if err != nil || string(got.Value) != "secret123" {
+		t.Fatalf("rollback value = %q %v", got.Value, err)
+	}
+	rec = do(t, h, http.MethodPost, "/api/secrets/API_KEY/rollback", `{"version":99}`, ck)
+	if rec.Code != 404 {
+		t.Fatalf("rollback missing version = %d", rec.Code)
+	}
+	rec = do(t, h, http.MethodPost, "/api/secrets/NOPE/rollback", `{"version":1}`, ck)
+	if rec.Code != 404 {
+		t.Fatalf("rollback missing secret = %d", rec.Code)
+	}
+}
+
+func TestWriteRequiresUnlock(t *testing.T) {
+	s, gs := newTestServer(t)
+	seedGitSecret(t, gs)
+	h := s.Handler()
+	ck := loginOK(t, h)
+	rec := do(t, h, http.MethodPost, "/api/secrets/NEW_KEY", `{"value":"x"}`, ck)
+	if rec.Code != 403 || !strings.Contains(rec.Body.String(), "locked") {
+		t.Fatalf("locked write = %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodDelete, "/api/secrets/API_KEY", "", ck)
+	if rec.Code != 403 {
+		t.Fatalf("locked delete = %d", rec.Code)
+	}
+}
+
+func newBareRemote(t *testing.T) string {
+	t.Helper()
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	if out, err := exec.Command("git", "init", "--bare", remote).CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v\n%s", err, out)
+	}
+	return remote
+}
+
+func TestRemoteMetaChangedRecovery(t *testing.T) {
+	remote := newBareRemote(t)
+	repo := filepath.Join(t.TempDir(), "repo")
+	gs, err := store.NewGitStore(repo, store.GitOptions{Remote: remote})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	if err := gs.InitSchema(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	seed := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, gs)
+	if err := seed.Unlock(); err != nil {
+		t.Fatalf("seed unlock: %v", err)
+	}
+	if err := seed.SetSecret("API_KEY", []byte("secret123"), nil); err != nil {
+		t.Fatalf("seed set (pushes): %v", err)
+	}
+
+	digest := sha256.Sum256([]byte(testToken))
+	s := New(Config{
+		Store: gs, Enc: crypto.NewAESGCM(),
+		Host: "127.0.0.1", Port: "7788", TokenDigest: digest,
+		UnlockTimeout: 30 * time.Minute, SessionTTL: 24 * time.Hour,
+		Now: time.Now, Log: log.New(io.Discard, "", 0),
+	})
+	t.Cleanup(s.Close)
+	h := s.Handler()
+	ck1 := loginOK(t, h)
+	if rec := unlockVault(t, h, ck1, "test-password"); rec.Code != 200 {
+		t.Fatalf("unlock1: %d", rec.Code)
+	}
+	ck2 := loginOK(t, h)
+	if rec := unlockVault(t, h, ck2, "test-password"); rec.Code != 200 {
+		t.Fatalf("unlock2: %d", rec.Code)
+	}
+
+	repo2 := filepath.Join(t.TempDir(), "repo2")
+	other, err := store.CloneGitVault(remote, repo2, store.GitOptions{Remote: remote})
+	if err != nil {
+		t.Fatalf("other: %v", err)
+	}
+	oldV := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, other)
+	if err := oldV.Unlock(); err != nil {
+		t.Fatalf("old unlock: %v", err)
+	}
+	got, err := oldV.GetSecret("API_KEY")
+	if err != nil {
+		t.Fatalf("old-key decrypt: %v", err)
+	}
+	if err := other.SetMeta("kdf_time", "4"); err != nil {
+		t.Fatalf("strengthen: %v", err)
+	}
+	fresh, err := store.NewGitStore(repo2, store.GitOptions{Remote: remote})
+	if err != nil {
+		t.Fatalf("fresh: %v", err)
+	}
+	mig := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, fresh)
+	if err := mig.Unlock(); err != nil {
+		t.Fatalf("mig unlock: %v", err)
+	}
+	if err := mig.SetSecret("API_KEY", got.Value, got.Tags); err != nil {
+		t.Fatalf("mig re-encrypt+push: %v", err)
+	}
+
+	rec := do(t, h, http.MethodPost, "/api/secrets/NEW_KEY", `{"value":"x"}`, ck1)
+	if rec.Code != 409 || !strings.Contains(rec.Body.String(), "reunlock") {
+		t.Fatalf("stale write = %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodGet, "/api/session", "", ck1)
+	if strings.Contains(rec.Body.String(), `"unlocked":true`) {
+		t.Fatal("requesting session must lose its unlock")
+	}
+	rec = do(t, h, http.MethodGet, "/api/session", "", ck2)
+	if strings.Contains(rec.Body.String(), `"unlocked":true`) {
+		t.Fatal("EVERY session must lose its unlock after recovery")
+	}
+	rec = unlockVault(t, h, ck1, "test-password")
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"verified":true`) {
+		t.Fatalf("re-unlock after recovery = %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodPost, "/api/secrets/NEW_KEY", `{"value":"x"}`, ck1)
+	if rec.Code != 200 {
+		t.Fatalf("write after re-unlock = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestNoRemoteWarning(t *testing.T) {
+	s, _ := newTestServer(t)
+	h := s.Handler()
+	ck := loginOK(t, h)
+	if rec := unlockVault(t, h, ck, "test-password"); rec.Code != 200 {
+		t.Fatalf("unlock: %d", rec.Code)
+	}
+	rec := do(t, h, http.MethodPost, "/api/secrets/NEW_KEY", `{"value":"x"}`, ck)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "no remote configured") {
+		t.Fatalf("no-remote write = %d %s", rec.Code, rec.Body.String())
 	}
 }

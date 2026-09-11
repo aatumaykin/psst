@@ -50,6 +50,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/unlock", s.apiHandler(false, s.handleUnlock))
 	mux.HandleFunc("GET /api/secrets", s.apiHandler(false, s.handleList))
 	mux.HandleFunc("GET /api/secrets/{name}/history", s.apiHandler(false, s.handleHistory))
+	mux.HandleFunc("POST /api/secrets/{name}", s.apiHandler(true, s.handleSet))
+	mux.HandleFunc("DELETE /api/secrets/{name}", s.apiHandler(true, s.handleDelete))
+	mux.HandleFunc("POST /api/secrets/{name}/rollback", s.apiHandler(true, s.handleRollback))
 	return s.recoverMW(s.logMW(s.hostMW(s.originMW(mux))))
 }
 
