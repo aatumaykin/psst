@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/aatumaykin/psst/internal/kdf"
@@ -427,6 +428,24 @@ func TestCloneEmptyRemoteOnboarding(t *testing.T) {
 	}
 	if g2 := cloneVault(t, remote); g2 == nil {
 		t.Fatal("second machine sees vault")
+	}
+}
+
+func TestGitStoreListUpdatedBy(t *testing.T) {
+	g, _ := newGitStore(t)
+	iv := make([]byte, 12)
+	if err := g.SetSecret("KEY", []byte("ct"), iv, nil); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	metas, err := g.ListSecrets()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(metas) != 1 {
+		t.Fatalf("metas = %d", len(metas))
+	}
+	if !strings.HasPrefix(metas[0].UpdatedBy, "psst/") {
+		t.Fatalf("updatedBy = %q, want psst/<hostname>", metas[0].UpdatedBy)
 	}
 }
 
