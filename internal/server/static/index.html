@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>psst</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header id="top">
+  <span id="vault-label">psst</span>
+  <span id="unlock-state"></span>
+  <button id="btn-logout" class="ghost" hidden>logout</button>
+</header>
+
+<main>
+  <section id="view-login" hidden>
+    <h1>psst server</h1>
+    <p>Enter the auth token printed by <code>psst serve</code>.</p>
+    <form id="form-login">
+      <input type="password" id="login-token" placeholder="auth token" autocomplete="off" required>
+      <button type="submit">sign in</button>
+      <p id="login-error" class="error" role="alert"></p>
+    </form>
+  </section>
+
+  <section id="view-list" hidden>
+    <div class="toolbar">
+      <button id="btn-create">new secret</button>
+      <button id="btn-unlock">unlock</button>
+    </div>
+    <p id="sync-warning" class="warning" role="alert" hidden></p>
+    <div id="secret-tree"></div>
+  </section>
+
+  <section id="view-history" hidden>
+    <button id="btn-back" class="ghost">&larr; back</button>
+    <h2 id="history-title"></h2>
+    <div class="toolbar">
+      <button id="btn-reveal">reveal value</button>
+      <button id="btn-edit">edit</button>
+      <button id="btn-delete" class="danger">delete</button>
+    </div>
+    <pre id="reveal-box" hidden></pre>
+    <p id="reveal-note" class="notice" hidden></p>
+    <table id="history-table">
+      <thead><tr><th>version</th><th>archived</th><th>by</th><th>tag</th><th></th></tr></thead>
+      <tbody id="history-body"></tbody>
+    </table>
+  </section>
+
+  <section id="view-form" hidden>
+    <button id="btn-back2" class="ghost">&larr; back</button>
+    <h2 id="form-title">new secret</h2>
+    <form id="form-secret">
+      <label>name <input id="f-name" pattern="[A-Z][A-Z0-9_]*" required></label>
+      <label>value <textarea id="f-value" placeholder="leave empty to keep the current value"></textarea></label>
+      <label>tag <input id="f-tag" pattern="[a-z][a-z0-9-]*" placeholder="optional"></label>
+      <button type="submit" id="btn-save">save</button>
+      <p id="form-error" class="error" role="alert"></p>
+    </form>
+  </section>
+</main>
+
+<div id="modal-unlock" hidden>
+  <div class="modal-card">
+    <h2>unlock vault</h2>
+    <p class="notice" id="unlock-note" hidden></p>
+    <form id="form-unlock">
+      <input type="password" id="unlock-password" placeholder="vault password" autocomplete="off" required>
+      <button type="submit">unlock</button>
+      <button type="button" id="btn-cancel-unlock" class="ghost">cancel</button>
+      <p id="unlock-error" class="error" role="alert"></p>
+    </form>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

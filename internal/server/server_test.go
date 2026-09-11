@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -615,5 +616,73 @@ func TestReveal(t *testing.T) {
 	rec = do(t, h, http.MethodGet, "/api/secrets/API_KEY/history", "", ck)
 	if strings.Contains(rec.Body.String(), "secret123") {
 		t.Fatal("history must not contain values")
+	}
+}
+
+func TestStaticAssets(t *testing.T) {
+	s, _ := newTestServer(t)
+	h := s.Handler()
+	for path, want := range map[string]string{
+		"/":          "text/html",
+		"/app.js":    "text/javascript",
+		"/style.css": "text/css",
+	} {
+		rec := do(t, h, http.MethodGet, path, "", "")
+		if rec.Code != 200 {
+			t.Fatalf("%s = %d", path, rec.Code)
+		}
+		if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, want) {
+			t.Fatalf("%s content-type = %q", path, ct)
+		}
+		csp := rec.Header().Get("Content-Security-Policy")
+		if !strings.Contains(csp, "default-src 'self'") || !strings.Contains(csp, "object-src 'none'") {
+			t.Fatalf("csp = %q", csp)
+		}
+		if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+			t.Fatalf("nosniff missing for %s", path)
+		}
+	}
+	for _, path := range []string{"/../etc/passwd", "/%2e%2e/etc/passwd", "/nope.js"} {
+		rec := do(t, h, http.MethodGet, path, "", "")
+		if rec.Code == 200 {
+			t.Fatalf("%s must not serve", path)
+		}
+	}
+}
+
+func TestConcurrentSmoke(t *testing.T) {
+	s, gs := newTestServer(t)
+	seedGitSecret(t, gs)
+	h := s.Handler()
+	ck := loginOK(t, h)
+	if rec := unlockVault(t, h, ck, "test-password"); rec.Code != 200 {
+		t.Fatalf("unlock: %d", rec.Code)
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 32)
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			rec := do(t, h, http.MethodGet, "/api/secrets", "", ck)
+			if rec.Code != 200 {
+				errs <- fmt.Errorf("list = %d", rec.Code)
+			}
+		}()
+	}
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			rec := do(t, h, http.MethodGet, fmt.Sprintf("/api/secrets/API_KEY/value"), "", ck)
+			if rec.Code != 200 {
+				errs <- fmt.Errorf("reveal = %d", rec.Code)
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
 	}
 }

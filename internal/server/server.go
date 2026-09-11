@@ -44,6 +44,9 @@ func New(cfg Config) *Server {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", s.handleStatic)
+	mux.HandleFunc("GET /app.js", s.handleStatic)
+	mux.HandleFunc("GET /style.css", s.handleStatic)
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("GET /api/session", s.handleSession)
 	mux.HandleFunc("POST /api/logout", s.handleLogout)
