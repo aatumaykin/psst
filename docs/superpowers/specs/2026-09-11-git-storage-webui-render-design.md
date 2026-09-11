@@ -1,7 +1,7 @@
 # Git Storage Backend, Web UI, and Secret Rendering — Design
 
 Date: 2026-09-11
-Status: approved in brainstorm, revised after subagent code review (1 critical / 13 major / 10 minor / 5 nit — all addressed below)
+Status: approved in brainstorm; revised after two subagent review rounds (round 1: 1 critical / 13 major / 10 minor / 5 nit; round 2: 0 critical / 5 major / 9 minor / 2 nit — all addressed)
 Scope: phased — phase 1 (GitStore) is this spec's implementation target; phases 2–3 recorded here as committed direction.
 
 ## Problem
@@ -15,7 +15,7 @@ Scope: phased — phase 1 (GitStore) is this spec's implementation target; phase
 | Decision | Choice |
 |---|---|
 | SQLite fate | GitStore as an option behind `SecretStore`; SQLite stays the default backend |
-| Key distribution | Shared password: Argon2id (v2 KDF) + per-vault salt stored in the repo |
+| Key distribution | Shared password: Argon2id + per-vault salt from the repo; **KDF parameters from `psst.yaml` are authoritative** for derivation (see 1.1) |
 | Secret file format | `base64(IV ‖ AES-256-GCM ciphertext(value))` — value only; ciphertext bound to vault metadata via GCM AAD (see 1.1) |
 | Grouping / tags | Subdirectories (`secrets/<tag>/NAME.enc`); exactly one tag per secret |
 | Dates | From git log (`--diff-filter=A` for created, last commit for updated); nothing stored in files |
@@ -24,7 +24,7 @@ Scope: phased — phase 1 (GitStore) is this spec's implementation target; phase
 | Web server auth | localhost bind + mandatory token; vault password unlock in UI; SSH tunnel for remote |
 | Substitution (idea 2) | New `psst render` command; env injection already covers subprocess cases |
 | Git driver | System `git` via `os/exec`; no new dependencies |
-| Key provider for git storage | Password-only; OS keychain is never consulted for git vaults (see 1.4) |
+| Key provider for git storage | Password-only derivation via a typed method that cannot hit the base64 passthrough (see 1.4) |
 | Migration command | `psst migrate storage --to git` (subcommand; bare `psst migrate` keeps KDF semantics, `psst migrate kdf` added) |
 
 Accepted trade-offs:
@@ -32,6 +32,7 @@ Accepted trade-offs:
 - Secret **names** are visible in the repo (file names), values never — same model as `pass`.
 - No multi-tag secrets in git backend (a file lives in one directory). SQLite keeps multi-tag JSON. Multi-tag requests against a git vault fail closed at CLI validation.
 - Ciphertext conflicts on the same key are not auto-merged (fail-closed), with an explicit recovery command (see 1.3).
+- Writes carry an O(history-of-file) cost for version numbering (see 1.2, History).
 
 ## 1. Git Storage Backend (phase 1)
 
@@ -55,25 +56,34 @@ Accepted trade-offs:
 version: 1
 kdf:
   algo: argon2id
-  time: 1
-  memory: 65536
+  time: 3                      # iterations; memory is in KiB
+  memory: 65536                # 64 MiB
   threads: 4
-salt: <base64>                 # per-vault salt; same password + salt => same key on every machine
+salt: <base64>                 # per-vault salt
 cipher: aes-256-gcm
 ```
 
-KDF parameters and salt are not secret (same as sops metadata). This reuses the existing v2 KDF: GitStore maps `GetMeta("kdf_salt")` / `GetMeta("kdf_version")` onto `psst.yaml` fields (see 1.2), so `vault.Unlock()` derives the key exactly as it does for SQLite vaults with per-vault salt.
+These defaults match the constants currently compiled into `internal/crypto/aesgcm.go` (`argon2Iterations=3`, `argon2Memory=64*1024` KiB, `argon2Threads=4`), so a git vault initialized today derives the same key as an existing v2+salt SQLite vault for the same password.
 
-**AAD binding.** Each `.enc` file is encrypted with GCM additional authenticated data `psst:v1:<kdf-algo>:<salt-base64>`. This binds every ciphertext to the vault's format version, KDF algorithm, and salt: files from another vault/salt fail authentication with an explainable error instead of a bare "message authentication failed", and future format or KDF changes have a migration point. Same AAD scheme may be adopted by the SQLite backend later; not required for phase 1.
+**Authoritative KDF parameters.** Today `KeyToBufferV2WithSalt` ignores any external parameters — they are compile-time constants. For git vaults this would make `psst.yaml` decorative and risk cross-version key skew. Phase 1 adds a parameterized derivation method to the `Encryptor`/`KeyDeriver` interfaces (see Interface changes below): `DeriveKeyFromPassword(password string, salt []byte, params KDFParams) ([]byte, error)` — always Argon2id, **no base64 passthrough** (the existing `KeyToBufferV2WithSalt` returns a 32-byte-decodable base64 string as the key directly, which would let a password-shaped-as-base64 skip the KDF entirely; git vaults must never use that path). `vault.Unlock()` on a git vault reads salt and parameters from `psst.yaml` and calls this method. Same password + same salt + same params ⇒ same key on every machine.
 
-**Validation (fail-closed).** `psst.yaml` is untrusted input (it lives in a synced repo; GCM authenticates secret values, not vault metadata). On open/init GitStore validates:
+**AAD binding.** Each `.enc` file is encrypted with GCM additional authenticated data `psst:v1:<kdf-algo>:<salt-base64>`. This binds every ciphertext to the vault's format version, KDF algorithm, and salt: files from another vault/salt fail authentication with an explainable error, and future format changes have a migration point. The current `Encryptor` interface has no AAD parameter (`gcm.Seal(..., nil)`), so phase 1 extends it with `EncryptWithAAD(plaintext, key, aad)` / `DecryptWithAAD(ciphertext, iv, key, aad)`; the old `Encrypt`/`Decrypt` delegate to them with nil AAD. The vault layer composes the AAD from store metadata (`GetMeta`) — the store itself never touches crypto (architecture rule: no `store → crypto` dependency). The SQLite backend keeps nil AAD in phase 1 (existing ciphertext stays readable); it may adopt AAD in a later migration.
+
+**Validation (fail-closed).** `psst.yaml` is untrusted input (it lives in a synced repo; GCM authenticates secret values, not vault metadata). On open GitStore validates:
 
 - Required fields present; `version == 1`, `cipher == aes-256-gcm`, `kdf.algo == argon2id` — anything else is a hard error, no fallback.
-- KDF minimums: `memory >= 64 MiB`, `time >= 1`, `threads >= 1`. Weaker parameters are rejected (blocks parameter-downgrade attacks by someone with write access to the remote).
-- Salt must be valid base64; **if the salt or KDF parameters change in a repo that was previously opened on this machine (recorded in the local vault config), that is an explicit error** pointing at the rotation procedure (see section 5), never a silent re-derivation.
+- KDF minimums: `memory >= 64 MiB` (65536 KiB), `time >= 3`, `threads >= 1`. Weaker parameters are rejected (blocks parameter-downgrade attacks by someone with write access to the remote).
+- Salt must be valid base64, 16+ bytes.
 - Empty password is rejected at init and unlock.
 
-**Remote schemes.** `ssh://`, `https://`, `git@…`, and filesystem paths to bare repos are allowed. `http://` remotes are rejected unless the user passes an explicit `--allow-insecure-remote` flag (plaintext git transport would let a MITM swap ciphertext and metadata).
+**Immutability policy — split by field.**
+
+- **Salt: strictly immutable.** If the salt differs from the one pinned in the local vault config for a previously opened repo → hard error pointing at the rotation procedure (section 5). No flag accepts a salt change in place.
+- **KDF parameters (`time`/`memory`/`threads`): monotonic strengthening only.** If parameters differ from the local pin: strictly stronger (any parameter increased, none decreased) → accept with a notice and update the pin — this is the legitimate `psst migrate kdf` path (1.4); equal → no-op; anything weaker or mixed → hard error. Without a pin (first open / re-clone) → trust and pin (TOFU).
+
+**Pinning mechanism.** The per-env local config (`.psst/config.yaml`, alongside the clone — see 1.4) records `salt`, `kdf params`, and `remote` after the first successful open. A re-clone resets the pin (TOFU); the pin protects continuity against in-repo tampering, not against a first-time attacker who controls the remote — HTTPS/SSH transports and the KDF minimums above are the defense there.
+
+**Remote schemes — exhaustive allowlist.** `ssh://`, `https://`, `git@…` (SSH), and filesystem paths to bare repos are allowed. `http://` is rejected unless the user passes an explicit `--allow-insecure-remote`. `git://` and every other plaintext transport are always rejected, no exceptions.
 
 ### 1.2 GitStore (`internal/store/git.go`)
 
@@ -81,29 +91,33 @@ Implements the **full** existing `SecretStore` interface (`internal/store/store.
 
 | Interface method | GitStore behavior |
 |---|---|
-| `InitSchema` | Idempotent (called on every command by `getUnlockedVault`): if the repo dir exists and `psst.yaml` is valid → no-op; otherwise clone/init + write `psst.yaml` + first commit. Cloning into a dir that already has a valid repo never rewrites `psst.yaml` (salt is immutable — see 1.1) |
+| `InitSchema` | Idempotent (called on every command by `getUnlockedVault`), **strictly non-destructive**: repo dir exists and `psst.yaml` is valid → no-op; repo dir exists but `psst.yaml` is missing or invalid → **hard error** (never regenerate — regenerating would mint a new salt and make every existing `.enc` permanently undecryptable). A new `psst.yaml` is written only when initializing a brand-new vault: `git init` for a local-only repo, or clone where `psst.yaml` arrives from the remote and is never overwritten |
 | `GetSecret` | read + decode file `secrets/[tag/]NAME.enc` |
 | `GetAllSecrets` | read + decode every file (used by `run`, `scan`, `export`) |
-| `SetSecret` | write file → `git add <exact path>` → commit → push |
+| `SetSecret` | write file → `git add <exact path>` → commit → push (inside an `ExecTx` batch when one is open — see below) |
 | `DeleteSecret` | `git rm <path>` + commit + push |
 | `DeleteHistory` | no-op: history lives in commits; deleting history would rewrite shared history — forbidden |
 | `ListSecrets` | walk `secrets/` tree; tag = directory name |
-| `GetHistory` | `git log --follow -- <file>` + `git show <rev>:<path>` for each commit to load the blob; `Version` = 1-based ordinal from oldest to newest (recomputed per call, so `--to N` means "N-th from creation" and stays stable as new commits land); `ArchivedAt` = commit time; `Author` = commit author |
+| `GetHistory` | `git log --follow -- <file>` + `git show <rev>:<path>` per commit to load blobs. **Excludes the current (HEAD) value** — history is archived versions only, matching SQLite semantics; the current value becomes history automatically when the next change lands (its commit joins the log). `Version` = 1-based ordinal from oldest to newest (recomputed per call; oldest-based numbering is stable — existing entries keep their ordinals when new commits append). Result order is newest-first (DESC), matching SQLite. `ID` = 0 (unused by git). `ArchivedAt` = commit time; `Author` = commit author |
 | `AddHistory` | no-op (git owns history) |
 | `PruneHistory` | no-op (pruning would rewrite shared history — forbidden) |
-| `ExecTx` | executes `fn` directly; atomicity comes from the git commit — **batch mode**: one pull at start, one commit + push at end. `import` and `migrate storage` use this to avoid N pull/push cycles |
-| `GetMeta` | reads `psst.yaml`: `kdf_version` (always `2` for git vaults), `kdf_salt` (from `salt`). Never returns empty `kdf_version` for a valid vault — a git vault missing these fields fails validation (1.1) instead of letting `vault.Unlock()` fall back to the v1 SHA-256 path |
+| `ExecTx` | **Reentrant batch**: depth counter per store instance; the outermost call does pull → `fn` → commit + push, nested calls (e.g. from `vault.SetSecret`, which self-wraps today) only run `fn`. `import` and `migrate storage` wrap their whole loop in one outer `ExecTx` — N secrets become one pull/commit/push, not N |
+| `GetMeta` | reads `psst.yaml`: `kdf_version` (always `2` for git vaults), `kdf_salt` (from `salt`), plus the KDF parameters needed by the vault layer to build the derivation call and AAD. Never returns empty `kdf_version` for a valid vault — a git vault missing these fields fails validation (1.1) instead of letting `vault.Unlock()` fall back to the v1 SHA-256 path |
 | `SetMeta` | writes the corresponding `psst.yaml` fields (only `kdf_*` keys are honored) as part of a commit |
 | `Close` | no-op |
 
-**`HistoryEntry.Author`** is a new field on `store.HistoryEntry` / `vault.SecretHistoryEntry`: GitStore fills it from the commit (machine identity, 1.3), SQLite leaves it empty. Output layer shows it when present. This is the only interface/type change in phase 1.
+**History cost.** `vault.SetSecret` calls `GetHistory` before writing (to number the archive version), so a write costs O(commits touching the file) `git show` invocations; `AddHistory` then discards the number (no-op). Phase 1 accepts this cost (histories of individual secrets are naturally small); if profiling ever shows pain, ordinal caching in the local config is the recorded fallback — not phase 1.
 
 - `psst rollback NAME --to N` uses the **existing** `vault.Rollback` flow: it resolves version N from `GetHistory` and writes it via `SetSecret` as a **new** commit. Remote history is never rewritten. No separate rollback path is added.
-- `psst tag NAME T` = `git mv secrets/NAME.enc secrets/T/NAME.enc` + commit + push. Tag = replace: the secret moves out of its previous directory (single tag invariant).
-- `psst untag NAME` = `git mv secrets/T/NAME.enc secrets/NAME.enc` + commit + push (error if already untagged).
-- Multi-tag requests against a git vault (`--tag a --tag b`, `tag` on an already-tagged secret with a *second* tag requested) are rejected at CLI validation with an explicit message — never silently flattened.
+- `psst tag NAME T` = `git mv secrets/[old/]NAME.enc secrets/T/NAME.enc` + commit + push. Tag = replace: the secret always ends up with exactly `T` (moving out of any previous directory). The CLI routes `tag`/`untag` on git vaults to this move operation directly — the SQLite-era `vault.AddTag`/`RemoveTag` (append/remove within a JSON array) is not used. Multi-tag inputs fail closed: `set --tag a --tag b` and any code path handing GitStore more than one tag is a CLI validation error with an explicit message — never silently flattened.
+- `psst untag NAME [TAG]` = `git mv secrets/T/NAME.enc secrets/NAME.enc` + commit + push. On a git vault the optional `TAG` argument (kept for parity with the SQLite form `untag <name> <tag>`) must equal the secret's single current tag; without it, the secret must be tagged, else error.
+- **Path safety.** A cloned repo is untrusted input. Tag names must match `[a-z][a-z0-9-]*`; secret names must match the existing `validName` rule (`[A-Z][A-Z0-9_]*`). The `secrets/` walk ignores (and reports) any entry that does not match the shape `secrets/[TAG/]NAME.enc`; all paths are constructed only from validated components. Directory traversal (`..`, absolute names) from repo content can never reach the filesystem.
 
-**Path safety.** A cloned repo is untrusted input. Tag names must match `[a-z][a-z0-9-]*`; secret names must match the existing `validName` rule (`[A-Z][A-Z0-9_]*`). The `secrets/` walk ignores (and reports) any entry that does not match the shape `secrets/[TAG/]NAME.enc`; all paths are constructed only from validated components. Directory traversal (`..`, absolute names) from repo content can never reach the filesystem.
+**Interface/type changes in phase 1** (complete list — there are three, not one):
+
+1. `store.HistoryEntry` / `vault.SecretHistoryEntry` gain `Author` (git: commit author; SQLite: empty).
+2. `Encryptor`/`KeyDeriver` gain `EncryptWithAAD`/`DecryptWithAAD` and `DeriveKeyFromPassword` (1.1); existing methods keep working unchanged for SQLite vaults.
+3. `KeyProvider` gains a password-only derivation path used by git vaults (1.4).
 
 ### 1.3 Sync protocol
 
@@ -119,19 +133,19 @@ Implements the **full** existing `SecretStore` interface (`internal/store/store.
 
 **Process lock.** All git-mutating sequences (and the read-pull) hold an exclusive process lock on the clone (`flock` on `repo/.psst.lock`). Two processes on one machine — CLI+CLI, or CLI + `psst serve` from phase 2 — serialize instead of racing on `index.lock` and half-written files. Lock waits with a timeout and fails with a clear message.
 
-**Reads** (`get/list/run/history/rollback`): best-effort sync, two distinct outcomes:
+**Reads** (`get/list/run/history` — note: `rollback` is a write, see below): best-effort sync, two distinct outcomes:
 
 - Network failure → work silently from the local clone.
 - Diverged (`pull --ff-only` rejected because the clone has unpushed local commits) → operate locally **but print a warning to stderr on every read command**: "local clone has unpushed changes; run `psst sync`". Stale reads must never be silent.
 
-**Writes** (`set/rm/tag/untag`), under the lock:
+**Writes** (`set/rm/tag/untag/rollback` — rollback resolves the version with a read but records via `SetSecret`, so it runs the full write protocol), under the lock:
 
 1. `git pull --rebase --autostash` (a repo without a remote configured is tolerated — see below).
 2. On rebase conflict (two machines changed the same key between syncs): `git rebase --abort`, fail with "key changed remotely; re-set the value or run `psst sync --discard-local`". No silent last-write-wins. The abort does not lose local commits — but the conflicting local commit stays on the branch and will conflict again, so:
 3. Apply change, `git add <exact secret path>` (never `-A`; no stray files in commits), `git commit -m "psst: <op> <NAME>"`.
 4. `git push`; on failure: error with hint ("change is in the local clone; run `psst sync` later"). If no remote/upstream is configured at all: warning "working locally, no remote configured", not an error (local-only git vault is a valid setup).
 
-**`psst sync`**: explicit `git pull --rebase --autostash` + `git push` for offline recovery.
+**`psst sync`**: explicit `git pull --rebase --autostash` + `git push` for offline recovery, under the lock. On rebase conflict it behaves exactly like a write: `rebase --abort` + the same error pointing at `--discard-local`.
 **`psst sync --discard-local`**: recovery for the conflict deadlock — `git reset --hard @{upstream}` under the lock, dropping local unpushed psst commits. Prints what is being discarded and requires `--confirm` in non-interactive use. This is the only place `reset` is allowed (documented allowlist exception); values in dropped commits remain recoverable from the local reflog.
 
 ### 1.4 CLI UX
@@ -144,12 +158,12 @@ psst migrate kdf                         # explicit form of KDF migration (bare 
 psst migrate storage --to git --remote <url>   # SQLite vault -> git repo
 ```
 
-- **Command naming**: `migrate` becomes a parent with subcommands `kdf` and `storage`; the existing bare `psst migrate` remains as the KDF migration for backward compatibility. `psst migrate storage --to git` **rejects vaults on KDF v1** (SHA-256, no salt) with a pointer to `psst migrate kdf` first — carrying v1 ciphertext into an argon2id-declared `psst.yaml` would produce a vault that cannot be decrypted. `migrate storage` decrypts from the old vault and re-encrypts into the new one (values, tags→directories), using `ExecTx` batch mode: one commit + push at the end.
-- **KDF migration on git vaults** (`psst migrate kdf`): changes `psst.yaml` + re-encrypts all `.enc` files as **one atomic commit** (via `ExecTx`), so other machines never observe a half-migrated vault.
+- **Command naming**: `migrate` becomes a parent with subcommands `kdf` and `storage`; the existing bare `psst migrate` remains as the KDF migration for backward compatibility. `psst migrate storage --to git` **rejects vaults on KDF v1** (SHA-256, no salt) with a pointer to `psst migrate kdf` first — carrying v1 ciphertext into an argon2id-declared `psst.yaml` would produce a vault that cannot be decrypted. `migrate storage` decrypts from the old vault and re-encrypts into the new one (values, tags→directories), using one outer `ExecTx`: one commit + push at the end.
+- **KDF migration on git vaults** (`psst migrate kdf`): writes stronger parameters to `psst.yaml` + re-encrypts all `.enc` files as **one atomic commit** (one outer `ExecTx`), so other machines never observe a half-migrated vault; the monotonic-strengthening rule (1.1) lets them accept the new parameters on next open and update their pins. Salt never changes.
 - **Storage selection priority**: `--storage` flag > persisted default in `.psst/config.yaml` (written by `init --storage git`) > autodetect from directory contents. If selection conflicts with actual contents (e.g. config says git but only `vault.db` exists) → explicit error. `--storage git` on any command before `init` → error with hint. The flag is valid on all vault-opening commands.
-- **Key provider: password-only.** Git vaults derive the key strictly from the password (Argon2id + salt from `psst.yaml`). The OS keychain provider is never consulted for git vaults — `keyring.NewProvider`'s auto-selection would otherwise hand back a machine-local random key from the SQLite era and every decryption would fail. `init --storage git` never writes to the keychain. Empty password is rejected.
-- **Interactive password prompt** is new functionality (today only `PSST_PASSWORD` exists): when the env var is unset and stdin is a TTY, prompt via `golang.org/x/term` (already a dependency).
-- **Wiring**: a single store factory in the CLI wiring (config → `NewSQLite` | `NewGitStore`); `FindVaultPath` generalizes to return the env directory (SQLite appends `vault.db`, GitStore uses `repo/`).
+- **Key provider: password-only.** Git vaults derive the key strictly from the password via `DeriveKeyFromPassword` (Argon2id + salt + params from `psst.yaml`; no base64 passthrough — 1.1). The OS keychain provider is never consulted for git vaults — `keyring.NewProvider`'s auto-selection would otherwise hand back a machine-local random key from the SQLite era and every decryption would fail. `init --storage git` never writes to the keychain. Empty password is rejected.
+- **Interactive password prompt** is new functionality (today only `PSST_PASSWORD` exists): when the env var is unset and stdin is a TTY, prompt via `golang.org/x/term` (already a dependency, `go.mod`).
+- **Wiring**: a single store factory in the CLI wiring (config → `NewSQLite` | `NewGitStore`); `FindVaultPath` generalizes to return the env directory (SQLite appends `vault.db`, GitStore uses `repo/`). The per-env `.psst/config.yaml` also holds the immutability pins and the persisted storage default (1.1).
 - Local clone location: `~/.psst/envs/<name>/repo` (global) or `.psst/envs/<name>/repo` (project), mirroring the existing SQLite layout. One environment = one repository = one password (same isolation as today: one env = one DB).
 - `psst list-envs` detects environments by `<env>/vault.db` **or** `<env>/repo/psst.yaml`.
 - `psst scan` is unchanged: it compares decrypted values against working-tree files; `.enc` files contain ciphertext and never match. Scanning the vault repo itself is unnecessary by design.
@@ -159,16 +173,20 @@ psst migrate storage --to git --remote <url>   # SQLite vault -> git repo
 Real temporary git repositories (`git init --bare` in `t.TempDir()` as remote):
 
 - Full CRUD cycle through GitStore, all 14 interface methods.
-- Two clones racing on the same key → conflict path (abort + error), then recovery via `sync --discard-local`.
+- Two clones racing on the same key → conflict path (abort + error), then recovery via `sync --discard-local`; `psst sync` on a conflicted clone → abort + error too.
 - Two clones racing on different keys → both land after rebase.
 - Offline read: remote removed, reads work; **diverged clone (local commit, failed push) → every read warns on stderr**.
 - Offline write: push fails with the `psst sync` hint; no-remote repo → warning, not error.
+- `InitSchema` non-destructiveness: existing repo with corrupted `psst.yaml` → hard error, salt never regenerated, no commit/push of a broken state.
 - Migration from SQLite vault (values, tags→dirs); v1-KDF vault rejected by `migrate storage`.
+- `migrate kdf` on git vault: one commit; second machine accepts stronger params and updates its pin; weaker params rejected.
 - Concurrent processes on one clone (CLI + CLI) → serialized by the lock, no `index.lock` errors.
+- Nested `ExecTx` (import of N secrets) → exactly one pull/commit/push.
 - Malicious repo: hooks present must never execute; non-conforming paths (`secrets/../x`, bad tag names) ignored/reported by the walk; path construction never escapes `secrets/`.
-- `psst.yaml` validation: missing fields, wrong version/cipher/algo, weak KDF params, salt change after first open → all hard errors.
-- AAD: a ciphertext from another salt/vault fails with the explainable error.
-- History: `Version` ordinals stable across new commits; rollback via existing `vault.Rollback` produces a new commit.
+- `psst.yaml` validation: missing fields, wrong version/cipher/algo, weak KDF params, salt change after first open → all hard errors; base64-shaped password still goes through Argon2 (no passthrough).
+- AAD: a ciphertext from another salt/vault fails with the explainable error; SQLite vaults with nil AAD keep decrypting (old `Encrypt`/`Decrypt` path).
+- History: `Version` ordinals stable across new commits and rollback; HEAD excluded; DESC order; `Author` populated.
+- Concurrent `tag`/`untag` → single-tag invariant holds (replace semantics).
 
 No new dependencies (`os/exec`, `syscall` flock, `golang.org/x/term` already present). Binary stays CGo-free.
 
@@ -186,10 +204,10 @@ psst serve [--listen 127.0.0.1:7788] [--token <tok>]
 1. **Server token — always mandatory** (even on localhost: other local users of a multi-user host can reach `127.0.0.1`): if `--token` is not passed, a token is generated at startup and printed once. Token check is constant-time; success issues an httpOnly session cookie with `SameSite=Strict`. Middleware additionally validates `Host` (`127.0.0.1:<port>` or `localhost:<port>`; rejects foreign Host headers — DNS-rebinding defense) and requires a matching `Origin` header on every mutating request. Default bind `127.0.0.1`; remote access via `ssh -L 7788:127.0.0.1:7788` (documented). `--listen 0.0.0.0` prints an explicit warning.
 2. **Vault password unlock**: Argon2id key derived in memory, bound to the session, 30-minute inactivity timeout, logout wipes the key. Without unlock the UI shows only names/tags/dates (already public in git), never values.
 
-**Screens**: secret list (tree by tag directories, dates from git log, commit author as "changed by machine"), create/edit (`set`), delete, history with rollback. Values shown only via an explicit reveal action (web analog of `psst get`, for the human operator).
+**Screens**: secret list (tree by tag directories, dates from git log, commit author as "changed by machine"), create/edit (`set`), delete, history with rollback. Values are shown only through an explicit reveal action — served by a dedicated endpoint, never embedded in list payloads.
 
 **Tech**: `go:embed` static assets in the binary, vanilla JS, stdlib `net/http`. UI-private REST API behind the session cookie:
-`GET /api/secrets`, `POST /api/secrets/{name}`, `DELETE /api/secrets/{name}`, `GET /api/secrets/{name}/history`, `POST /api/secrets/{name}/rollback`.
+`GET /api/secrets`, `POST /api/secrets/{name}`, `DELETE /api/secrets/{name}`, `GET /api/secrets/{name}/history`, `POST /api/secrets/{name}/rollback`, `GET /api/secrets/{name}/value` (reveal; unlock required).
 
 No new dependencies.
 
@@ -219,21 +237,21 @@ Docs gain a recipes section: `ssh + sshpass -e`, python `os.environ`, node, `doc
 "Never send secrets over network" is refined to:
 
 1. The git remote contains only ciphertext (values encrypted and AAD-bound; names visible by design).
-2. Web UI: localhost + mandatory token + unlock; value reveal only after unlock; Host/Origin checks and `SameSite=Strict`.
+2. Web UI: localhost + mandatory token + unlock; value reveal only via the dedicated reveal endpoint after unlock; Host/Origin checks and `SameSite=Strict`.
 3. Remote UI access only through an SSH tunnel.
-4. Plaintext values gain exactly two **new** places to leave the machine: the child process environment (runner, existing) and the 0600 file produced by `render` (new). `psst get`, `psst export`, and the UI reveal remain the existing explicit, operator-initiated exceptions.
+4. Plaintext egress inventory: the child process environment (runner) is the existing channel; phase 1 adds exactly one new channel — the 0600 file produced by `render`. `psst get` and `psst export` remain the existing explicit operator-initiated exceptions; phase 2 adds the UI reveal as one more explicit, operator-initiated exception.
 
 This formalizes, not weakens, the local-only principle.
 
 ## 5. Password / key rotation (out of scope for phase 1 — recorded direction)
 
-Changing the shared password with the same salt changes nothing for attackers who only have ciphertext; rotation means a **new salt + re-encryption of every `.enc` file + updated `psst.yaml` as one atomic commit** (`ExecTx`), which invalidates all UI sessions and requires every machine to re-enter the new password. Phase 1 ships no `rotate` command; the salt-immutability check (1.1) makes accidental drift impossible, and the documented manual procedure is: create a new vault repo with the new password, `migrate storage` into it, retire the old repo. A first-class `psst rotate` is a candidate for a later phase.
+Changing the shared password with the same salt changes nothing for attackers who only have ciphertext; rotation means a **new salt + re-encryption of every `.enc` file + updated `psst.yaml` as one atomic commit** (`ExecTx`), which invalidates all UI sessions. Because the salt pin (1.1) is strict, a future `psst rotate` necessarily requires an explicit acceptance step on every machine (e.g. `psst sync --accept-rotation` after re-entering the password, or a fresh clone) — the pin must fire; there is no silent adoption. Phase 1 ships no `rotate` command; the documented manual procedure is: create a new vault repo with the new password, `migrate storage` into it, retire the old repo.
 
 ## 6. Implementation phases
 
 | Phase | Content | Depends on |
 |---|---|---|
-| 1 | GitStore (all 14 methods + `Author` field), sync protocol with lock + recovery, `init --storage git`, `psst sync`, `psst migrate kdf`/`storage`, `docs/rules/security.md` refinement (ships in the same PR — ciphertext leaves for a remote from the first commit) | — |
+| 1 | GitStore (all 14 methods + `Author` field + `Encryptor`/`KeyProvider` extensions), sync protocol with lock + recovery, `init --storage git`, `psst sync`, `psst migrate kdf`/`storage`, `docs/rules/security.md` refinement (ships in the same PR — ciphertext leaves for a remote from the first commit) | — |
 | 2 | `psst serve`, UI, session/unlock | phase 1 |
 | 3 | `psst render`, recipes docs | none (parallelizable) |
 
