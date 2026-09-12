@@ -184,6 +184,30 @@ explicit reveal action.
 Remote access: `ssh -L 7788:127.0.0.1:7788 <host>`, then open
 `http://127.0.0.1:7788` locally.
 
+### Render templates
+
+```bash
+psst render --in deploy.env.tpl --out deploy.env           # output is always 0600
+psst render --in config.yaml.tpl --out config.yaml --tag prod
+psst render --in app.ini.tpl --out app.ini --strict
+```
+
+- `{{KEY}}` — must resolve; unresolved names fail the command (fail-closed: a literal
+  `{{KEY}}` never ships). Note: templates mixing another `{{ }}` templating system
+  (Helm, Go templates) cannot be rendered — every `{{...}}` span must resolve.
+- `$KEY` / `${KEY}` — replaced when the secret exists, left as-is otherwise.
+- `--strict` — unresolved `$` placeholders fail too.
+- Rendered files are plaintext secrets: add them to `.gitignore` (only `.env`/`.env.*`
+  are ignored by default); `psst scan` catches tracked leaks.
+
+Protocol-independent recipes (no proxy needed):
+
+```bash
+psst SSHPASS -- sshpass -e ssh user@host            # env injection
+psst render --in deploy.env.tpl --out deploy.env    # file generation
+docker --env-file <(psst export) run ...            # container env
+```
+
 ### Global Flags
 
 All commands support:

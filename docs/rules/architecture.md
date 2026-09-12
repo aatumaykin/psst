@@ -20,6 +20,7 @@ Layered architecture with dependency injection via interfaces. Direction: `cli �
 └──────────┴──────────┴───────────┘
 │  output/                        │  Presentation — human/JSON/quiet formatting
 │  runner/                        │  Execution — subprocess + output masking
+│  render/                        │  Template substitution — single-pass matcher (leaf, no internal deps)
 ```
 
 ## Dependency Rules
@@ -31,6 +32,7 @@ Layered architecture with dependency injection via interfaces. Direction: `cli �
 5. `runner/` is standalone — no imports from `vault`, `store`, `keyring`.
 6. **Allowed:** `cli → server`, `server → vault`, `server → store`, `server → crypto`, `server → keyring`. The web UI server is a presentation layer beside `cli/`; it never imports `cli`, `output`, or `runner`.
 7. The long-lived server serializes all vault/store access behind a single mutex (`server.opMu`); `vault.Vault` is not goroutine-safe.
+8. **Allowed:** `cli → render`. `render/` is a pure leaf package (stdlib only) and must not import any other internal package.
 
 ## Key Interfaces
 
