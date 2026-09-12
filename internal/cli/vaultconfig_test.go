@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/aatumaykin/psst/internal/crypto"
+	"github.com/aatumaykin/psst/internal/store"
 )
 
 func mustParams(t *testing.T) crypto.KDFParams {
@@ -69,6 +72,80 @@ func TestResolveStorage(t *testing.T) {
 	}
 	if _, err := ResolveStorage("bogus", dir2); err == nil {
 		t.Fatal("invalid flag value must error")
+	}
+}
+
+func TestOpenVaultStoreLoadPinsFresh(t *testing.T) {
+	envDir := filepath.Join(t.TempDir(), "env")
+	repo := filepath.Join(envDir, "repo")
+	gs, err := store.NewGitStore(repo, store.GitOptions{})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	if err := gs.InitSchema(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	s, _, err := OpenVaultStore(envDir, "git", "", false)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	cfg, err := LoadVaultConfig(envDir)
+	if err != nil {
+		t.Fatalf("cfg: %v", err)
+	}
+	cfg.PinSalt = "AAAAAAAAAAAAAAAAAAAAAA=="
+	if err := SaveVaultConfig(envDir, *cfg); err != nil {
+		t.Fatalf("save cfg: %v", err)
+	}
+	err = s.InitSchema()
+	if !errors.Is(err, store.ErrSaltChanged) {
+		t.Fatalf("InitSchema after pin tamper = %v, want ErrSaltChanged", err)
+	}
+}
+
+func TestOpenVaultStoreLoadPinsUnreadableConfigFailsClosed(t *testing.T) {
+	envDir := filepath.Join(t.TempDir(), "env")
+	repo := filepath.Join(envDir, "repo")
+	gs, err := store.NewGitStore(repo, store.GitOptions{})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	if err := gs.InitSchema(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	s1, _, err := OpenVaultStore(envDir, "git", "", false)
+	if err != nil {
+		t.Fatalf("open1: %v", err)
+	}
+	if err := s1.InitSchema(); err != nil {
+		t.Fatalf("init1 (pins vault): %v", err)
+	}
+	metaPath := filepath.Join(repo, "psst.yaml")
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatalf("read meta: %v", err)
+	}
+	lines := strings.Split(string(data), "\n")
+	for i, ln := range lines {
+		if strings.HasPrefix(ln, "salt: ") {
+			lines[i] = "salt: " + strings.Repeat("A", 32)
+		}
+	}
+	if err := os.WriteFile(metaPath, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
+		t.Fatalf("tamper meta: %v", err)
+	}
+	s2, _, err := OpenVaultStore(envDir, "git", "", false)
+	if err != nil {
+		t.Fatalf("open2: %v", err)
+	}
+	cfgPath := configPath(envDir)
+	if err := os.Chmod(cfgPath, 0o000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(cfgPath, 0o600) })
+	err = s2.InitSchema()
+	if !errors.Is(err, store.ErrSaltChanged) {
+		t.Fatalf("InitSchema with unreadable config = %v, want ErrSaltChanged (no silent TOFU re-pin)", err)
 	}
 }
 

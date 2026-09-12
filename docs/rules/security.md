@@ -66,10 +66,26 @@ This is a **security-critical** project — a secrets manager. Security rules ap
 - **Never** add a `--verbose` flag that prints secret values.
 - **Never** cache decrypted values in package-level variables.
 - **Never** expose secrets in JSON output unless explicitly requested via `psst get`.
-- **Never** send plaintext secrets over network. The git remote of a git-storage vault contains only AES-256-GCM ciphertext (AAD-bound to vault metadata); secret names are visible as file names by design. The web UI (future phase) binds to localhost with a mandatory token. Plaintext egress inventory: the child process environment (runner) is the existing channel; `psst render` (future phase) adds a 0600 file channel. `psst get` and `psst export` remain explicit operator-initiated exceptions.
+- **Never** send plaintext secrets over network. The git remote of a git-storage vault contains only AES-256-GCM ciphertext (AAD-bound to vault metadata); secret names are visible as file names by design. The web UI (`psst serve`) binds to localhost by default and requires a mandatory
+token plus a second vault-password unlock barrier; Host and Origin checks defend
+against DNS rebinding/CSRF; values are revealed only through the dedicated
+`/api/secrets/{name}/value` endpoint after unlock. Remote UI access only via SSH tunnel. Plaintext egress inventory: the child process environment (runner) is the existing channel; `psst render` (future phase) adds a 0600 file channel. `psst get` and `psst export` remain explicit operator-initiated exceptions.
 - **Never** add telemetry or crash reporting that could include secret values.
 - **Never** use `log.Printf` with secret-containing structs.
 - **Never** store vault key in plaintext file.
+
+## Web UI (`psst serve`)
+
+- Default bind `127.0.0.1`; non-loopback `--listen` prints an explicit tunnel warning.
+- Two barriers: server token (SHA-256 digest in memory, constant-time compare,
+  printed once) and per-session vault unlock (Argon2id key in memory, 30-minute
+  inactivity timeout, zeroed on logout/expiry/shutdown).
+- Host allowlist (`127.0.0.1`/`localhost`/`[::1]` + listener port) on every request;
+  `Origin` required and matching on every mutating request; cookie is `HttpOnly`,
+  `SameSite=Strict`.
+- Without unlock the UI serves only names/tags/dates/authors — never values.
+- All vault/store access in the server serializes behind one mutex; the server is
+  another client of the git clone (repo `flock` still guards cross-process).
 
 ## Vulnerability Response
 

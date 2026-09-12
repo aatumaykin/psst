@@ -519,6 +519,24 @@ func TestVaultRollbackReencrypts(t *testing.T) {
 	}
 }
 
+func TestVaultListSecretsMapsUpdatedBy(t *testing.T) {
+	v := newTestGitVault(t)
+	defer v.Close()
+	if err := v.Unlock(); err != nil {
+		t.Fatalf("unlock: %v", err)
+	}
+	if err := v.SetSecret("KEY", []byte("secret123"), nil); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	metas, err := v.ListSecrets()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(metas) != 1 || metas[0].UpdatedBy == "" {
+		t.Fatalf("updatedBy not mapped: %+v", metas)
+	}
+}
+
 func TestVaultBatchSingleCommit(t *testing.T) {
 	v := newTestGitVault(t)
 	defer v.Close()

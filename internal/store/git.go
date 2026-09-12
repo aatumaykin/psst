@@ -21,6 +21,7 @@ var (
 	ErrNoRemote          = errors.New("no remote configured")
 	ErrRemoteMetaChanged = errors.New("vault parameters changed remotely; re-run the command")
 	ErrConflict          = errors.New("key changed remotely; re-set the value or run `psst sync --discard-local`")
+	ErrPushFailed        = errors.New("push failed")
 )
 
 type GitOptions struct {
@@ -217,6 +218,10 @@ func (g *GitStore) hasCommits() bool {
 func (g *GitStore) hasRemote() bool {
 	out, err := g.git.Run("config", "--get", "remote.origin.url")
 	return err == nil && strings.TrimSpace(out) != ""
+}
+
+func (g *GitStore) HasRemote() bool {
+	return g.hasRemote()
 }
 
 type gitEntry struct {
@@ -424,7 +429,7 @@ func (g *GitStore) push() error {
 		return ErrNoRemote
 	}
 	if _, err := g.git.Run("push"); err != nil {
-		return fmt.Errorf("push failed; change is in the local clone, run `psst sync` later: %w", err)
+		return fmt.Errorf("%w; change is in the local clone, run `psst sync` later: %w", ErrPushFailed, err)
 	}
 	return nil
 }
@@ -434,7 +439,7 @@ func (g *GitStore) pushAll() error {
 		return ErrNoRemote
 	}
 	if _, err := g.git.Run("push", "-u", "origin", "HEAD"); err != nil {
-		return fmt.Errorf("push failed; change is in the local clone, run `psst sync` later: %w", err)
+		return fmt.Errorf("%w; change is in the local clone, run `psst sync` later: %w", ErrPushFailed, err)
 	}
 	return nil
 }
@@ -512,15 +517,20 @@ func (g *GitStore) DiscardLocal() error {
 	return g.reloadMetaAndCheck()
 }
 
-func (g *GitStore) entryTimes(rel string) (time.Time, time.Time, error) {
-	out, err := g.git.Run("log", "-1", "--format=%cI", "--", rel)
+func (g *GitStore) entryTimes(rel string) (time.Time, time.Time, string, error) {
+	out, err := g.git.Run("log", "-1", "--format=%cI%x1f%an", "--", rel)
 	if err != nil {
-		return time.Time{}, time.Time{}, err
+		return time.Time{}, time.Time{}, "", err
 	}
-	updated, err := time.Parse(time.RFC3339, strings.TrimSpace(out))
+	fields := strings.SplitN(strings.TrimSpace(out), "\x1f", 2)
+	if len(fields) != 2 {
+		return time.Time{}, time.Time{}, "", fmt.Errorf("parse git log output for %s", rel)
+	}
+	updated, err := time.Parse(time.RFC3339, fields[0])
 	if err != nil {
-		return time.Time{}, time.Time{}, err
+		return time.Time{}, time.Time{}, "", err
 	}
+	author := fields[1]
 	created := updated
 	out, err = g.git.Run("log", "--diff-filter=A", "--format=%cI", "--", rel)
 	if err == nil {
@@ -536,7 +546,7 @@ func (g *GitStore) entryTimes(rel string) (time.Time, time.Time, error) {
 			}
 		}
 	}
-	return created, updated, nil
+	return created, updated, author, nil
 }
 
 func (g *GitStore) mutate(msg string, op func() error) error {
@@ -715,7 +725,7 @@ func (g *GitStore) GetSecret(name string) (*StoredSecret, error) {
 	}
 	created, updated := time.Time{}, time.Time{}
 	if rel, err := filepath.Rel(g.repoDir, path); err == nil {
-		created, updated, _ = g.entryTimes(rel)
+		created, updated, _, _ = g.entryTimes(rel)
 	}
 	if diverged {
 		fmt.Fprintln(os.Stderr, "psst: warning: local clone has unpushed changes; run psst sync")
@@ -764,11 +774,11 @@ func (g *GitStore) ListSecrets() ([]SecretMeta, error) {
 		if e.tag != "" {
 			secretTags = []string{e.tag}
 		}
-		created, updated := time.Time{}, time.Time{}
+		created, updated, author := time.Time{}, time.Time{}, ""
 		if rel, err := filepath.Rel(g.repoDir, e.path); err == nil {
-			created, updated, _ = g.entryTimes(rel)
+			created, updated, author, _ = g.entryTimes(rel)
 		}
-		result = append(result, SecretMeta{Name: e.name, Tags: secretTags, CreatedAt: created, UpdatedAt: updated})
+		result = append(result, SecretMeta{Name: e.name, Tags: secretTags, CreatedAt: created, UpdatedAt: updated, UpdatedBy: author})
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result, nil

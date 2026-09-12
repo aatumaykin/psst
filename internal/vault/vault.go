@@ -274,6 +274,7 @@ func (v *Vault) ListSecrets() ([]SecretMeta, error) {
 			Tags:      m.Tags,
 			CreatedAt: m.CreatedAt,
 			UpdatedAt: m.UpdatedAt,
+			UpdatedBy: m.UpdatedBy,
 		}
 	}
 	return result, nil

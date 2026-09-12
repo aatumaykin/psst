@@ -1,0 +1,29 @@
+:root { --fg:#1c2333; --bg:#f6f7f9; --card:#fff; --line:#d9dee7; --accent:#2453ff; --danger:#c0392b; }
+* { box-sizing: border-box; }
+body { margin:0; font:15px/1.5 system-ui, sans-serif; color:var(--fg); background:var(--bg); }
+header#top { display:flex; gap:1rem; align-items:center; padding:.7rem 1.2rem; background:var(--card); border-bottom:1px solid var(--line); }
+#vault-label { font-weight:700; letter-spacing:.06em; }
+#unlock-state { color:#667; font-size:.85rem; }
+main { max-width:880px; margin:0 auto; padding:1.2rem; }
+button { border:1px solid var(--accent); background:var(--accent); color:#fff; border-radius:6px; padding:.42rem .9rem; font:inherit; cursor:pointer; }
+button.ghost { background:transparent; color:var(--fg); border-color:var(--line); }
+button.danger { background:var(--danger); border-color:var(--danger); }
+button:hover { filter:brightness(1.06); }
+.toolbar { display:flex; gap:.6rem; margin:.6rem 0 1rem; }
+input, textarea { font:inherit; padding:.45rem .6rem; border:1px solid var(--line); border-radius:6px; width:100%; }
+form label { display:block; margin:.7rem 0; }
+form button { margin-top:.6rem; }
+.error { color:var(--danger); min-height:1.2em; }
+.warning { background:#fff6e5; border:1px solid #eedc9a; padding:.5rem .7rem; border-radius:6px; }
+.notice { color:#667; font-size:.85rem; }
+.group { margin-bottom:1rem; }
+.group h3 { margin:.2rem 0 .4rem; font-size:.8rem; text-transform:uppercase; letter-spacing:.08em; color:#667; }
+.secret-row { display:flex; gap:.8rem; align-items:center; background:var(--card); border:1px solid var(--line); border-radius:6px; padding:.45rem .7rem; margin-bottom:.35rem; }
+.secret-row .name { font-family:ui-monospace, monospace; font-weight:600; cursor:pointer; flex:1; }
+.secret-row .meta { color:#667; font-size:.8rem; }
+table { border-collapse:collapse; width:100%; background:var(--card); border:1px solid var(--line); border-radius:6px; }
+th, td { text-align:left; padding:.45rem .7rem; border-bottom:1px solid var(--line); font-size:.9rem; }
+#reveal-box { background:#101623; color:#d7e3ff; padding:.7rem; border-radius:6px; overflow:auto; font-family:ui-monospace, monospace; }
+#modal-unlock { position:fixed; inset:0; background:rgba(12,18,30,.55); display:flex; align-items:center; justify-content:center; }
+.modal-card { background:var(--card); border-radius:10px; padding:1.2rem 1.4rem; width:min(420px, 90vw); }
+[hidden] { display:none !important; }

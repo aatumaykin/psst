@@ -12,6 +12,8 @@ Layered architecture with dependency injection via interfaces. Direction: `cli �
 ├─────────────────────────────────┤
 │  cli/                           │  Cobra commands — parsing, validation, I/O
 ├─────────────────────────────────┤
+│  server/                        │  Web UI — HTTP handlers, sessions, embedded SPA
+├─────────────────────────────────┤
 │  vault/                         │  Business logic facade — CRUD, history, tags
 ├──────────┬──────────┬───────────┤
 │  crypto/ │  store/  │ keyring/  │  Infrastructure — encryption, DB, OS keychain
@@ -27,6 +29,8 @@ Layered architecture with dependency injection via interfaces. Direction: `cli �
 3. **Prohibited:** `vault → cli`, `store → cli`, any upward dependency from inner to outer layers.
 4. `output/` may import `vault/` types only (for `vault.SecretMeta`, `vault.SecretHistoryEntry`). No business logic in output.
 5. `runner/` is standalone — no imports from `vault`, `store`, `keyring`.
+6. **Allowed:** `cli → server`, `server → vault`, `server → store`, `server → crypto`, `server → keyring`. The web UI server is a presentation layer beside `cli/`; it never imports `cli`, `output`, or `runner`.
+7. The long-lived server serializes all vault/store access behind a single mutex (`server.opMu`); `vault.Vault` is not goroutine-safe.
 
 ## Key Interfaces
 

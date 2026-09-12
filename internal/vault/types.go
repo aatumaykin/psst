@@ -17,6 +17,7 @@ type SecretMeta struct {
 	Tags      []string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	UpdatedBy string
 }
 
 type SecretHistoryEntry struct {
