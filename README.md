@@ -204,6 +204,8 @@ Protocol-independent recipes (no proxy needed):
 
 ```bash
 psst SSHPASS -- sshpass -e ssh user@host            # env injection
+psst API_KEY -- python deploy.py                    # os.environ["API_KEY"]
+psst API_KEY -- node deploy.js                      # process.env.API_KEY
 psst render --in deploy.env.tpl --out deploy.env    # file generation
 docker --env-file <(psst export) run ...            # container env
 ```

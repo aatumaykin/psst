@@ -90,6 +90,20 @@ func TestRenderUnresolvedBrace(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(e.dir, "nope.env")); !os.IsNotExist(err) {
 		t.Fatal("output file must not be created on unresolved")
 	}
+	e.writeFile("tpl3", "{{MISSING}}")
+	if err := os.WriteFile(filepath.Join(e.dir, "exists.env"), []byte("sentinel-bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, code := e.run("render", "--in", "tpl3", "--out", "exists.env"); code != 1 {
+		t.Fatalf("pre-existing code = %d, want 1", code)
+	}
+	data, err := os.ReadFile(filepath.Join(e.dir, "exists.env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "sentinel-bytes" {
+		t.Fatalf("pre-existing output must be untouched: %q", data)
+	}
 }
 
 func TestRenderStrict(t *testing.T) {
@@ -128,6 +142,14 @@ func TestRenderTagFilter(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(e.dir, "tag2.env"))
 	if string(data) != "secret123" {
 		t.Fatalf("content = %q", data)
+	}
+	e.writeFile("tpl3", "$DB_PASS")
+	if _, _, code := e.run("render", "--in", "tpl3", "--out", "tag3.env", "--tag", "prod"); code != 0 {
+		t.Fatalf("tag literal code = %d", code)
+	}
+	data, _ = os.ReadFile(filepath.Join(e.dir, "tag3.env"))
+	if string(data) != "$DB_PASS" {
+		t.Fatalf("secret outside tag set must stay literal: %q", data)
 	}
 }
 

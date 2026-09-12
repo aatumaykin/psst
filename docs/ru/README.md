@@ -206,6 +206,8 @@ psst render --in app.ini.tpl --out app.ini --strict
 
 ```bash
 psst SSHPASS -- sshpass -e ssh user@host            # инъекция в env
+psst API_KEY -- python deploy.py                    # os.environ["API_KEY"]
+psst API_KEY -- node deploy.js                      # process.env.API_KEY
 psst render --in deploy.env.tpl --out deploy.env    # генерация файла
 docker --env-file <(psst export) run ...            # env для контейнера
 ```

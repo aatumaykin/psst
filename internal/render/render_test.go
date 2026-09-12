@@ -2,7 +2,6 @@ package render
 
 import (
 	"bytes"
-	"strings"
 	"testing"
 )
 
@@ -145,7 +144,21 @@ func TestRenderBytePreservation(t *testing.T) {
 	if !bytes.Equal(out, []byte{'a', 0xff, 0xfe, 'x', 'b'}) || subs != 1 {
 		t.Fatalf("bytes = %x", out)
 	}
-	if strings.ContainsRune(string(out), 0) == false && len(out) != 5 {
-		t.Fatal("length drift")
+	if len(out) != 5 {
+		t.Fatalf("length drift: %d", len(out))
+	}
+}
+
+func TestRenderNonConformingNamesIgnored(t *testing.T) {
+	values := map[string][]byte{"api_key": []byte("x")}
+	out, unresolved, subs := Render([]byte("{{api_key}} ${api_key}"), values)
+	if string(out) != "{{api_key}} ${api_key}" || subs != 0 {
+		t.Fatalf("non-conforming names must not substitute: %q %d", out, subs)
+	}
+	if len(unresolved) != 2 {
+		t.Fatalf("unresolved = %v, want 2", unresolved)
+	}
+	if unresolved[0].Syntax != SyntaxBrace || unresolved[1].Syntax != SyntaxShell {
+		t.Fatalf("syntaxes = %v", unresolved)
 	}
 }

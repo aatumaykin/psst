@@ -117,9 +117,7 @@ var renderCmd = &cobra.Command{
 		if err := writeRenderedOutput(out, result); err != nil {
 			exitWithError(err.Error())
 		}
-		if !quiet && !jsonOut {
-			f.Success(fmt.Sprintf("Rendered %d placeholders → %s", subs, out))
-		}
+		f.Success(fmt.Sprintf("Rendered %d placeholders → %s", subs, out))
 	},
 }
 
