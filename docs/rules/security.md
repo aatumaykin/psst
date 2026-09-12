@@ -69,7 +69,7 @@ This is a **security-critical** project — a secrets manager. Security rules ap
 - **Never** send plaintext secrets over network. The git remote of a git-storage vault contains only AES-256-GCM ciphertext (AAD-bound to vault metadata); secret names are visible as file names by design. The web UI (`psst serve`) binds to localhost by default and requires a mandatory
 token plus a second vault-password unlock barrier; Host and Origin checks defend
 against DNS rebinding/CSRF; values are revealed only through the dedicated
-`/api/secrets/{name}/value` endpoint after unlock. Remote UI access only via SSH tunnel. Plaintext egress inventory: the child process environment (runner) is the existing channel; `psst render` (future phase) adds a 0600 file channel. `psst get` and `psst export` remain explicit operator-initiated exceptions.
+`/api/secrets/{name}/value` endpoint after unlock. Remote UI access only via SSH tunnel. Plaintext egress inventory: the child process environment (runner), the 0600 file produced by `psst render`, the web UI reveal (phase 2), and the explicit operator-initiated exceptions `psst get` / `psst export`.
 - **Never** add telemetry or crash reporting that could include secret values.
 - **Never** use `log.Printf` with secret-containing structs.
 - **Never** store vault key in plaintext file.
