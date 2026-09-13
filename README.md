@@ -219,6 +219,10 @@ psst sync --accept-rotation                 # on every other machine
 
 - `psst rotate` (git storage only) mints a new salt and re-encrypts every secret plus
   the updated `psst.yaml` as ONE commit; the rotating machine re-pins itself.
+- `psst rotate --kdf` also strengthens the KDF parameters to the defaults in the same
+  commit — never weakens: on a vault already at defaults it is a params no-op (the salt
+  still rotates), and on a vault stronger than defaults it fails closed (there is no CLI
+  path to lower parameters, by design).
 - On every other machine the old password fails with
   `vault salt changed; run 'psst sync --accept-rotation' (or re-clone)`. Acceptance
   verifies the NEW password before the pin moves — a wrong password leaves the clone

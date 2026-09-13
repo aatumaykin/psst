@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/aatumaykin/psst/internal/store"
 )
 
 func exitCode(err error) int {
@@ -32,9 +34,10 @@ func (e *testEnv) runWithPassword(t *testing.T, password string, args ...string)
 	return outBuf.String(), errBuf.String(), exitCode(err)
 }
 
-func runRotateStdin(t *testing.T, e *testEnv, oldPassword, newPassword string) (string, int) {
+func runRotateStdin(t *testing.T, e *testEnv, oldPassword, newPassword string, extraArgs ...string) (string, int) {
 	t.Helper()
-	cmd := exec.Command(e.binary, "rotate", "--stdin")
+	args := append([]string{"rotate", "--stdin"}, extraArgs...)
+	cmd := exec.Command(e.binary, args...)
 	cmd.Dir = e.dir
 	cmd.Env = append(os.Environ(), "PSST_PASSWORD="+oldPassword, "HOME="+e.dir)
 	stdin, _ := cmd.StdinPipe()
@@ -84,6 +87,52 @@ func TestRotateEndToEnd(t *testing.T) {
 	stdout, _, code := e.runWithPassword(t, "new-password", "get", "API_KEY", "--storage", "git")
 	if code != 0 || !strings.Contains(stdout, "secret123") {
 		t.Fatalf("new password get: %s %d", stdout, code)
+	}
+}
+
+func readEnvVaultMeta(t *testing.T, e *testEnv) *store.VaultMeta {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(e.dir, ".psst", "repo", "psst.yaml"))
+	if err != nil {
+		t.Fatalf("read psst.yaml: %v", err)
+	}
+	meta, err := store.ParseVaultMeta(data)
+	if err != nil {
+		t.Fatalf("parse psst.yaml: %v", err)
+	}
+	return meta
+}
+
+func TestRotateKDFEndToEnd(t *testing.T) {
+	e := newTestEnv(t)
+	if _, _, code := e.run("init", "--storage", "git"); code != 0 {
+		t.Fatal("git init failed")
+	}
+	e.setSecret(t, "API_KEY", "secret123")
+	before := readEnvVaultMeta(t, e)
+
+	out, code := runRotateStdin(t, e, "test-password", "new-password", "--kdf")
+	if code != 0 {
+		t.Fatalf("rotate --kdf failed: %s", out)
+	}
+	if !strings.Contains(out, "Rotated: 1 secrets re-encrypted") {
+		t.Fatalf("summary: %s", out)
+	}
+
+	if _, _, code := e.runWithPassword(t, "test-password", "get", "API_KEY", "--storage", "git"); code != 1 {
+		t.Fatal("old password must fail after rotation")
+	}
+	stdout, _, code := e.runWithPassword(t, "new-password", "get", "API_KEY", "--storage", "git")
+	if code != 0 || !strings.Contains(stdout, "secret123") {
+		t.Fatalf("new password get: %s %d", stdout, code)
+	}
+
+	after := readEnvVaultMeta(t, e)
+	if after.SaltB64 == before.SaltB64 {
+		t.Fatal("salt must rotate even when params are a no-op")
+	}
+	if after.Params.Time != 3 || after.Params.Memory != 65536 {
+		t.Fatalf("params weakened or changed: %+v", after.Params)
 	}
 }
 

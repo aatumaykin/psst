@@ -4,12 +4,14 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/aatumaykin/psst/internal/crypto"
+	"github.com/aatumaykin/psst/internal/kdf"
 	"github.com/aatumaykin/psst/internal/keyring"
 	"github.com/aatumaykin/psst/internal/store"
 )
@@ -614,7 +616,7 @@ func TestVaultRotate(t *testing.T) {
 	oldTime, _ := gs.GetMeta("kdf_time")
 	oldMemory, _ := gs.GetMeta("kdf_memory")
 
-	n, err := v.Rotate("new-password")
+	n, err := v.Rotate("new-password", nil)
 	if err != nil {
 		t.Fatalf("rotate: %v", err)
 	}
@@ -655,7 +657,7 @@ func TestVaultRotateOldKeyDies(t *testing.T) {
 	if err := v.SetSecret("API_KEY", []byte("secret123"), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v.Rotate("new-password"); err != nil {
+	if _, err := v.Rotate("new-password", nil); err != nil {
 		t.Fatal(err)
 	}
 	old := vaultFromPassword(t, gs, "test-password")
@@ -689,7 +691,7 @@ func TestVaultRotateIncludesInTxArrivals(t *testing.T) {
 	if err := ov.SetSecret("LATE", []byte("late-secret456"), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v.Rotate("new-password"); err != nil {
+	if _, err := v.Rotate("new-password", nil); err != nil {
 		t.Fatalf("rotate: %v", err)
 	}
 	got, err := v.GetSecret("LATE")
@@ -710,7 +712,7 @@ func TestVaultRotateAbortsOnUndecryptable(t *testing.T) {
 	if err := v.VerifyAllDecryptable(); err == nil {
 		t.Fatal("pre-flight must fail on garbage")
 	}
-	if _, err := v.Rotate("new-password"); err == nil {
+	if _, err := v.Rotate("new-password", nil); err == nil {
 		t.Fatal("rotate must abort")
 	}
 	salt, _ := g.GetMeta("kdf_salt")
@@ -726,11 +728,122 @@ func TestVaultRotateAbortsOnUndecryptable(t *testing.T) {
 func TestVaultRotateEmptyVault(t *testing.T) {
 	g, _ := newGitVaultStore(t)
 	v := vaultFromPassword(t, g, "test-password")
-	n, err := v.Rotate("new-password")
+	n, err := v.Rotate("new-password", nil)
 	if err != nil || n != 0 {
 		t.Fatalf("empty rotate = %d %v", n, err)
 	}
 	if err := v.SetSecret("FIRST", []byte("x"), nil); err != nil {
 		t.Fatalf("write after empty rotate: %v", err)
+	}
+}
+
+func readVaultMetaFile(t *testing.T, repo string) *store.VaultMeta {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repo, "psst.yaml"))
+	if err != nil {
+		t.Fatalf("read psst.yaml: %v", err)
+	}
+	meta, err := store.ParseVaultMeta(data)
+	if err != nil {
+		t.Fatalf("parse psst.yaml: %v", err)
+	}
+	return meta
+}
+
+func TestVaultRotateKDFStrengthens(t *testing.T) {
+	remote := newBareRemoteVault(t)
+	repo := filepath.Join(t.TempDir(), "repo")
+	gs, err := store.NewGitStore(repo, store.GitOptions{Remote: remote})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gs.InitSchema(); err != nil {
+		t.Fatal(err)
+	}
+	v := vaultFromPassword(t, gs, "test-password")
+	if err := v.SetSecret("API_KEY", []byte("secret123"), []string{"prod"}); err != nil {
+		t.Fatal(err)
+	}
+
+	stronger := kdf.Params{Time: 4, Memory: 64 * 1024, Threads: 4}
+	n, err := v.Rotate("new-password", &stronger)
+	if err != nil {
+		t.Fatalf("rotate with stronger params: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("rotated = %d, want 1", n)
+	}
+
+	meta := readVaultMetaFile(t, repo)
+	if meta.Params.Time != 4 {
+		t.Fatalf("kdf_time = %d, want 4", meta.Params.Time)
+	}
+	if meta.Params != stronger {
+		t.Fatalf("params = %+v, want %+v", meta.Params, stronger)
+	}
+
+	out, _ := store.NewGitRunner(repo).Run("log", "--format=%s", "-3")
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) < 2 || lines[0] != "psst: rotate" {
+		t.Fatalf("log = %q", out)
+	}
+
+	got, err := v.GetSecret("API_KEY")
+	if err != nil || string(got.Value) != "secret123" || got.Tags[0] != "prod" {
+		t.Fatalf("roundtrip = %q %v", got.Value, err)
+	}
+	if err := v.SetSecret("AFTER", []byte("x"), nil); err != nil {
+		t.Fatalf("same-process write: %v", err)
+	}
+
+	cloned, err := store.CloneGitVault(remote, filepath.Join(t.TempDir(), "repo2"), store.GitOptions{Remote: remote})
+	if err != nil {
+		t.Fatalf("clone: %v", err)
+	}
+	if _, err := cloned.SyncAcceptRotation(); err != nil {
+		t.Fatalf("accept on second clone: %v", err)
+	}
+	cv := vaultFromPassword(t, cloned, "new-password")
+	cgot, err := cv.GetSecret("API_KEY")
+	if err != nil || string(cgot.Value) != "secret123" {
+		t.Fatalf("second clone roundtrip = %q %v", cgot.Value, err)
+	}
+}
+
+func TestVaultRotateKDFWeakeningFails(t *testing.T) {
+	g, repo := newGitVaultStore(t)
+	v := vaultFromPassword(t, g, "test-password")
+	if err := v.SetSecret("API_KEY", []byte("secret123"), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	stronger := kdf.Params{Time: 4, Memory: 64 * 1024, Threads: 4}
+	if _, err := v.Rotate("mid-password", &stronger); err != nil {
+		t.Fatalf("strengthen: %v", err)
+	}
+
+	saltBefore, _ := g.GetMeta("kdf_salt")
+	logBefore, _ := store.NewGitRunner(repo).Run("log", "--format=%H")
+
+	weaker := kdf.Params{Time: 3, Memory: 64 * 1024, Threads: 4}
+	_, err := v.Rotate("new-password", &weaker)
+	if err == nil || !strings.Contains(err.Error(), "rotation must not weaken KDF parameters") {
+		t.Fatalf("weakening error = %v", err)
+	}
+
+	saltAfter, _ := g.GetMeta("kdf_salt")
+	if saltAfter != saltBefore {
+		t.Fatalf("salt changed on weakening abort: %q was %q", saltAfter, saltBefore)
+	}
+	logAfter, _ := store.NewGitRunner(repo).Run("log", "--format=%H")
+	if logAfter != logBefore {
+		t.Fatal("commits landed on weakening abort")
+	}
+	if got, _ := g.GetMeta("kdf_time"); got != "4" {
+		t.Fatalf("kdf_time = %q, want 4", got)
+	}
+	got, err := v.GetSecret("API_KEY")
+	if err != nil || string(got.Value) != "secret123" {
+		t.Fatalf("vault still readable = %q %v", got.Value, err)
 	}
 }

@@ -61,6 +61,7 @@ var rotateCmd = &cobra.Command{
 		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
 		f := getFormatter(jsonOut, quiet)
 		useStdin, _ := cmd.Flags().GetBool("stdin")
+		useKDF, _ := cmd.Flags().GetBool("kdf")
 
 		envDir, err := vault.FindVaultDir(global, env)
 		if err != nil {
@@ -105,7 +106,12 @@ var rotateCmd = &cobra.Command{
 		if err != nil {
 			exitWithError(err.Error())
 		}
-		n, err := v.Rotate(newPassword)
+		var target *crypto.KDFParams
+		if useKDF {
+			defaults := crypto.DefaultKDFParams()
+			target = &defaults
+		}
+		n, err := v.Rotate(newPassword, target)
 		if err != nil {
 			exitWithError(err.Error() + "; working tree may be dirty; run 'psst sync --discard-local' to reset to the remote (pre-rotation) state")
 		}
@@ -154,5 +160,6 @@ func atoiDefault(s string) int {
 //nolint:gochecknoinits // cobra command registration
 func init() {
 	rotateCmd.Flags().Bool("stdin", false, "Read the new password from stdin (one line)")
+	rotateCmd.Flags().Bool("kdf", false, "Strengthen KDF parameters to defaults in the same commit")
 	rootCmd.AddCommand(rotateCmd)
 }

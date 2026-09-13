@@ -789,7 +789,7 @@ func TestServeSelfHealAfterRotation(t *testing.T) {
 	if err := rot.Unlock(); err != nil {
 		t.Fatalf("rot unlock: %v", err)
 	}
-	if _, err := rot.Rotate("new-password"); err != nil {
+	if _, err := rot.Rotate("new-password", nil); err != nil {
 		t.Fatalf("rotate: %v", err)
 	}
 	if _, err := gs.SyncAcceptRotation(); err != nil {

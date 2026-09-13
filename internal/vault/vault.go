@@ -11,6 +11,7 @@ import (
 	"strconv"
 
 	"github.com/aatumaykin/psst/internal/crypto"
+	"github.com/aatumaykin/psst/internal/kdf"
 	"github.com/aatumaykin/psst/internal/keyring"
 	"github.com/aatumaykin/psst/internal/store"
 )
@@ -480,7 +481,7 @@ func (v *Vault) VerifyAllDecryptable() error {
 	return nil
 }
 
-func (v *Vault) Rotate(newPassword string) (int, error) {
+func (v *Vault) Rotate(newPassword string, params *kdf.Params) (int, error) {
 	if v.key == nil {
 		return 0, errors.New("vault is locked")
 	}
@@ -488,17 +489,24 @@ func (v *Vault) Rotate(newPassword string) (int, error) {
 	if !ok {
 		return 0, errors.New("rotate requires git storage")
 	}
-	params := crypto.KDFParams{
+	current := crypto.KDFParams{
 		Time:    uint32(metaAtoi(v.store, "kdf_time")),
 		Memory:  uint32(metaAtoi(v.store, "kdf_memory")),
 		Threads: uint8(metaAtoi(v.store, "kdf_threads")),
+	}
+	target := current
+	if params != nil {
+		if params.Time < current.Time || params.Memory < current.Memory || params.Threads < current.Threads {
+			return 0, errors.New("rotation must not weaken KDF parameters")
+		}
+		target = *params
 	}
 	salt := make([]byte, 16)
 	if _, err := rand.Read(salt); err != nil {
 		return 0, fmt.Errorf("generate salt: %w", err)
 	}
 	newSaltB64 := base64.StdEncoding.EncodeToString(salt)
-	newKey, err := v.enc.DeriveKeyFromPassword(newPassword, salt, params)
+	newKey, err := v.enc.DeriveKeyFromPassword(newPassword, salt, target)
 	if err != nil {
 		return 0, fmt.Errorf("derive key: %w", err)
 	}
@@ -534,6 +542,17 @@ func (v *Vault) Rotate(newPassword string) (int, error) {
 				return fmt.Errorf("update %s: %w", s.Name, err)
 			}
 			rotated++
+		}
+		if params != nil {
+			if err := v.store.SetMeta("kdf_time", strconv.Itoa(int(target.Time))); err != nil {
+				return fmt.Errorf("set kdf_time: %w", err)
+			}
+			if err := v.store.SetMeta("kdf_memory", strconv.Itoa(int(target.Memory))); err != nil {
+				return fmt.Errorf("set kdf_memory: %w", err)
+			}
+			if err := v.store.SetMeta("kdf_threads", strconv.Itoa(int(target.Threads))); err != nil {
+				return fmt.Errorf("set kdf_threads: %w", err)
+			}
 		}
 		return gs.RotateSalt(newSaltB64)
 	})
