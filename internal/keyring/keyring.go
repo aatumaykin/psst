@@ -2,25 +2,23 @@ package keyring
 
 import (
 	"os"
-
-	"github.com/aatumaykin/psst/internal/crypto"
 )
 
+// KeyDeriver derives encryption keys from passwords.
 type KeyDeriver interface {
 	KeyToBuffer(key string) ([]byte, error)
-	KeyToBufferV2(key string) ([]byte, error)
-	KeyToBufferV2WithSalt(key string, salt []byte) ([]byte, error)
-	DeriveKeyFromPassword(password string, salt []byte, params crypto.KDFParams) ([]byte, error)
 	GenerateKey() ([]byte, error)
 }
 
+// KeyProvider retrieves and stores encryption keys using the OS keychain or env vars.
 type KeyProvider interface {
-	GetRawKey(service, account string) (string, error)
+	GetRawKey(service, account string) ([]byte, error)
 	SetKey(service, account string, key []byte) error
 	IsAvailable() bool
 	GenerateKey() ([]byte, error)
 }
 
+// NewProvider returns an OS keychain provider if available, otherwise an env-based one.
 func NewProvider(deriver KeyDeriver) KeyProvider {
 	oskr := &OSKeyring{deriver: deriver}
 	if oskr.IsAvailable() {
@@ -35,4 +33,9 @@ func IsKeychainAvailable() bool {
 
 func IsEnvPasswordSet() bool {
 	return os.Getenv("PSST_PASSWORD") != ""
+}
+
+func IsEnvProvider(kp KeyProvider) bool {
+	_, ok := kp.(*EnvVarProvider)
+	return ok
 }

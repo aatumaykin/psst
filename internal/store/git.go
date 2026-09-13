@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -626,10 +627,10 @@ func (g *GitStore) markDirty() {
 }
 
 func (g *GitStore) ExecTx(fn func() error) error {
-	return g.ExecTxMsg("psst: batch", fn)
+	return g.ExecTxMsg(context.Background(), "psst: batch", fn)
 }
 
-func (g *GitStore) ExecTxMsg(msg string, fn func() error) error {
+func (g *GitStore) ExecTxMsg(ctx context.Context, msg string, fn func() error) error {
 	g.mu.Lock()
 	nested := g.txDepth > 0
 	g.mu.Unlock()
@@ -664,7 +665,7 @@ func (g *GitStore) ExecTxMsg(msg string, fn func() error) error {
 	return nil
 }
 
-func (g *GitStore) RotateSalt(saltB64 string) error {
+func (g *GitStore) RotateSalt(ctx context.Context, saltB64 string) error {
 	g.mu.Lock()
 	inTx := g.txDepth > 0
 	g.mu.Unlock()
@@ -700,7 +701,7 @@ func (g *GitStore) RotateSalt(saltB64 string) error {
 	return nil
 }
 
-func (g *GitStore) SyncAcceptRotation() (*VaultMeta, error) {
+func (g *GitStore) SyncAcceptRotation(ctx context.Context) (*VaultMeta, error) {
 	lock, err := LockRepo(g.repoDir)
 	if err != nil {
 		return nil, err
@@ -742,7 +743,7 @@ func (g *GitStore) SyncAcceptRotation() (*VaultMeta, error) {
 	return newMeta, nil
 }
 
-func (g *GitStore) AheadOfUpstream() bool {
+func (g *GitStore) AheadOfUpstream(ctx context.Context) bool {
 	out, err := g.git.Run("status", "-sb")
 	if err != nil {
 		return false
@@ -754,7 +755,7 @@ func (g *GitStore) AheadOfUpstream() bool {
 	return strings.Contains(first, "[ahead")
 }
 
-func (g *GitStore) SetSecret(name string, encValue, iv []byte, tags []string) error {
+func (g *GitStore) SetSecret(ctx context.Context, name string, encValue, iv []byte, tags []string) error {
 	tag := ""
 	switch len(tags) {
 	case 0:
@@ -808,7 +809,7 @@ func (g *GitStore) SetSecret(name string, encValue, iv []byte, tags []string) er
 	})
 }
 
-func (g *GitStore) GetSecret(name string) (*StoredSecret, error) {
+func (g *GitStore) GetSecret(ctx context.Context, name string) (*StoredSecret, error) {
 	diverged, err := g.SyncPullRead()
 	if err != nil {
 		return nil, err
@@ -839,7 +840,7 @@ func (g *GitStore) GetSecret(name string) (*StoredSecret, error) {
 	return &StoredSecret{Name: name, EncryptedValue: ct, IV: iv, Tags: secretTags, CreatedAt: created, UpdatedAt: updated}, nil
 }
 
-func (g *GitStore) GetAllSecrets() ([]StoredSecret, error) {
+func (g *GitStore) GetAllSecrets(ctx context.Context) ([]StoredSecret, error) {
 	if _, err := g.SyncPullRead(); err != nil {
 		return nil, err
 	}
@@ -866,7 +867,7 @@ func (g *GitStore) GetAllSecrets() ([]StoredSecret, error) {
 	return result, nil
 }
 
-func (g *GitStore) ListSecrets() ([]SecretMeta, error) {
+func (g *GitStore) ListSecrets(ctx context.Context) ([]SecretMeta, error) {
 	if _, err := g.SyncPullRead(); err != nil {
 		return nil, err
 	}
@@ -890,7 +891,7 @@ func (g *GitStore) ListSecrets() ([]SecretMeta, error) {
 	return result, nil
 }
 
-func (g *GitStore) DeleteSecret(name string) error {
+func (g *GitStore) DeleteSecret(ctx context.Context, name string) error {
 	path, _, ok := g.locate(name)
 	if !ok {
 		return fmt.Errorf("secret %q not found", name)
@@ -912,7 +913,7 @@ func (g *GitStore) DeleteSecret(name string) error {
 	})
 }
 
-func (g *GitStore) GetHistory(name string) ([]HistoryEntry, error) {
+func (g *GitStore) GetHistory(ctx context.Context, name string) ([]HistoryEntry, error) {
 	if !ValidSecretName.MatchString(name) {
 		return nil, nil
 	}
@@ -990,15 +991,15 @@ func (g *GitStore) GetHistory(name string) ([]HistoryEntry, error) {
 	return result, nil
 }
 
-func (g *GitStore) AddHistory(name string, version int, encValue, iv []byte, tags []string) error {
+func (g *GitStore) AddHistory(ctx context.Context, name string, version int, encValue, iv []byte, tags []string) error {
 	return nil
 }
 
-func (g *GitStore) PruneHistory(name string, keepVersions int) error {
+func (g *GitStore) PruneHistory(ctx context.Context, name string, keepVersions int) error {
 	return nil
 }
 
-func (g *GitStore) DeleteHistory(name string) error {
+func (g *GitStore) DeleteHistory(ctx context.Context, name string) error {
 	return nil
 }
 
@@ -1006,7 +1007,7 @@ func (g *GitStore) Close() error {
 	return nil
 }
 
-func (g *GitStore) GetMeta(key string) (string, error) {
+func (g *GitStore) GetMeta(ctx context.Context, key string) (string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	switch key {
@@ -1043,7 +1044,7 @@ func (g *GitStore) GetMeta(key string) (string, error) {
 	return "", nil
 }
 
-func (g *GitStore) SetMeta(key, value string) error {
+func (g *GitStore) SetMeta(ctx context.Context, key, value string) error {
 	switch key {
 	case "kdf_time", "kdf_memory", "kdf_threads":
 	default:
@@ -1088,6 +1089,25 @@ func (g *GitStore) SetMeta(key, value string) error {
 		g.markDirty()
 		return nil
 	})
+}
+
+func (g *GitStore) IncrementMetaInt(ctx context.Context, key string, increment int) (int, error) {
+	cur, err := g.GetMeta(ctx, key)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	if cur != "" {
+		n, err = strconv.Atoi(cur)
+		if err != nil {
+			return 0, fmt.Errorf("increment meta %q: invalid integer %q: %w", key, cur, err)
+		}
+	}
+	n += increment
+	if err := g.SetMeta(ctx, key, strconv.Itoa(n)); err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 var _ SecretStore = (*GitStore)(nil)

@@ -14,8 +14,8 @@ type fixedPasswordProvider struct {
 
 var _ keyring.KeyProvider = (*fixedPasswordProvider)(nil)
 
-func (p *fixedPasswordProvider) GetRawKey(_, _ string) (string, error) {
-	return p.password, nil
+func (p *fixedPasswordProvider) GetRawKey(_, _ string) ([]byte, error) {
+	return []byte(p.password), nil
 }
 
 func (p *fixedPasswordProvider) SetKey(_, _ string, _ []byte) error {
@@ -55,19 +55,19 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request, sess *sess
 		return
 	}
 	v := vault.New(s.cfg.Enc, &fixedPasswordProvider{password: req.Password}, s.cfg.Store)
-	if err := v.Unlock(); err != nil {
+	if err := v.Unlock(r.Context()); err != nil {
 		writeErr(w, http.StatusInternalServerError, "unlock failed")
 		return
 	}
 	verified := false
-	metas, err := v.ListSecrets()
+	metas, err := v.ListSecrets(r.Context())
 	if err != nil {
 		_ = v.Close()
 		s.writeStoreError(w, err)
 		return
 	}
 	if len(metas) > 0 {
-		if _, err := v.GetSecret(metas[0].Name); err != nil {
+		if _, err := v.GetSecret(r.Context(), metas[0].Name); err != nil {
 			_ = v.Close()
 			writeErr(w, http.StatusUnauthorized, "wrong password or undecryptable secret "+metas[0].Name)
 			return

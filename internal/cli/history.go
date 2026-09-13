@@ -14,30 +14,27 @@ var historyCmd = &cobra.Command{
 	Use:   "history <name>",
 	Short: "View secret version history",
 	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
-		f := getFormatter(jsonOut, quiet)
+	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-
-		v, err := getUnlockedVault(cmd, jsonOut, quiet, global, env)
-		if err != nil {
-			exitWithError(err.Error())
+		if err := requireValidName(name); err != nil {
+			return err
 		}
-		defer v.Close()
-
-		entries, err := v.GetHistory(name)
-		if err != nil {
-			exitWithError(err.Error())
-		}
-
-		if len(entries) == 0 {
-			if !quiet {
-				fmt.Fprintf(os.Stdout, "No history for %s\n", name)
+		return withVault(cmd, func(v vault.Interface, f *output.Formatter) error {
+			entries, err := v.GetHistory(cmd.Context(), name)
+			if err != nil {
+				return exitWithError(err.Error())
 			}
-			return
-		}
 
-		f.HistoryEntries(name, toHistoryItems(entries))
+			if len(entries) == 0 {
+				if !f.IsQuiet() {
+					fmt.Fprintf(os.Stdout, "No history for %s\n", name)
+				}
+				return nil
+			}
+
+			f.HistoryEntries(name, toHistoryItems(entries))
+			return nil
+		})
 	},
 }
 

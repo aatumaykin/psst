@@ -48,59 +48,60 @@ func writeRenderedOutput(path string, data []byte) error {
 var renderCmd = &cobra.Command{
 	Use:   "render",
 	Short: "Render a template file, substituting vault secrets",
-	Run: func(cmd *cobra.Command, _ []string) {
-		jsonOut, quiet, global, env, tags := getGlobalFlags(cmd)
-		f := getFormatter(jsonOut, quiet)
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		cfg := getGlobalFlags(cmd)
+		f := getFormatter(cfg.JSON, cfg.Quiet)
+		ctx := cmd.Context()
 		in, _ := cmd.Flags().GetString("in")
 		out, _ := cmd.Flags().GetString("out")
 		strict, _ := cmd.Flags().GetBool("strict")
 
 		if in == "" || out == "" {
-			exitWithError("--in and --out are required")
+			return exitWithError("--in and --out are required")
 		}
 		if out == "-" {
-			exitWithError("--out - is not supported: values must not go to stdout")
+			return exitWithError("--out - is not supported: values must not go to stdout")
 		}
 		inAbs, err := filepath.Abs(in)
 		if err != nil {
-			exitWithError(err.Error())
+			return exitWithError(err.Error())
 		}
 		outAbs, err := filepath.Abs(out)
 		if err != nil {
-			exitWithError(err.Error())
+			return exitWithError(err.Error())
 		}
 		if filepath.Clean(inAbs) == filepath.Clean(outAbs) {
-			exitWithError("refusing to overwrite the template")
+			return exitWithError("refusing to overwrite the template")
 		}
 		tmpl, err := os.ReadFile(in)
 		if err != nil {
-			exitWithError("read template: " + err.Error())
+			return exitWithError("read template: " + err.Error())
 		}
 
-		v, err := getUnlockedVault(cmd, jsonOut, quiet, global, env)
+		v, err := getUnlockedVault(ctx, cfg.JSON, cfg.Quiet, cfg)
 		if err != nil {
-			exitWithError(err.Error())
+			return err
 		}
 		defer v.Close()
 
 		var values map[string][]byte
-		if len(tags) > 0 {
-			metas, terr := v.GetSecretsByTags(tags)
+		if len(cfg.Tags) > 0 {
+			metas, terr := v.GetSecretsByTags(ctx, cfg.Tags)
 			if terr != nil {
-				exitWithError(terr.Error())
+				return exitWithError(terr.Error())
 			}
 			values = make(map[string][]byte, len(metas))
 			for _, m := range metas {
-				sec, gerr := v.GetSecret(m.Name)
+				sec, gerr := v.GetSecret(ctx, m.Name)
 				if gerr != nil {
-					exitWithError(gerr.Error())
+					return exitWithError(gerr.Error())
 				}
 				values[m.Name] = sec.Value
 			}
 		} else {
-			values, err = v.GetAllSecrets()
+			values, err = v.GetAllSecrets(ctx)
 			if err != nil {
-				exitWithError(err.Error())
+				return exitWithError(err.Error())
 			}
 		}
 
@@ -112,12 +113,13 @@ var renderCmd = &cobra.Command{
 			}
 		}
 		if len(report) > 0 {
-			exitWithError("unresolved placeholders: " + formatUnresolved(report))
+			return exitWithError("unresolved placeholders: " + formatUnresolved(report))
 		}
 		if err := writeRenderedOutput(out, result); err != nil {
-			exitWithError(err.Error())
+			return exitWithError(err.Error())
 		}
 		f.Success(fmt.Sprintf("Rendered %d placeholders → %s", subs, out))
+		return nil
 	},
 }
 

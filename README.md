@@ -44,7 +44,6 @@ sudo install psst /usr/local/bin/
 ### Requirements
 
 - Go 1.26+ (for building)
-- gcc (for CGo — mattn/go-sqlite3)
 - On Linux: `libsecret` headers (for OS keyring support)
 
 ## Quick Start
@@ -84,12 +83,15 @@ psst run -- ./deploy.sh             # inject all secrets
 ### Managing Secrets
 
 ```bash
-psst init [--global] [--env <name>]   # Create vault
+psst init [--global] [--env <name>] [--vault-path <path>]   # Create vault
 psst set <NAME> [--stdin] [--tag T]   # Add/update secret
-psst get <NAME>                       # Show value (debugging only)
+psst get <NAME>                       # Show value (interactive terminal only)
+psst verify <NAME> --expected <val>   # Verify value without revealing it
+psst verify <NAME> --hash <sha256>    # Verify via SHA-256 hash
 psst list [--tag T]                   # List secret names
 psst rm <NAME>                        # Delete secret + history
 psst migrate                          # Upgrade vault to latest KDF
+psst completion <shell>               # Generate shell completion script
 ```
 
 ### Using Secrets
@@ -105,7 +107,7 @@ psst <SECRET>... -- <command> [args...]    # Run with specific secrets
 psst import .env                      # Import from .env file
 psst import --stdin                   # Import from stdin
 psst import --from-env                # Import from environment variables
-psst export                           # Export to stdout (.env format)
+psst export                           # Export to stdout (interactive terminal only)
 psst export --env-file .env           # Export to file
 ```
 
@@ -123,6 +125,14 @@ psst tag <NAME> <TAG>                 # Add tag
 psst untag <NAME> <TAG>               # Remove tag
 psst list --tag prod                  # Filter by tag (OR logic)
 psst --tag aws -- aws s3 ls           # Run with tagged secrets only
+```
+
+### Self-Update
+
+```bash
+psst update check                     # Check for newer version
+psst update install                   # Download and install latest
+psst update install --force           # Reinstall current version
 ```
 
 ### Secret Scanner
@@ -147,6 +157,19 @@ psst list-envs                        # List all environments
 ```
 
 Stored in `.psst/envs/<name>/vault.db` (or `~/.psst/envs/<name>/` with `--global`).
+
+### Custom Vault Path
+
+When the default local/global path resolution doesn't fit (e.g. cron jobs, custom directory layouts), specify the vault directory directly. The vault file is always named `vault.db`:
+
+```bash
+psst init --vault-path /opt/secrets
+psst --vault-path /opt/secrets set API_KEY --stdin
+psst --vault-path /opt/secrets list
+psst --vault-path /opt/secrets API_KEY -- curl ...
+```
+
+`--vault-path` takes precedence over `--global` and `--env`.
 
 ### Git Storage (multi-machine)
 
@@ -243,11 +266,13 @@ psst sync --accept-rotation                 # on every other machine
 All commands support:
 
 ```
---json              Structured JSON output
--q, --quiet         Minimal output
--g, --global        Use global vault (~/.psst/)
---env <name>        Use specific environment
---tag <name>        Filter by tag (repeatable, OR logic)
+--json                 Structured JSON output
+-q, --quiet            Minimal output
+-g, --global           Use global vault (~/.psst/)
+--env <name>           Use specific environment
+--tag <name>           Filter by tag (repeatable, OR logic)
+--vault-path <path>    Path to vault database file
+--no-mask              Disable output masking (debugging only)
 ```
 
 Fallback environment variables: `PSST_GLOBAL=1`, `PSST_ENV=<name>`.
@@ -260,9 +285,46 @@ Fallback environment variables: `PSST_GLOBAL=1`, `PSST_ENV=<name>`.
 - Encryption key stored in OS keychain (libsecret on Linux)
 - Secrets automatically redacted in command output (`[REDACTED]`)
 - Secrets never exposed to agent context
+- `psst get` and `psst export` require interactive terminal confirmation
+- `psst verify` for safe secret comparison without revealing values (constant-time)
 - `PSST_PASSWORD` removed from child process environment
 - Vault database file permissions set to `0600`
 - Best-effort memory zeroing for keys and plaintext
+
+## Backup & Recovery
+
+The vault stores all secrets in a single encrypted SQLite database. If this file or the encryption key is lost, secrets are irrecoverable.
+
+### Manual backup
+
+```bash
+# 1. Copy the vault database
+cp .psst/vault.db /backup/vault-$(date +%Y%m%d).db
+
+# 2. For keychain users: the key is in the OS keychain (psst/vault-key)
+#    No additional backup needed if the keychain is intact.
+
+# 3. For PSST_PASSWORD users: backup is the password itself.
+#    Keep the vault.db file and the password in separate locations.
+```
+
+### Recovery
+
+```bash
+# Restore vault.db to the expected location
+cp /backup/vault.db .psst/vault.db
+
+# Ensure keychain is accessible (keychain users)
+# OR set PSST_PASSWORD (password users)
+psst list   # verify access
+```
+
+### Plaintext backup (warning: exposes secret values)
+
+```bash
+psst export --env-file .env.backup   # writes unencrypted values
+# Delete .env.backup after use!
+```
 
 ## CI / Headless Environments
 
@@ -283,28 +345,32 @@ Key is derived from password via Argon2id (new vaults) or SHA-256 (legacy vaults
 cmd/psst/main.go          Entry point (DI wiring)
 internal/
 ├── crypto/               AES-256-GCM encryption (Encryptor interface)
-├── store/                SQLite storage (SecretStore interface)
+├── kdf/                  Argon2id KDF parameters
+├── store/                SQLite + Git storage (SecretStore interfaces)
 ├── keyring/              OS keychain + env var fallback (KeyProvider interface)
 ├── vault/                Business logic facade
 ├── output/               Human/JSON/quiet formatting
 ├── runner/               Subprocess execution + output masking
-└── cli/                  Cobra commands (15 commands)
+├── server/               Web UI — HTTP handlers, sessions, embedded SPA
+├── render/               Template substitution — {{KEY}}/$KEY placeholders (leaf)
+├── updater/              Self-update mechanism (GitHub releases)
+├── version/              Build-time version info (ldflags)
+└── cli/                  Cobra commands (23 root commands + exec pattern)
 ```
 
 ### Key Interfaces
 
 ```go
 type Encryptor interface {
-    Encrypt(plaintext, key []byte) (ciphertext, iv []byte, err error)
-    Decrypt(ciphertext, iv, key []byte) ([]byte, error)
+    Encrypt(plaintext []byte, key []byte, aad ...[]byte) (ciphertext, iv []byte, err error)
+    Decrypt(ciphertext, iv []byte, key []byte, aad ...[]byte) ([]byte, error)
     KeyToBuffer(key string) ([]byte, error)
-    KeyToBufferV2(key string) ([]byte, error)
+    KeyToBufferV2WithSalt(key string, salt []byte) ([]byte, error)
     GenerateKey() ([]byte, error)
 }
 
 type KeyProvider interface {
-    GetKey(service, account string) ([]byte, error)
-    GetRawKey(service, account string) (string, error)
+    GetRawKey(service, account string) ([]byte, error)
     SetKey(service, account string, key []byte) error
     IsAvailable() bool
     GenerateKey() ([]byte, error)
@@ -312,8 +378,11 @@ type KeyProvider interface {
 
 type SecretStore interface {
     InitSchema() error
-    GetSecret(name string) (*StoredSecret, error)
-    SetSecret(name string, encValue, iv []byte, tags []string) error
+    GetSecret(ctx context.Context, name string) (*StoredSecret, error)
+    GetAllSecrets(ctx context.Context) ([]StoredSecret, error)
+    ListSecrets(ctx context.Context) ([]SecretMeta, error)
+    SetSecret(ctx context.Context, name string, encValue, iv []byte, tags []string) error
+    DeleteSecret(ctx context.Context, name string) error
     // ... (full interface in internal/store/store.go)
 }
 ```
@@ -335,7 +404,7 @@ make build-linux-arm64
 | Package | Purpose |
 |---------|---------|
 | `spf13/cobra` | CLI framework |
-| `mattn/go-sqlite3` | SQLite driver (CGo) |
+| `modernc.org/sqlite` | Pure Go SQLite driver (no CGo) |
 | `zalando/go-keyring` | OS keychain integration |
 | `golang.org/x/term` | Secure terminal input |
 | `golang.org/x/crypto` | Argon2id KDF |
@@ -374,7 +443,7 @@ CREATE TABLE secrets_history (
 | Property | Original (TS) | This (Go) |
 |----------|---------------|-----------|
 | Runtime | Bun | Static binary |
-| SQLite | bun:sqlite / better-sqlite3 | mattn/go-sqlite3 |
+| SQLite | bun:sqlite / better-sqlite3 | modernc.org/sqlite (pure Go) |
 | Crypto | Web Crypto API | stdlib crypto/aes + crypto/cipher |
 | Keychain | CLI utility calls | zalando/go-keyring |
 | CLI | Manual argument parsing | spf13/cobra |

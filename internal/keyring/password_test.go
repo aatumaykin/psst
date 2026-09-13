@@ -11,7 +11,7 @@ func TestPasswordProviderEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if raw != "test-password" {
+	if string(raw) != "test-password" {
 		t.Fatalf("raw = %q", raw)
 	}
 	if !p.IsAvailable() {

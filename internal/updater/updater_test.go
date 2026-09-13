@@ -74,6 +74,28 @@ func TestCompareVersionsWithPrerelease(t *testing.T) {
 	}
 }
 
+func TestCompareVersionsSemverPrerelease(t *testing.T) {
+	tests := []struct {
+		a, b string
+		want int
+	}{
+		{"1.0.0-alpha", "1.0.0-beta", -1},
+		{"1.0.0-beta", "1.0.0-rc", -1},
+		{"1.0.0-rc", "1.0.0", -1},
+		{"1.0.0-alpha", "1.0.0-rc", -1},
+		{"1.0.0-beta", "1.0.0-alpha", 1},
+		{"1.0.0-rc", "1.0.0-beta", 1},
+		{"1.0.0-dev", "1.0.0-alpha", -1},
+		{"1.0.0-alpha", "1.0.0-alpha", 0},
+	}
+	for _, tt := range tests {
+		got := compareVersions(tt.a, tt.b)
+		if got != tt.want {
+			t.Errorf("compareVersions(%q, %q) = %d, want %d", tt.a, tt.b, got, tt.want)
+		}
+	}
+}
+
 func TestCompareVersionsInvalid(t *testing.T) {
 	tests := []struct {
 		a, b string

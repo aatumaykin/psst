@@ -12,9 +12,16 @@ import (
 
 const defaultGitHubAPIURL = "https://api.github.com/repos/aatumaykin/psst/releases/latest"
 
-const httpTimeoutSec = 15
+const apiTimeoutSec = 15
+const downloadTimeoutSec = 120
 
-var httpClient = &http.Client{Timeout: httpTimeoutSec * time.Second}
+func newHTTPClient() *http.Client {
+	return &http.Client{Timeout: apiTimeoutSec * time.Second}
+}
+
+func newDownloadClient() *http.Client {
+	return &http.Client{Timeout: downloadTimeoutSec * time.Second}
+}
 
 func fetchLatestRelease() (*ReleaseInfo, error) {
 	return fetchLatestReleaseWithURL(defaultGitHubAPIURL)
@@ -26,7 +33,8 @@ func fetchLatestReleaseWithURL(apiURL string) (*ReleaseInfo, error) {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	resp, err := httpClient.Do(req)
+	client := newHTTPClient()
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch release: %w", err)
 	}
@@ -52,13 +60,16 @@ func fetchLatestReleaseWithURL(apiURL string) (*ReleaseInfo, error) {
 	return &release, nil
 }
 
+const maxDownloadSize = 200 * 1024 * 1024
+
 func downloadFile(url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create download request: %w", err)
 	}
 
-	resp, err := httpClient.Do(req)
+	client := newDownloadClient()
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("download %s: %w", url, err)
 	}
@@ -68,7 +79,7 @@ func downloadFile(url string) ([]byte, error) {
 		return nil, fmt.Errorf("download %s: status %d", url, resp.StatusCode)
 	}
 
-	body, readErr := io.ReadAll(resp.Body)
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxDownloadSize))
 	if readErr != nil {
 		return nil, fmt.Errorf("download %s: read body: %w", url, readErr)
 	}

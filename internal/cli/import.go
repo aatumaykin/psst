@@ -8,82 +8,92 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/aatumaykin/psst/internal/output"
+	"github.com/aatumaykin/psst/internal/vault"
 )
 
 var importCmd = &cobra.Command{
 	Use:   "import [file]",
 	Short: "Import secrets from .env file, stdin, or environment",
-	Run: func(cmd *cobra.Command, args []string) {
-		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
-		f := getFormatter(jsonOut, quiet)
+	RunE: func(cmd *cobra.Command, args []string) error {
 		useStdin, _ := cmd.Flags().GetBool("stdin")
 		fromEnv, _ := cmd.Flags().GetBool("from-env")
 
-		v, err := getUnlockedVault(cmd, jsonOut, quiet, global, env)
-		if err != nil {
-			exitWithError(err.Error())
-		}
-		defer v.Close()
-
-		var entries map[string]string
+		var entries map[string][]byte
+		var err error
 
 		switch {
 		case fromEnv:
 			prefix, _ := cmd.Flags().GetString("prefix")
-			if prefix == "" {
-				if !quiet {
-					fmt.Fprintf(os.Stderr, "Warning: importing all matching env vars. Use --prefix to filter (e.g. --prefix MYAPP_)\n")
-				}
-			}
 			entries = readFromEnv(prefix)
 		case useStdin:
 			entries, err = parseEnvFromReader(os.Stdin)
 			if err != nil {
-				exitWithError(err.Error())
+				return exitWithError(err.Error())
 			}
 		default:
 			if len(args) > 0 {
 				file, openErr := os.Open(args[0])
 				if openErr != nil {
-					exitWithError(fmt.Sprintf("Cannot open file: %v", openErr))
+					return exitWithError(fmt.Sprintf("Cannot open file: %v", openErr))
 				}
 				defer file.Close()
 				entries, err = parseEnvFromReader(file)
 				if err != nil {
-					exitWithError(err.Error())
+					return exitWithError(err.Error())
 				}
 			} else {
-				exitWithError("Specify a file, --stdin, or --from-env")
-				return
+				return exitWithError("Specify a file, --stdin, or --from-env")
 			}
 		}
 
-		count := 0
-		batchErr := v.Batch(func() error {
-			for name, value := range entries {
-				if !validName.MatchString(name) {
-					if !quiet {
+		isGit := storageIsGit(getGlobalFlags(cmd))
+
+		return withVault(cmd, func(v vault.Interface, f *output.Formatter) error {
+			count := 0
+			setOne := func(name string, value []byte) error {
+				if nameErr := vault.ValidateSecretName(name); nameErr != nil {
+					if !f.IsQuiet() {
 						fmt.Fprintf(os.Stderr, "Skipping invalid name: %s\n", name)
 					}
-					continue
+					return nil
 				}
-				if setErr := v.SetSecret(name, []byte(value), nil); setErr != nil {
-					return fmt.Errorf("Failed to set %s: %v", name, setErr)
+				if setErr := v.SetSecret(cmd.Context(), name, value, nil); setErr != nil {
+					return exitWithError(fmt.Sprintf("Failed to set %s: %v", name, setErr))
 				}
 				count++
+				return nil
 			}
+
+			if isGit {
+				batchErr := v.Batch(func() error {
+					for name, value := range entries {
+						if err := setOne(name, value); err != nil {
+							return err
+						}
+					}
+					return nil
+				})
+				if batchErr != nil {
+					return batchErr
+				}
+			} else {
+				for name, value := range entries {
+					if err := setOne(name, value); err != nil {
+						return err
+					}
+				}
+			}
+
+			f.Success(fmt.Sprintf("Imported %d secret(s)", count))
 			return nil
 		})
-		if batchErr != nil {
-			exitWithError(batchErr.Error())
-		}
-
-		f.Success(fmt.Sprintf("Imported %d secret(s)", count))
 	},
 }
 
-func parseEnvFromReader(r io.Reader) (map[string]string, error) {
-	entries := make(map[string]string)
+func parseEnvFromReader(r io.Reader) (map[string][]byte, error) {
+	entries := make(map[string][]byte)
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -94,7 +104,7 @@ func parseEnvFromReader(r io.Reader) (map[string]string, error) {
 		if !ok {
 			continue
 		}
-		entries[name] = value
+		entries[name] = []byte(value)
 	}
 	return entries, scanner.Err()
 }
@@ -106,15 +116,25 @@ func parseEnvLine(line string) (string, string, bool) {
 	}
 	name = strings.TrimSpace(name)
 	value = strings.TrimSpace(value)
-	value = strings.TrimPrefix(value, `"`)
-	value = strings.TrimSuffix(value, `"`)
-	value = strings.TrimPrefix(value, `'`)
-	value = strings.TrimSuffix(value, `'`)
+
+	if len(value) >= 2 { //nolint:mnd // minimum length for matching quote pair
+		if value[0] == '"' && value[len(value)-1] == '"' {
+			value = value[1 : len(value)-1]
+			value = strings.ReplaceAll(value, `\"`, `"`)
+			value = strings.ReplaceAll(value, `\\`, `\`)
+			return name, value, true
+		}
+		if value[0] == '\'' && value[len(value)-1] == '\'' {
+			value = value[1 : len(value)-1]
+			return name, value, true
+		}
+	}
+
 	return name, value, true
 }
 
-func readFromEnv(prefix string) map[string]string {
-	entries := make(map[string]string)
+func readFromEnv(prefix string) map[string][]byte {
+	entries := make(map[string][]byte)
 	for _, e := range os.Environ() {
 		name, value, ok := strings.Cut(e, "=")
 		if !ok {
@@ -123,8 +143,8 @@ func readFromEnv(prefix string) map[string]string {
 		if prefix != "" && !strings.HasPrefix(name, prefix) {
 			continue
 		}
-		if validName.MatchString(name) {
-			entries[name] = value
+		if vault.ValidateSecretName(name) == nil {
+			entries[name] = []byte(value)
 		}
 	}
 	return entries

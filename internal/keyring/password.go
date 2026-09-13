@@ -45,8 +45,12 @@ func (p *PasswordProvider) resolve() (string, error) {
 	return "", errors.New("PSST_PASSWORD not set and no terminal available")
 }
 
-func (p *PasswordProvider) GetRawKey(_, _ string) (string, error) {
-	return p.resolve()
+func (p *PasswordProvider) GetRawKey(_, _ string) ([]byte, error) {
+	pw, err := p.resolve()
+	if err != nil {
+		return nil, err
+	}
+	return []byte(pw), nil
 }
 
 func (p *PasswordProvider) SetKey(_, _ string, _ []byte) error {

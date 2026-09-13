@@ -4,6 +4,7 @@ import (
 	"time"
 )
 
+// Secret holds a decrypted secret with metadata.
 type Secret struct {
 	Name      string
 	Value     []byte
@@ -12,6 +13,7 @@ type Secret struct {
 	UpdatedAt time.Time
 }
 
+// SecretMeta is metadata for a stored secret (no decrypted value).
 type SecretMeta struct {
 	Name      string
 	Tags      []string
@@ -20,6 +22,7 @@ type SecretMeta struct {
 	UpdatedBy string
 }
 
+// SecretHistoryEntry represents a previous version of a secret.
 type SecretHistoryEntry struct {
 	Version    int
 	Tags       []string
@@ -27,6 +30,7 @@ type SecretHistoryEntry struct {
 	ArchivedAt time.Time
 }
 
+// InitOptions configures vault initialization.
 type InitOptions struct {
 	Global       bool
 	Env          string

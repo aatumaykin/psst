@@ -3,6 +3,9 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,53 +14,53 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/aatumaykin/psst/internal/output"
+	"github.com/aatumaykin/psst/internal/vault"
 )
 
 var scanCmd = &cobra.Command{
 	Use:   "scan",
 	Short: "Scan files for leaked secrets",
-	Run: func(cmd *cobra.Command, _ []string) {
-		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
-		f := getFormatter(jsonOut, quiet)
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		staged, _ := cmd.Flags().GetBool("staged")
 		scanPath, _ := cmd.Flags().GetString("path")
 
-		v, err := getUnlockedVault(cmd, jsonOut, quiet, global, env)
-		if err != nil {
-			exitWithError(err.Error())
-		}
-		defer v.Close()
+		return withVault(cmd, func(v vault.Interface, f *output.Formatter) error {
+			secrets, err := v.GetAllSecrets(cmd.Context())
+			if err != nil {
+				return exitWithError(err.Error())
+			}
 
-		secrets, err := v.GetAllSecrets()
-		if err != nil {
-			exitWithError(err.Error())
-		}
+			if len(secrets) == 0 {
+				f.Success("No secrets in vault to scan for.")
+				return nil
+			}
 
-		if len(secrets) == 0 {
-			f.Success("No secrets in vault to scan for.")
-			return
-		}
+			byteSecrets := make(map[string][]byte, len(secrets))
+			maps.Copy(byteSecrets, secrets)
+			defer zeroSecretMap(byteSecrets)
 
-		strSecrets := make(map[string]string, len(secrets))
-		for k, v := range secrets {
-			strSecrets[k] = string(v)
-		}
+			files, err := getScanFiles(staged, scanPath)
+			if err != nil {
+				return exitWithError(err.Error())
+			}
 
-		files, err := getScanFiles(staged, scanPath)
-		if err != nil {
-			exitWithError(err.Error())
-		}
+			var results []output.ScanMatch
+			var allWarnings []string
+			for _, file := range files {
+				matches, warns := scanFile(file, byteSecrets)
+				results = append(results, matches...)
+				allWarnings = append(allWarnings, warns...)
+			}
 
-		var results []output.ScanMatch
-		for _, file := range files {
-			matches := scanFile(file, strSecrets)
-			results = append(results, matches...)
-		}
-
-		f.ScanResults(results)
-		if len(results) > 0 {
-			os.Exit(1)
-		}
+			f.ScanResults(results)
+			for _, w := range allWarnings {
+				fmt.Fprintf(os.Stderr, "Warning: %s\n", w)
+			}
+			if len(results) > 0 {
+				return &exitError{code: 1}
+			}
+			return nil
+		})
 	},
 }
 
@@ -74,6 +77,10 @@ func getScanFiles(staged bool, scanPath string) ([]string, error) {
 			return nil, err
 		}
 		return files, nil
+	}
+
+	if _, lookupErr := exec.LookPath("git"); lookupErr != nil {
+		return nil, errors.New("git not found: install git or use --path flag")
 	}
 
 	if staged {
@@ -95,19 +102,26 @@ func getScanFiles(staged bool, scanPath string) ([]string, error) {
 	return splitLines(string(out)), nil
 }
 
-func scanFile(path string, secrets map[string]string) []output.ScanMatch {
+func scanFile(path string, secrets map[string][]byte) ([]output.ScanMatch, []string) {
+	var warnings []string
+
 	info, err := os.Stat(path)
-	if err != nil || info.IsDir() || info.Size() > 1024*1024 {
-		return nil
+	if err != nil {
+		warnings = append(warnings, fmt.Sprintf("cannot stat %s: %v", path, err))
+		return nil, warnings
+	}
+	if info.IsDir() || info.Size() > 1024*1024 {
+		return nil, warnings
 	}
 
 	if isBinaryExtension(path) {
-		return nil
+		return nil, warnings
 	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil
+		warnings = append(warnings, fmt.Sprintf("cannot read %s: %v", path, err))
+		return nil, warnings
 	}
 
 	data = bytes.TrimPrefix(data, []byte("\xEF\xBB\xBF"))
@@ -118,10 +132,11 @@ func scanFile(path string, secrets map[string]string) []output.ScanMatch {
 		lineNum++
 		line = strings.TrimRight(line, "\r")
 		if strings.ContainsRune(line, 0) {
-			return nil
+			return nil, warnings
 		}
+		lineData := []byte(line)
 		for name, value := range secrets {
-			if len(value) >= 4 && strings.Contains(line, value) {
+			if len(value) >= 4 && bytes.Contains(lineData, value) {
 				results = append(results, output.ScanMatch{
 					File:       path,
 					Line:       lineNum,
@@ -130,7 +145,7 @@ func scanFile(path string, secrets map[string]string) []output.ScanMatch {
 			}
 		}
 	}
-	return results
+	return results, warnings
 }
 
 func isBinaryExtension(path string) bool {

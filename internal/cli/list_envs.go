@@ -10,9 +10,9 @@ import (
 var listEnvsCmd = &cobra.Command{
 	Use:   "list-envs",
 	Short: "List all environments",
-	Run: func(cmd *cobra.Command, _ []string) {
-		jsonOut, quiet, _, _, _ := getGlobalFlags(cmd)
-		f := getFormatter(jsonOut, quiet)
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		cfg := getGlobalFlags(cmd)
+		f := getFormatter(cfg.JSON, cfg.Quiet)
 
 		var envs []string
 
@@ -27,6 +27,7 @@ var listEnvsCmd = &cobra.Command{
 
 		deduped := dedupe(envs)
 		f.EnvironmentList(deduped)
+		return nil
 	},
 }
 

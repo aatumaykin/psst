@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -67,6 +68,22 @@ func setSecretWithPassword(t *testing.T, e *testEnv, password, name, value strin
 	}
 }
 
+func (e *testEnv) verifyWithPassword(t *testing.T, password, name, value string, extraArgs ...string) {
+	t.Helper()
+	outFile := filepath.Join(e.dir, ".verify.env")
+	args := append([]string{"export", "--env-file", outFile}, extraArgs...)
+	if _, _, code := e.runWithPassword(t, password, args...); code != 0 {
+		t.Fatalf("export %s failed with password: exit %d", name, code)
+	}
+	data, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("cannot read env file: %v", err)
+	}
+	if !slices.Contains(strings.Split(string(data), "\n"), name+"="+value) {
+		t.Fatalf("expected %s=%s in export, got: %s", name, value, string(data))
+	}
+}
+
 func TestRotateEndToEnd(t *testing.T) {
 	e := newTestEnv(t)
 	if _, _, code := e.run("init", "--storage", "git"); code != 0 {
@@ -81,13 +98,10 @@ func TestRotateEndToEnd(t *testing.T) {
 	if !strings.Contains(out, "Rotated: 1 secrets re-encrypted") {
 		t.Fatalf("summary: %s", out)
 	}
-	if _, _, code := e.runWithPassword(t, "test-password", "get", "API_KEY", "--storage", "git"); code != 1 {
+	if _, _, code := e.runWithPassword(t, "test-password", "export", "--env-file", filepath.Join(e.dir, ".old.env"), "--storage", "git"); code == 0 {
 		t.Fatal("old password must fail after rotation")
 	}
-	stdout, _, code := e.runWithPassword(t, "new-password", "get", "API_KEY", "--storage", "git")
-	if code != 0 || !strings.Contains(stdout, "secret123") {
-		t.Fatalf("new password get: %s %d", stdout, code)
-	}
+	e.verifyWithPassword(t, "new-password", "API_KEY", "secret123", "--storage", "git")
 }
 
 func readEnvVaultMeta(t *testing.T, e *testEnv) *store.VaultMeta {
@@ -119,13 +133,10 @@ func TestRotateKDFEndToEnd(t *testing.T) {
 		t.Fatalf("summary: %s", out)
 	}
 
-	if _, _, code := e.runWithPassword(t, "test-password", "get", "API_KEY", "--storage", "git"); code != 1 {
+	if _, _, code := e.runWithPassword(t, "test-password", "export", "--env-file", filepath.Join(e.dir, ".old.env"), "--storage", "git"); code == 0 {
 		t.Fatal("old password must fail after rotation")
 	}
-	stdout, _, code := e.runWithPassword(t, "new-password", "get", "API_KEY", "--storage", "git")
-	if code != 0 || !strings.Contains(stdout, "secret123") {
-		t.Fatalf("new password get: %s %d", stdout, code)
-	}
+	e.verifyWithPassword(t, "new-password", "API_KEY", "secret123", "--storage", "git")
 
 	after := readEnvVaultMeta(t, e)
 	if after.SaltB64 == before.SaltB64 {
@@ -273,10 +284,7 @@ func TestAcceptRotationFlow(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "Rotation accepted") {
 		t.Fatalf("accept = %d %s", code, out)
 	}
-	stdout, _, code := tc.b.runWithPassword(t, "new-password", "get", "API_KEY", "--storage", "git")
-	if code != 0 || !strings.Contains(stdout, "secret123") {
-		t.Fatalf("post-accept get: %s %d", stdout, code)
-	}
+	tc.b.verifyWithPassword(t, "new-password", "API_KEY", "secret123", "--storage", "git")
 	_, stderr, code = tc.b.runWithPassword(t, "new-password", "rollback", "API_KEY", "--to", "1", "--storage", "git")
 	if code != 1 || !strings.Contains(stderr, "predates a KDF migration") {
 		t.Fatalf("pre-rotation rollback must fail closed: %d %s", code, stderr)

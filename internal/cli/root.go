@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -15,6 +16,14 @@ import (
 	"github.com/aatumaykin/psst/internal/store"
 	"github.com/aatumaykin/psst/internal/vault"
 )
+
+type exitError struct {
+	code int
+}
+
+func (e *exitError) Error() string {
+	return fmt.Sprintf("exit code %d", e.code)
+}
 
 var rootCmd = &cobra.Command{
 	Use:           "psst",
@@ -36,21 +45,47 @@ func Execute() error {
 	}
 
 	if dashDashIdx >= 0 {
-		jsonOut, quiet, global, env, tags := parseGlobalFlagsFromArgs(args[:dashDashIdx])
-		secretNames := filterSecretNames(args[:dashDashIdx], jsonOut, quiet, global, env, tags)
+		cfg := parseGlobalFlagsFromArgs(args[:dashDashIdx])
+		secretNames := filterSecretNames(args[:dashDashIdx])
 		secretNames = filterSubcommandNames(secretNames)
 		commandArgs := args[dashDashIdx+1:]
 
-		if len(commandArgs) > 0 && (len(secretNames) > 0 || len(tags) > 0) {
+		if len(commandArgs) > 0 && (len(secretNames) > 0 || len(cfg.Tags) > 0) {
 			noMask := containsFlag(args, "--no-mask")
-			os.Exit(handleExecPatternDirect(
+			expandArgs := containsFlag(args, "--expand-args")
+			err := handleExecPatternDirect(
+				context.Background(),
 				secretNames, commandArgs,
-				jsonOut, quiet, global, env, tags, noMask,
-			))
+				ExecConfig{
+					JSONOut:    cfg.JSON,
+					Quiet:      cfg.Quiet,
+					Global:     cfg.Global,
+					Env:        cfg.Env,
+					Tags:       cfg.Tags,
+					VaultPath:  cfg.VaultPath,
+					Storage:    cfg.Storage,
+					NoMask:     noMask,
+					ExpandArgs: expandArgs,
+				},
+			)
+			var exitErr *exitError
+			if err != nil && errors.As(err, &exitErr) {
+				os.Exit(exitErr.code)
+			}
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%v\n", err)
+				os.Exit(1)
+			}
+			return nil
 		}
 	}
 
-	return rootCmd.Execute()
+	err := rootCmd.Execute()
+	var exitErr *exitError
+	if err != nil && errors.As(err, &exitErr) {
+		os.Exit(exitErr.code)
+	}
+	return err
 }
 
 //nolint:gochecknoinits // cobra command registration
@@ -60,23 +95,43 @@ func init() {
 	rootCmd.PersistentFlags().BoolP("global", "g", false, "Use global vault")
 	rootCmd.PersistentFlags().String("env", "", "Environment name")
 	rootCmd.PersistentFlags().StringArray("tag", nil, "Filter by tag (repeatable)")
+	rootCmd.PersistentFlags().String("vault-path", "", "Path to vault database file")
 	rootCmd.PersistentFlags().String("storage", "", "Storage backend: sqlite or git")
 }
 
-func getGlobalFlags(cmd *cobra.Command) (bool, bool, bool, string, []string) {
-	jsonOut, _ := cmd.Flags().GetBool("json")
-	quiet, _ := cmd.Flags().GetBool("quiet")
-	global, _ := cmd.Flags().GetBool("global")
-	env, _ := cmd.Flags().GetString("env")
-	tags, _ := cmd.Flags().GetStringArray("tag")
+type globalConfig struct {
+	JSON      bool
+	Quiet     bool
+	Global    bool
+	Env       string
+	Tags      []string
+	VaultPath string
+	Storage   string
+}
 
+func resolveEnvOverrides(cfg *globalConfig) {
 	if os.Getenv("PSST_GLOBAL") == "1" {
-		global = true
+		cfg.Global = true
 	}
-	if env == "" {
-		env = os.Getenv("PSST_ENV")
+	if cfg.Env == "" {
+		cfg.Env = os.Getenv("PSST_ENV")
 	}
-	return jsonOut, quiet, global, env, tags
+	if cfg.Storage == "" {
+		cfg.Storage = os.Getenv("PSST_STORAGE")
+	}
+}
+
+func getGlobalFlags(cmd *cobra.Command) globalConfig {
+	cfg := globalConfig{}
+	cfg.JSON, _ = cmd.Flags().GetBool("json")
+	cfg.Quiet, _ = cmd.Flags().GetBool("quiet")
+	cfg.Global, _ = cmd.Flags().GetBool("global")
+	cfg.Env, _ = cmd.Flags().GetString("env")
+	cfg.Tags, _ = cmd.Flags().GetStringArray("tag")
+	cfg.VaultPath, _ = cmd.Flags().GetString("vault-path")
+	cfg.Storage, _ = cmd.Flags().GetString("storage")
+	resolveEnvOverrides(&cfg)
+	return cfg
 }
 
 func getFormatter(jsonOut, quiet bool) *output.Formatter {
@@ -87,54 +142,54 @@ func getRunner() *runner.Runner {
 	return runner.New()
 }
 
-func createDependencies() (crypto.Encryptor, keyring.KeyProvider) {
-	enc := crypto.NewAESGCM()
-	kp := keyring.NewProvider(enc)
-	return enc, kp
-}
+const (
+	ExitNoVault    = 3
+	ExitAuthFailed = 5
+)
 
-func getStorageFlag(cmd *cobra.Command) string {
-	storage, _ := cmd.Flags().GetString("storage")
-	if storage == "" {
-		storage = os.Getenv("PSST_STORAGE")
+func resolveVaultPath(cfg globalConfig) (string, error) {
+	if cfg.VaultPath != "" {
+		return filepath.Join(cfg.VaultPath, "vault.db"), nil
 	}
-	return storage
+	return vault.FindVaultPath(cfg.Global, cfg.Env)
 }
 
-func storageIsGit(cmd *cobra.Command, global bool, env string) bool {
-	envDir, err := vault.FindVaultDir(global, env)
+func storageIsGit(cfg globalConfig) bool {
+	envDir, err := vault.FindVaultDir(cfg.Global, cfg.Env)
 	if err != nil {
 		return false
 	}
-	storage, err := ResolveStorage(getStorageFlag(cmd), envDir)
+	storage, err := ResolveStorage(cfg.Storage, envDir)
 	return err == nil && storage == "git"
 }
 
-func getUnlockedVault(cmd *cobra.Command, jsonOut, quiet bool, global bool, env string) (*vault.Vault, error) {
-	envDir, err := vault.FindVaultDir(global, env)
+func getUnlockedVault(ctx context.Context, jsonOut, quiet bool, cfg globalConfig) (vault.Interface, error) {
+	envDir, err := vault.FindVaultDir(cfg.Global, cfg.Env)
 	if err != nil {
 		return nil, err
 	}
 
-	storage, err := ResolveStorage(getStorageFlag(cmd), envDir)
-	if err != nil {
-		return nil, err
+	storage := "sqlite"
+	if cfg.VaultPath != "" {
+		envDir = cfg.VaultPath
+	} else {
+		storage, err = ResolveStorage(cfg.Storage, envDir)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	//nolint:gosec // user-provided path is intentional for CLI tool
 	dbExists := statExists(vault.SQLitePath(envDir))
 	gitMarkerExists := statExists(filepath.Join(envDir, "repo", "psst.yaml")) ||
 		statExists(filepath.Join(envDir, "repo", ".git"))
 	if storage == "git" {
 		if !statExists(filepath.Join(envDir, "repo", ".git")) {
 			printNoVault(jsonOut, quiet)
-			//nolint:mnd // exit code for missing vault
-			os.Exit(3)
+			return nil, &exitError{code: ExitNoVault}
 		}
 	} else if !dbExists && !gitMarkerExists {
 		printNoVault(jsonOut, quiet)
-		//nolint:mnd // exit code for missing vault
-		os.Exit(3)
+		return nil, &exitError{code: ExitNoVault}
 	}
 
 	enc := crypto.NewAESGCM()
@@ -147,10 +202,10 @@ func getUnlockedVault(cmd *cobra.Command, jsonOut, quiet bool, global bool, env 
 	if schemaErr := s.InitSchema(); schemaErr != nil {
 		_ = s.Close()
 		if errors.Is(schemaErr, store.ErrSaltChanged) {
-			exitWithError(schemaErr.Error() + "; run 'psst sync --accept-rotation' (or re-clone)")
+			return nil, exitWithError(schemaErr.Error() + "; run 'psst sync --accept-rotation' (or re-clone)")
 		}
 		if errors.Is(schemaErr, store.ErrKDFWeakened) {
-			exitWithError(schemaErr.Error() + "; see rotation procedure in docs")
+			return nil, exitWithError(schemaErr.Error() + "; see rotation procedure in docs")
 		}
 		return nil, fmt.Errorf("init schema: %w", schemaErr)
 	}
@@ -163,16 +218,15 @@ func getUnlockedVault(cmd *cobra.Command, jsonOut, quiet bool, global bool, env 
 	}
 
 	v := vault.New(enc, kp, s)
-	if unlockErr := v.Unlock(); unlockErr != nil {
-		_ = s.Close()
+	if unlockErr := v.Unlock(ctx); unlockErr != nil {
+		_ = v.Close()
 		if storage == "git" {
 			f := output.NewFormatter(jsonOut, quiet)
 			f.Error("Failed to unlock vault. Set PSST_PASSWORD or run in a terminal")
 		} else {
 			printAuthFailed(jsonOut, quiet)
 		}
-		//nolint:mnd // exit code for auth failure
-		os.Exit(5)
+		return nil, &exitError{code: ExitAuthFailed}
 	}
 	return v, nil
 }
@@ -187,11 +241,59 @@ func printAuthFailed(jsonOut, quiet bool) {
 	if keyring.IsKeychainAvailable() {
 		f.Error("Failed to unlock vault. Check keychain access.")
 	} else {
-		f.Error("Failed to unlock vault. Set PSST_PASSWORD:\n  export PSST_PASSWORD=\"your-password\"\n  Note: PSST_PASSWORD is visible to other users via /proc on shared systems")
+		f.Error(
+			"Failed to unlock vault. Set PSST_PASSWORD:\n" +
+				"  export PSST_PASSWORD=\"your-password\"\n" +
+				"  Note: PSST_PASSWORD is visible to other users via /proc on shared systems",
+		)
 	}
 }
 
-func exitWithError(msg string) {
+func withVault(cmd *cobra.Command, fn func(v vault.Interface, f *output.Formatter) error) error {
+	cfg := getGlobalFlags(cmd)
+	v, err := getUnlockedVault(cmd.Context(), cfg.JSON, cfg.Quiet, cfg)
+	if err != nil {
+		return err
+	}
+	defer v.Close()
+	f := getFormatter(cfg.JSON, cfg.Quiet)
+	return fn(v, f)
+}
+
+func zeroSecretMap(m map[string][]byte) {
+	for k, v := range m {
+		crypto.ZeroBytes(v)
+		delete(m, k)
+	}
+}
+
+func exitWithError(msg string) error {
 	fmt.Fprintf(os.Stderr, "✗ %s\n", msg)
-	os.Exit(1)
+	return &exitError{code: 1}
+}
+
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
+
+func confirmReveal(label string) error {
+	if !isTerminal(os.Stdin) {
+		fmt.Fprintln(os.Stderr, "✗ Cannot reveal "+label+": not a terminal.")
+		fmt.Fprintln(os.Stderr, "  Use 'psst verify <name> --expected <value>' to check a specific secret.")
+		fmt.Fprintln(os.Stderr, "  Use 'psst verify <name> --hash <sha256>' for a safer check.")
+		return &exitError{code: 1}
+	}
+
+	fmt.Fprintf(os.Stderr, "? Reveal %s? [y/N] ", label)
+	var buf [1]byte
+	n, err := os.Stdin.Read(buf[:])
+	if err != nil || n != 1 || (buf[0] != 'y' && buf[0] != 'Y') {
+		fmt.Fprintln(os.Stderr, "✗ Reveal cancelled.")
+		return &exitError{code: 1}
+	}
+	return nil
 }

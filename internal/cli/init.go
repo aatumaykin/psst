@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/aatumaykin/psst/internal/crypto"
 	"github.com/aatumaykin/psst/internal/keyring"
 	"github.com/aatumaykin/psst/internal/output"
 	"github.com/aatumaykin/psst/internal/store"
@@ -16,43 +17,41 @@ import (
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Create a new vault",
-	Run: func(cmd *cobra.Command, _ []string) {
-		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
-		f := getFormatter(jsonOut, quiet)
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		cfg := getGlobalFlags(cmd)
+		f := getFormatter(cfg.JSON, cfg.Quiet)
 		remote, _ := cmd.Flags().GetString("remote")
 		allowInsecure, _ := cmd.Flags().GetBool("allow-insecure-remote")
 
-		storage := getStorageFlag(cmd)
-
-		if storage == "git" {
-			initGitVault(f, global, env, remote, allowInsecure)
-			return
+		if cfg.Storage == "git" {
+			return initGitVault(f, cfg, remote, allowInsecure)
 		}
 
-		vaultPath, err := vault.FindVaultPath(global, env)
+		vaultPath, err := resolveVaultPath(cfg)
 		if err != nil {
-			exitWithError(err.Error())
+			return exitWithError(err.Error())
 		}
 
 		keychainAvailable := keyring.IsKeychainAvailable()
 		envPasswordSet := keyring.IsEnvPasswordSet()
 
 		if !keychainAvailable && !envPasswordSet {
-			exitWithError(
+			return exitWithError(
 				"OS keychain unavailable. Set PSST_PASSWORD before running init:\n" +
 					"  export PSST_PASSWORD=\"your-password\"\n" +
 					"  psst init")
 		}
 
-		enc, kp := createDependencies()
+		enc := crypto.NewAESGCM()
+		kp := keyring.NewProvider(enc)
 
 		opts := vault.InitOptions{
-			Global: global,
-			Env:    env,
+			Global: cfg.Global,
+			Env:    cfg.Env,
 		}
 
-		if initErr := vault.InitVault(vaultPath, enc, kp, opts); initErr != nil {
-			exitWithError(initErr.Error())
+		if initErr := vault.InitVault(cmd.Context(), vaultPath, enc, kp, opts); initErr != nil {
+			return exitWithError(initErr.Error())
 		}
 
 		f.Success("Vault created at " + vaultPath)
@@ -63,6 +62,7 @@ var initCmd = &cobra.Command{
 			f.Bullet(`export PSST_PASSWORD="your-password"`)
 			f.Bullet("Note: PSST_PASSWORD is visible to other users via /proc on shared systems")
 		}
+		return nil
 	},
 }
 
@@ -88,14 +88,14 @@ func gitStoreOptions(envDir string) store.GitOptions {
 	}
 }
 
-func initGitVault(f *output.Formatter, global bool, env, remote string, allowInsecure bool) {
-	envDir, err := vault.FindVaultDir(global, env)
+func initGitVault(f *output.Formatter, cfg globalConfig, remote string, allowInsecure bool) error {
+	envDir, err := vault.FindVaultDir(cfg.Global, cfg.Env)
 	if err != nil {
-		exitWithError(err.Error())
+		return exitWithError(err.Error())
 	}
 
 	if !keyring.IsEnvPasswordSet() && !term.IsTerminal(int(os.Stdin.Fd())) {
-		exitWithError(
+		return exitWithError(
 			"Set PSST_PASSWORD before running init:\n" +
 				"  export PSST_PASSWORD=\"your-password\"\n" +
 				"  psst init --storage git")
@@ -103,7 +103,7 @@ func initGitVault(f *output.Formatter, global bool, env, remote string, allowIns
 
 	repoPath := filepath.Join(envDir, "repo")
 	if statExists(repoPath) {
-		exitWithError("git vault already exists at " + repoPath)
+		return exitWithError("git vault already exists at " + repoPath)
 	}
 
 	opts := gitStoreOptions(envDir)
@@ -112,33 +112,33 @@ func initGitVault(f *output.Formatter, global bool, env, remote string, allowIns
 
 	if remote != "" {
 		if err := ValidateRemoteScheme(remote, allowInsecure); err != nil {
-			exitWithError(err.Error())
+			return exitWithError(err.Error())
 		}
 		gs, cloneErr := store.CloneGitVault(remote, repoPath, opts)
 		if cloneErr != nil {
-			exitWithError(cloneErr.Error())
+			return exitWithError(cloneErr.Error())
 		}
 		if schemaErr := gs.InitSchema(); schemaErr != nil {
-			exitWithError(schemaErr.Error())
+			return exitWithError(schemaErr.Error())
 		}
 	} else {
 		gs, newErr := store.NewGitStore(repoPath, opts)
 		if newErr != nil {
-			exitWithError(newErr.Error())
+			return exitWithError(newErr.Error())
 		}
 		if schemaErr := gs.InitSchema(); schemaErr != nil {
-			exitWithError(schemaErr.Error())
+			return exitWithError(schemaErr.Error())
 		}
 	}
 
-	cfg, err := LoadVaultConfig(envDir)
+	vcfg, err := LoadVaultConfig(envDir)
 	if err != nil {
-		exitWithError(err.Error())
+		return exitWithError(err.Error())
 	}
-	cfg.Storage = "git"
-	cfg.Remote = remote
-	if err := SaveVaultConfig(envDir, *cfg); err != nil {
-		exitWithError(err.Error())
+	vcfg.Storage = "git"
+	vcfg.Remote = remote
+	if err := SaveVaultConfig(envDir, *vcfg); err != nil {
+		return exitWithError(err.Error())
 	}
 
 	msg := "Git vault created at " + repoPath
@@ -150,6 +150,7 @@ func initGitVault(f *output.Formatter, global bool, env, remote string, allowIns
 	if !keyring.IsEnvPasswordSet() {
 		f.Warning("Set PSST_PASSWORD before each use")
 	}
+	return nil
 }
 
 //nolint:gochecknoinits // cobra command registration

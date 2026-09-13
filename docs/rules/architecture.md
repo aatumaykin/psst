@@ -21,6 +21,8 @@ Layered architecture with dependency injection via interfaces. Direction: `cli �
 │  output/                        │  Presentation — human/JSON/quiet formatting
 │  runner/                        │  Execution — subprocess + output masking
 │  render/                        │  Template substitution — single-pass matcher (leaf, no internal deps)
+│  updater/                       │  Self-update — GitHub release check + install
+│  version/                       │  Build-time version info (injected via ldflags)
 ```
 
 ## Dependency Rules
@@ -28,7 +30,7 @@ Layered architecture with dependency injection via interfaces. Direction: `cli �
 1. **Allowed:** `cli → vault`, `cli → runner`, `cli → output`, `cli → crypto`, `cli → store`, `cli → keyring`, `vault → crypto`, `vault → store`, `vault → keyring`.
 2. **Prohibited:** `crypto → store`, `crypto → keyring`, `store → crypto`, `store → keyring`, `keyring → store`. Leaf packages must not depend on each other.
 3. **Prohibited:** `vault → cli`, `store → cli`, any upward dependency from inner to outer layers.
-4. `output/` may import `vault/` types only (for `vault.SecretMeta`, `vault.SecretHistoryEntry`). No business logic in output.
+4. `output/` may import `vault/` types only (for `vault.SecretMeta`, `vault.SecretHistoryEntry`). No business logic in output. `output/` must NOT import `version/` — version data is passed as parameter via `VersionData` struct.
 5. `runner/` is standalone — no imports from `vault`, `store`, `keyring`.
 6. **Allowed:** `cli → server`, `server → vault`, `server → store`, `server → crypto`, `server → keyring`. The web UI server is a presentation layer beside `cli/`; it never imports `cli`, `output`, or `runner`.
 7. The long-lived server serializes all vault/store access behind a single mutex (`server.opMu`); `vault.Vault` is not goroutine-safe.
@@ -39,15 +41,16 @@ Layered architecture with dependency injection via interfaces. Direction: `cli �
 ```go
 // crypto/crypto.go
 type Encryptor interface {
-    Encrypt(plaintext, key []byte) (ciphertext, iv []byte, err error)
-    Decrypt(ciphertext, iv, key []byte) ([]byte, error)
+    Encrypt(plaintext []byte, key []byte, aad ...[]byte) (ciphertext, iv []byte, err error)
+    Decrypt(ciphertext, iv []byte, key []byte, aad ...[]byte) ([]byte, error)
     KeyToBuffer(key string) ([]byte, error)
+    KeyToBufferV2WithSalt(key string, salt []byte) ([]byte, error)
     GenerateKey() ([]byte, error)
 }
 
 // keyring/keyring.go
 type KeyProvider interface {
-    GetKey(service, account string) ([]byte, error)
+    GetRawKey(service, account string) ([]byte, error)
     SetKey(service, account string, key []byte) error
     IsAvailable() bool
     GenerateKey() ([]byte, error)
@@ -56,28 +59,32 @@ type KeyProvider interface {
 // store/store.go
 type SecretStore interface {
     InitSchema() error
-    GetSecret(name string) (*StoredSecret, error)
-    SetSecret(name string, encValue, iv []byte, tags []string) error
-    DeleteSecret(name string) error
-    DeleteHistory(name string) error
-    ListSecrets() ([]SecretMeta, error)
-    GetHistory(name string) ([]HistoryEntry, error)
-    AddHistory(name string, version int, encValue, iv []byte, tags []string) error
-    PruneHistory(name string, keepVersions int) error
+    GetSecret(ctx context.Context, name string) (*StoredSecret, error)
+    GetAllSecrets(ctx context.Context) ([]StoredSecret, error)
+    SetSecret(ctx context.Context, name string, encValue, iv []byte, tags []string) error
+    DeleteSecret(ctx context.Context, name string) error
+    DeleteHistory(ctx context.Context, name string) error
+    ListSecrets(ctx context.Context) ([]SecretMeta, error)
+    GetHistory(ctx context.Context, name string) ([]HistoryEntry, error)
+    AddHistory(ctx context.Context, name string, version int, encValue, iv []byte, tags []string) error
+    PruneHistory(ctx context.Context, name string, keepVersions int) error
+    ExecTx(fn func() error) error
+    GetMeta(ctx context.Context, key string) (string, error)
+    SetMeta(ctx context.Context, key, value string) error
+    IncrementMetaInt(ctx context.Context, key string, increment int) (int, error)
     Close() error
 }
 ```
 
 ## DI Wiring
 
-All dependency wiring happens in `cli/root.go` via `getUnlockedVault()`:
+All dependency wiring happens in `cli/root.go` via `createDependencies()` and `getUnlockedVault()`:
 
-```go
-enc := crypto.NewAESGCM()
-kp := keyring.NewProvider(enc)       // auto-selects OS keyring or env var
-s, _ := store.NewSQLite(vaultPath)
-v := vault.New(enc, kp, s)
-v.Unlock()
+func createDependencies() (crypto.Encryptor, keyring.KeyProvider) {
+    enc := crypto.NewAESGCM()
+    kp := keyring.NewProvider(enc)
+    return enc, kp
+}
 ```
 
 No DI container, no global state. Each command creates its own instances.
@@ -103,5 +110,6 @@ No DI container, no global state. Each command creates its own instances.
 ## Encryption
 
 - AES-256-GCM with random 12-byte IV per encryption.
-- Key: 32 bytes from OS keychain (base64-encoded) or derived from `PSST_PASSWORD` via SHA-256.
+- Key derivation via Argon2id (v2, current) or SHA-256 (v1, legacy). New vaults use Argon2id by default; upgrade via `psst migrate`.
+- KDF version and salt stored in `vault_meta` table.
 - `PSST_PASSWORD` is stripped from child process environment.

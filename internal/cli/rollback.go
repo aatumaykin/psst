@@ -4,37 +4,34 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+
+	"github.com/aatumaykin/psst/internal/output"
+	"github.com/aatumaykin/psst/internal/vault"
 )
 
 var rollbackCmd = &cobra.Command{
 	Use:   "rollback <name>",
 	Short: "Rollback secret to a previous version",
 	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
-		f := getFormatter(jsonOut, quiet)
+	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		toVersion, _ := cmd.Flags().GetInt("to")
 
-		if !validName.MatchString(name) {
-			exitWithError(fmt.Sprintf("Invalid secret name %q. Must match [A-Z][A-Z0-9_]*", name))
+		if err := requireValidName(name); err != nil {
+			return err
 		}
 
 		if toVersion <= 0 {
-			exitWithError("Specify version with --to <number>")
+			return exitWithError("Specify version with --to <number>")
 		}
 
-		v, err := getUnlockedVault(cmd, jsonOut, quiet, global, env)
-		if err != nil {
-			exitWithError(err.Error())
-		}
-		defer v.Close()
-
-		if rbErr := v.Rollback(name, toVersion); rbErr != nil {
-			exitWithError(rbErr.Error())
-		}
-
-		f.Success(fmt.Sprintf("Rolled back %s to v%d", name, toVersion))
+		return withVault(cmd, func(v vault.Interface, f *output.Formatter) error {
+			if rbErr := v.Rollback(cmd.Context(), name, toVersion); rbErr != nil {
+				return exitWithError(rbErr.Error())
+			}
+			f.Success(fmt.Sprintf("Rolled back %s to v%d", name, toVersion))
+			return nil
+		})
 	},
 }
 

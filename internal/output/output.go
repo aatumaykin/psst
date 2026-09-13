@@ -7,16 +7,16 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	"github.com/aatumaykin/psst/internal/version"
 )
 
+// ScanMatch represents a secret leak found in a file.
 type ScanMatch struct {
 	File       string `json:"file"`
 	Line       int    `json:"line"`
 	SecretName string `json:"secret_name"`
 }
 
+// SecretItem is a secret entry for display output.
 type SecretItem struct {
 	Name      string    `json:"name"`
 	Tags      []string  `json:"tags"`
@@ -24,6 +24,7 @@ type SecretItem struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// HistoryItem is a version history entry for display output.
 type HistoryItem struct {
 	Version    int       `json:"version"`
 	Tags       []string  `json:"tags"`
@@ -31,6 +32,7 @@ type HistoryItem struct {
 	ArchivedAt time.Time `json:"archived_at"`
 }
 
+// Formatter handles CLI output in plain-text or JSON mode.
 type Formatter struct {
 	jsonMode bool
 	quiet    bool
@@ -38,6 +40,7 @@ type Formatter struct {
 	stderr   io.Writer
 }
 
+// NewFormatter creates a Formatter with the given output mode flags.
 func NewFormatter(jsonMode, quiet bool) *Formatter {
 	return &Formatter{
 		jsonMode: jsonMode,
@@ -141,9 +144,7 @@ func (f *Formatter) EnvList(secrets map[string]string) {
 		f.PrintJSON(secrets)
 		return
 	}
-	for name, value := range secrets {
-		fmt.Fprintf(f.stdout, "%s=%s\n", name, quoteValue(value))
-	}
+	f.EnvListWriter(secrets, f.stdout)
 }
 
 func (f *Formatter) EnvListWriter(secrets map[string]string, w io.Writer) {
@@ -180,16 +181,26 @@ func (f *Formatter) IsQuiet() bool {
 	return f.quiet
 }
 
-func (f *Formatter) VersionInfo() {
+// VersionData holds version information for display.
+type VersionData struct {
+	Version   string `json:"version"`
+	Commit    string `json:"commit"`
+	Date      string `json:"date"`
+	GoVersion string `json:"go"`
+	OSArch    string `json:"os_arch"`
+}
+
+func (f *Formatter) VersionInfo(v VersionData) {
 	if f.jsonMode {
-		f.PrintJSON(version.JSON())
+		f.PrintJSON(v)
 		return
 	}
 	if f.quiet {
-		fmt.Fprintln(f.stdout, version.Version)
+		fmt.Fprintln(f.stdout, v.Version)
 		return
 	}
-	fmt.Fprint(f.stdout, version.String()+"\n")
+	fmt.Fprintf(f.stdout, "psst %s\ncommit: %s\nbuilt:  %s\ngo:     %s\nos/arch: %s\n",
+		v.Version, v.Commit, v.Date, v.GoVersion, v.OSArch)
 }
 
 func (f *Formatter) PrintJSON(data any) {
@@ -202,7 +213,9 @@ func (f *Formatter) PrintJSON(data any) {
 
 func quoteValue(v string) string {
 	if strings.ContainsAny(v, " \t\n\r\"'") {
-		return `"` + strings.ReplaceAll(v, `"`, `\"`) + `"`
+		v = strings.ReplaceAll(v, `\`, `\\`)
+		v = strings.ReplaceAll(v, `"`, `\"`)
+		return `"` + v + `"`
 	}
 	return v
 }

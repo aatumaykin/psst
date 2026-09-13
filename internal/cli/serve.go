@@ -38,18 +38,18 @@ func isLoopbackHost(host string) bool {
 	return false
 }
 
-func resolveServeToken(flagVal string) (string, bool) {
+func resolveServeToken(flagVal string) (string, bool, error) {
 	if flagVal != "" {
-		return flagVal, false
+		return flagVal, false, nil
 	}
 	if env := os.Getenv("PSST_SERVE_TOKEN"); env != "" {
-		return env, false
+		return env, false, nil
 	}
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		exitWithError(fmt.Sprintf("generate token: %v", err))
+		return "", false, fmt.Errorf("generate token: %w", err)
 	}
-	return base64.RawURLEncoding.EncodeToString(b), true
+	return base64.RawURLEncoding.EncodeToString(b), true, nil
 }
 
 func serveStorageGate(envDir, storageFlag string) error {
@@ -75,8 +75,8 @@ func serveStorageGate(envDir, storageFlag string) error {
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Run the web UI server (git storage only)",
-	Run: func(cmd *cobra.Command, _ []string) {
-		_, _, global, env, _ := getGlobalFlags(cmd)
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		cfg := getGlobalFlags(cmd)
 		listen, _ := cmd.Flags().GetString("listen")
 		tokenFlag, _ := cmd.Flags().GetString("token")
 		timeoutStr, _ := cmd.Flags().GetString("timeout")
@@ -85,39 +85,40 @@ var serveCmd = &cobra.Command{
 		}
 		timeout, err := time.ParseDuration(timeoutStr)
 		if err != nil {
-			exitWithError(fmt.Sprintf("invalid --timeout: %v", err))
+			return exitWithError(fmt.Sprintf("invalid --timeout: %v", err))
 		}
-		//nolint:mnd // spec minimum
 		if timeout < minServeTimeout {
-			exitWithError("--timeout must be at least 1m")
+			return exitWithError("--timeout must be at least 1m")
 		}
-		envDir, err := vault.FindVaultDir(global, env)
+		envDir, err := vault.FindVaultDir(cfg.Global, cfg.Env)
 		if err != nil {
-			exitWithError(err.Error())
+			return exitWithError(err.Error())
 		}
-		if err := serveStorageGate(envDir, getStorageFlag(cmd)); err != nil {
+		if err := serveStorageGate(envDir, cfg.Storage); err != nil {
 			if errors.Is(err, errNoVault) {
-				printNoVault(false, false)
-				//nolint:mnd // exit code for missing vault
-				os.Exit(3)
+				printNoVault(cfg.JSON, cfg.Quiet)
+				return &exitError{code: ExitNoVault}
 			}
-			exitWithError(err.Error())
+			return exitWithError(err.Error())
 		}
 		s, gs, err := OpenVaultStore(envDir, "git", "", false)
 		if err != nil {
-			exitWithError(fmt.Sprintf("open vault: %v", err))
+			return exitWithError(fmt.Sprintf("open vault: %v", err))
 		}
 		if err := s.InitSchema(); err != nil {
-			exitWithError(fmt.Sprintf("init vault: %v", err))
+			return exitWithError(fmt.Sprintf("init vault: %v", err))
 		}
 		host, port, err := net.SplitHostPort(listen)
 		if err != nil {
-			exitWithError(fmt.Sprintf("invalid --listen %q: %v", listen, err))
+			return exitWithError(fmt.Sprintf("invalid --listen %q: %v", listen, err))
 		}
 		if !isLoopbackHost(host) {
 			fmt.Fprintln(os.Stderr, "warning: listening on a non-loopback interface; expose only via SSH tunnel (ssh -L 7788:127.0.0.1:7788)")
 		}
-		token, generated := resolveServeToken(tokenFlag)
+		token, generated, err := resolveServeToken(tokenFlag)
+		if err != nil {
+			return exitWithError(err.Error())
+		}
 		digest := sha256.Sum256([]byte(token))
 		srv := server.New(server.Config{
 			Store: gs, Enc: crypto.NewAESGCM(),
@@ -158,7 +159,7 @@ var serveCmd = &cobra.Command{
 		select {
 		case err := <-errCh:
 			if err != nil && !errors.Is(err, http.ErrServerClosed) {
-				exitWithError(fmt.Sprintf("serve: %v", err))
+				return exitWithError(fmt.Sprintf("serve: %v", err))
 			}
 		case <-ctx.Done():
 		}
@@ -166,6 +167,7 @@ var serveCmd = &cobra.Command{
 		defer cancel()
 		_ = httpSrv.Shutdown(shutdownCtx)
 		srv.Close()
+		return nil
 	},
 }
 

@@ -11,6 +11,9 @@ import (
 	"runtime"
 )
 
+const maxBinarySize = 100 * 1024 * 1024
+
+// PerformUpdate downloads and installs the latest version.
 func PerformUpdate(info *UpdateInfo, force bool) error {
 	if !force && !info.IsNewer() {
 		return fmt.Errorf("already up to date (v%s)", info.CurrentVersion)
@@ -94,7 +97,10 @@ func extractBinaryFromTarGz(archivePath string) ([]byte, error) {
 		}
 
 		if hdr.Name == "psst" || filepath.Base(hdr.Name) == "psst" {
-			data, readErr := io.ReadAll(tr)
+			if hdr.Size > maxBinarySize {
+				return nil, fmt.Errorf("binary in archive too large: %d bytes", hdr.Size)
+			}
+			data, readErr := io.ReadAll(io.LimitReader(tr, maxBinarySize))
 			if readErr != nil {
 				return nil, fmt.Errorf("read binary from tar: %w", readErr)
 			}
@@ -106,38 +112,46 @@ func extractBinaryFromTarGz(archivePath string) ([]byte, error) {
 }
 
 func replaceBinary(currentPath, newPath string) error {
-	//nolint:gosec // executable binary needs execute permission
-	if chmodErr := os.Chmod(newPath, 0o755); chmodErr != nil {
+	if chmodErr := os.Chmod(newPath, 0o755); chmodErr != nil { //nolint:gosec // binary must be executable
 		return fmt.Errorf("chmod new binary: %w", chmodErr)
 	}
 
 	backupPath := currentPath + ".bak"
-	if renameErr := os.Rename(currentPath, backupPath); renameErr != nil {
-		if copyErr := copyFile(newPath, currentPath); copyErr != nil {
-			return fmt.Errorf("copy over current binary: %w", copyErr)
-		}
-		return os.Remove(newPath)
+	backupCreated := false
+	if renameErr := os.Rename(currentPath, backupPath); renameErr == nil {
+		backupCreated = true
 	}
 
 	if moveErr := os.Rename(newPath, currentPath); moveErr != nil {
-		_ = os.Rename(backupPath, currentPath)
-		return fmt.Errorf("rename new binary: %w", moveErr)
+		if copyErr := copyFile(newPath, currentPath); copyErr != nil {
+			if backupCreated {
+				_ = os.Rename(backupPath, currentPath)
+			}
+			return fmt.Errorf("copy over current binary: %w", copyErr)
+		}
 	}
 
-	_ = os.Remove(backupPath)
+	if backupCreated {
+		_ = os.Remove(backupPath)
+	}
 	return nil
 }
 
 func copyFile(src, dst string) error {
-	in, openErr := os.Open(src)
-	if openErr != nil {
-		return openErr
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+
+	in, err := os.Open(src)
+	if err != nil {
+		return err
 	}
 	defer in.Close()
 
-	out, createErr := os.Create(dst)
-	if createErr != nil {
-		return createErr
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, srcInfo.Mode())
+	if err != nil {
+		return err
 	}
 	defer out.Close()
 

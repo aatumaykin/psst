@@ -10,30 +10,25 @@ import (
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all secrets",
-	Run: func(cmd *cobra.Command, _ []string) {
-		jsonOut, quiet, global, env, tags := getGlobalFlags(cmd)
-		f := getFormatter(jsonOut, quiet)
-
-		v, err := getUnlockedVault(cmd, jsonOut, quiet, global, env)
-		if err != nil {
-			exitWithError(err.Error())
-		}
-		defer v.Close()
-
-		if len(tags) > 0 {
-			filtered, tagErr := v.GetSecretsByTags(tags)
-			if tagErr != nil {
-				exitWithError(tagErr.Error())
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		cfg := getGlobalFlags(cmd)
+		return withVault(cmd, func(v vault.Interface, f *output.Formatter) error {
+			if len(cfg.Tags) > 0 {
+				filtered, tagErr := v.GetSecretsByTags(cmd.Context(), cfg.Tags)
+				if tagErr != nil {
+					return exitWithError(tagErr.Error())
+				}
+				f.SecretList(toSecretItems(filtered))
+				return nil
 			}
-			f.SecretList(toSecretItems(filtered))
-			return
-		}
 
-		secrets, err := v.ListSecrets()
-		if err != nil {
-			exitWithError(err.Error())
-		}
-		f.SecretList(toSecretItems(secrets))
+			secrets, err := v.ListSecrets(cmd.Context())
+			if err != nil {
+				return exitWithError(err.Error())
+			}
+			f.SecretList(toSecretItems(secrets))
+			return nil
+		})
 	},
 }
 
