@@ -266,6 +266,33 @@ func TestTouchSemantics(t *testing.T) {
 	}
 }
 
+func TestAutoRefreshDoesNotExtendUnlock(t *testing.T) {
+	now := time.Now()
+	s, gs := newTestServer(t)
+	seedGitSecret(t, gs)
+	s.cfg.Now = func() time.Time { return now }
+	h := s.Handler()
+	ck := loginOK(t, h)
+	if rec := unlockVault(t, h, ck, "test-password"); rec.Code != 200 {
+		t.Fatalf("unlock: %d", rec.Code)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/secrets", nil)
+	req.Host = "127.0.0.1:7788"
+	req.Header.Set("Cookie", "psst_session="+ck)
+	req.Header.Set("X-Psst-Auto", "1")
+	rec := httptest.NewRecorder()
+	s.cfg.Now = func() time.Time { return now.Add(29 * time.Minute) }
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("auto poll: %d", rec.Code)
+	}
+	s.cfg.Now = func() time.Time { return now.Add(31 * time.Minute) }
+	s.Sweep()
+	if rec := do(t, h, http.MethodGet, "/api/session", "", ck); !strings.Contains(rec.Body.String(), `"unlocked":false`) {
+		t.Fatal("auto-refresh must not extend the unlock timer")
+	}
+}
+
 func TestSessionExpiry(t *testing.T) {
 	now := time.Now()
 	s, _ := newTestServer(t)

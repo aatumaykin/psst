@@ -42,7 +42,7 @@ func (s *Server) apiHandler(unlockRequired bool, h func(w http.ResponseWriter, r
 			writeErr(w, http.StatusUnauthorized, "not authenticated")
 			return
 		}
-		if !(r.Method == http.MethodGet && r.URL.Path == "/api/session") {
+		if !(r.Method == http.MethodGet && r.URL.Path == "/api/session") && r.Header.Get("X-Psst-Auto") != "1" {
 			s.touch(sess)
 		}
 		if unlockRequired {

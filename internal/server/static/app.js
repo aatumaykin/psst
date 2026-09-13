@@ -4,8 +4,9 @@ const $ = (id) => document.getElementById(id);
 let currentSecret = null;
 let editing = false;
 
-async function api(method, path, body) {
+async function api(method, path, body, auto) {
   const opts = { method, headers: {} };
+  if (auto) opts.headers["X-Psst-Auto"] = "1";
   if (body !== undefined) {
     opts.headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(body);
@@ -63,8 +64,8 @@ async function refreshSession() {
   if (s.authenticated) await loadList();
 }
 
-async function loadList() {
-  const data = await api("GET", "/api/secrets");
+async function loadList(auto) {
+  const data = await api("GET", "/api/secrets", undefined, auto);
   $("sync-warning").hidden = !data.warning;
   if (data.warning) $("sync-warning").textContent = data.warning;
   const tree = $("secret-tree");
@@ -229,4 +230,14 @@ $("form-secret").addEventListener("submit", async (ev) => {
 });
 
 setInterval(renderUnlockState, 30000);
+
+let listRefreshInFlight = false;
+async function refreshListIfVisible() {
+  if (document.visibilityState !== "visible" || listRefreshInFlight) return;
+  if ($("view-list").hidden) return;
+  listRefreshInFlight = true;
+  try { await loadList(true); } catch (_) {} finally { listRefreshInFlight = false; }
+}
+setInterval(refreshListIfVisible, 30000);
+
 refreshSession().catch(() => showView("login"));
