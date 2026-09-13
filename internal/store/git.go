@@ -224,6 +224,10 @@ func (g *GitStore) HasRemote() bool {
 	return g.hasRemote()
 }
 
+func (g *GitStore) HasUpstream() bool {
+	return g.hasUpstream()
+}
+
 type gitEntry struct {
 	path string
 	name string
@@ -410,13 +414,16 @@ func (g *GitStore) reloadMetaAndCheck() error {
 	g.mu.Lock()
 	unlocked := g.unlockedFP
 	g.mu.Unlock()
-	if unlocked != "" && newMeta.Fingerprint() != unlocked {
-		return ErrRemoteMetaChanged
-	}
 	if g.opts.LoadPins != nil {
 		if err := CheckPinned(newMeta, g.opts.LoadPins()); err != nil {
+			if errors.Is(err, ErrSaltChanged) {
+				return fmt.Errorf("vault metadata changed since last open: %w; run 'psst sync --accept-rotation' (or re-clone)", err)
+			}
 			return fmt.Errorf("vault metadata changed since last open: %w", err)
 		}
+	}
+	if unlocked != "" && newMeta.Fingerprint() != unlocked {
+		return ErrRemoteMetaChanged
 	}
 	g.mu.Lock()
 	g.meta = newMeta

@@ -128,6 +128,141 @@ func TestRotateNoTTYNoStdin(t *testing.T) {
 	}
 }
 
+type twoClones struct {
+	t      *testing.T
+	remote string
+	a, b   *testEnv
+}
+
+func newTwoClones(t *testing.T) *twoClones {
+	t.Helper()
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	if out, err := exec.Command("git", "init", "--bare", remote).CombinedOutput(); err != nil {
+		t.Fatalf("bare: %v\n%s", err, out)
+	}
+	tc := &twoClones{t: t, remote: remote, a: newTestEnv(t), b: newTestEnv(t)}
+	tc.initClone(tc.a)
+	tc.initClone(tc.b)
+	return tc
+}
+
+func (tc *twoClones) initClone(e *testEnv) {
+	tc.t.Helper()
+	cmd := exec.Command(e.binary, "init", "--storage", "git", "--remote", tc.remote, "--global")
+	cmd.Dir = e.dir
+	cmd.Env = append(os.Environ(), "PSST_PASSWORD=test-password", "HOME="+e.dir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		tc.t.Fatalf("clone init: %v\n%s", err, out)
+	}
+}
+
+func (tc *twoClones) seedOn(e *testEnv, name, value string) {
+	tc.t.Helper()
+	cmd := exec.Command(e.binary, "set", name, "--stdin")
+	cmd.Dir = e.dir
+	cmd.Env = append(os.Environ(), "PSST_PASSWORD=test-password", "HOME="+e.dir)
+	stdin, _ := cmd.StdinPipe()
+	go func() {
+		stdin.Write([]byte(value + "\n"))
+		stdin.Close()
+	}()
+	cmd.Run()
+}
+
+func runAccept(t *testing.T, e *testEnv, password string) (string, int) {
+	t.Helper()
+	cmd := exec.Command(e.binary, "sync", "--accept-rotation")
+	cmd.Dir = e.dir
+	cmd.Env = append(os.Environ(), "PSST_PASSWORD="+password, "HOME="+e.dir)
+	var outBuf, errBuf strings.Builder
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+	err := cmd.Run()
+	return outBuf.String() + errBuf.String(), exitCode(err)
+}
+
+func chmodRemoteReadOnly(t *testing.T, remote string) os.FileMode {
+	t.Helper()
+	st, err := os.Stat(remote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(remote, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	return st.Mode().Perm()
+}
+
+func restoreRemotePerms(t *testing.T, remote string, mode os.FileMode) {
+	t.Helper()
+	if err := os.Chmod(remote, mode); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAcceptRotationFlow(t *testing.T) {
+	tc := newTwoClones(t)
+	tc.seedOn(tc.a, "API_KEY", "secret123")
+	tc.b.run("sync")
+
+	if out, code := runRotateStdin(t, tc.a, "test-password", "new-password"); code != 0 {
+		t.Fatalf("rotate: %s", out)
+	}
+	_, stderr, code := tc.b.runWithPassword(t, "test-password", "list", "--storage", "git")
+	if code != 1 || !strings.Contains(stderr, "accept-rotation") {
+		t.Fatalf("unaccepted clone = %d %s", code, stderr)
+	}
+	out, code := runAccept(t, tc.b, "wrong-password")
+	if code != 1 || !strings.Contains(out, "wrong password") {
+		t.Fatalf("wrong accept = %d %s", code, out)
+	}
+	_, stderr, code = tc.b.runWithPassword(t, "test-password", "list", "--storage", "git")
+	if code != 1 {
+		t.Fatal("pin must be unchanged after failed accept")
+	}
+	out, code = runAccept(t, tc.b, "new-password")
+	if code != 0 || !strings.Contains(out, "Rotation accepted") {
+		t.Fatalf("accept = %d %s", code, out)
+	}
+	stdout, _, code := tc.b.runWithPassword(t, "new-password", "get", "API_KEY", "--storage", "git")
+	if code != 0 || !strings.Contains(stdout, "secret123") {
+		t.Fatalf("post-accept get: %s %d", stdout, code)
+	}
+	_, stderr, code = tc.b.runWithPassword(t, "new-password", "rollback", "API_KEY", "--to", "1", "--storage", "git")
+	if code != 1 || !strings.Contains(stderr, "predates a KDF migration") {
+		t.Fatalf("pre-rotation rollback must fail closed: %d %s", code, stderr)
+	}
+}
+
+func TestAcceptRotationOfflineRefusal(t *testing.T) {
+	tc := newTwoClones(t)
+	tc.seedOn(tc.a, "API_KEY", "secret123")
+	tc.b.run("sync")
+	remoteRO := chmodRemoteReadOnly(t, tc.remote)
+	tc.seedOn(tc.b, "OFFLINE", "offline-secret789")
+	restoreRemotePerms(t, tc.remote, remoteRO)
+	if out, code := runRotateStdin(t, tc.a, "test-password", "new-password"); code != 0 {
+		t.Fatalf("rotate: %s", out)
+	}
+	out, code := runAccept(t, tc.b, "new-password")
+	if code != 1 || !strings.Contains(out, "unpushed local commits") {
+		t.Fatalf("offline accept = %d %s", code, out)
+	}
+}
+
+func TestAcceptRotationNoopAndFlags(t *testing.T) {
+	tc := newTwoClones(t)
+	tc.seedOn(tc.a, "API_KEY", "secret123")
+	tc.b.run("sync")
+	if out, code := runAccept(t, tc.b, "test-password"); code != 0 {
+		t.Fatalf("noop accept = %d %s", code, out)
+	}
+	_, stderr, code := tc.b.run("sync", "--accept-rotation", "--discard-local")
+	if code != 1 || !strings.Contains(stderr, "mutually exclusive") {
+		t.Fatalf("flags = %d %s", code, stderr)
+	}
+}
+
 func TestRotatePushFailureRecoveryHint(t *testing.T) {
 	e := newTestEnv(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
