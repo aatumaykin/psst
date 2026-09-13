@@ -1,68 +1,113 @@
 package cli
 
 import (
-	"os"
 	"slices"
 	"strings"
 )
 
-// parseGlobalFlagsFromArgs mirrors the global flags defined in root.go init().
-// When adding/removing/changing global flags (PersistentFlags on rootCmd),
-// update this function and filterSecretNames to stay in sync.
-func parseGlobalFlagsFromArgs(args []string) (bool, bool, bool, string, []string) {
-	var jsonOut, quiet, global bool
-	var env string
-	var tags []string
+type flagDef struct {
+	Name     string
+	Short    string
+	HasValue bool
+}
+
+var globalFlags = []flagDef{
+	{Name: "--json"},
+	{Name: "--quiet", Short: "-q"},
+	{Name: "--global", Short: "-g"},
+	{Name: "--env", HasValue: true},
+	{Name: "--tag", HasValue: true},
+	{Name: "--vault-path", HasValue: true},
+	{Name: "--storage", HasValue: true},
+}
+
+func isKnownFlag(arg string) bool {
+	for _, f := range globalFlags {
+		if arg == f.Name || (f.Short != "" && arg == f.Short) {
+			return true
+		}
+		if f.HasValue && strings.HasPrefix(arg, f.Name+"=") {
+			return true
+		}
+	}
+	return false
+}
+
+func parseGlobalFlagsFromArgs(args []string) globalConfig {
+	cfg := globalConfig{}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--json":
-			jsonOut = true
+			cfg.JSON = true
 		case "--quiet", "-q":
-			quiet = true
+			cfg.Quiet = true
 		case "--global", "-g":
-			global = true
+			cfg.Global = true
 		case "--env":
 			i++
 			if i < len(args) {
-				env = args[i]
+				cfg.Env = args[i]
 			}
 		case "--tag":
 			i++
 			if i < len(args) {
-				tags = append(tags, args[i])
+				cfg.Tags = append(cfg.Tags, args[i])
+			}
+		case "--vault-path":
+			i++
+			if i < len(args) {
+				cfg.VaultPath = args[i]
+			}
+		case "--storage":
+			i++
+			if i < len(args) {
+				cfg.Storage = args[i]
+			}
+		default:
+			if v, found := strings.CutPrefix(args[i], "--env="); found {
+				cfg.Env = v
+				continue
+			}
+			if v, found := strings.CutPrefix(args[i], "--tag="); found {
+				cfg.Tags = append(cfg.Tags, v)
+			}
+			if v, found := strings.CutPrefix(args[i], "--vault-path="); found {
+				cfg.VaultPath = v
+			}
+			if v, found := strings.CutPrefix(args[i], "--storage="); found {
+				cfg.Storage = v
 			}
 		}
 	}
-	if os.Getenv("PSST_GLOBAL") == "1" {
-		global = true
-	}
-	if env == "" {
-		env = os.Getenv("PSST_ENV")
-	}
-	return jsonOut, quiet, global, env, tags
+	resolveEnvOverrides(&cfg)
+	return cfg
 }
 
-func filterSecretNames(
-	args []string,
-	_, _, _ bool,
-	_ string,
-	_ []string,
-) []string {
-	skip := map[string]bool{
-		"--json": true, "--quiet": true, "-q": true,
-		"--global": true, "-g": true, "--no-mask": true,
-	}
+func filterSecretNames(args []string) []string {
 	valueArgs := map[int]bool{}
 	for i := 0; i < len(args); i++ {
-		if (args[i] == "--env" || args[i] == "--tag") && i+1 < len(args) {
-			valueArgs[i] = true
-			valueArgs[i+1] = true
-			i++
+		for _, f := range globalFlags {
+			if !f.HasValue {
+				continue
+			}
+			if args[i] == f.Name && i+1 < len(args) {
+				valueArgs[i] = true
+				valueArgs[i+1] = true
+				i++
+				break
+			}
+			if strings.HasPrefix(args[i], f.Name+"=") {
+				valueArgs[i] = true
+				break
+			}
 		}
 	}
+
+	extraFlags := map[string]bool{"--no-mask": true, "--expand-args": true}
+
 	var names []string
 	for i, a := range args {
-		if skip[a] || valueArgs[i] {
+		if isKnownFlag(a) || extraFlags[a] || valueArgs[i] {
 			continue
 		}
 		if !strings.HasPrefix(a, "-") {

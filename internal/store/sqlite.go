@@ -7,56 +7,67 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite" // sqlite driver registration
 )
 
 type SQLiteStore struct {
 	mu        sync.Mutex
-	txMu      sync.Mutex
 	db        *sql.DB
-	currentTx *sql.Tx
+	currentTx atomic.Pointer[sql.Tx]
 	dbPath    string
 }
 
+// NewSQLite opens or creates a SQLite-backed secret store.
 func NewSQLite(dbPath string) (*SQLiteStore, error) {
 	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
+	ctx, cancel := context.WithTimeout(
+		context.Background(), 5*time.Second, //nolint:mnd // reasonable connection timeout
+	)
+	defer cancel()
+	if err = db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("verify database connection: %w", err)
+	}
+	var integrity string
+	if intErr := db.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&integrity); intErr != nil ||
+		integrity != "ok" {
+		_ = db.Close()
+		if intErr != nil {
+			return nil, fmt.Errorf("vault integrity check failed: %w", intErr)
+		}
+		return nil, fmt.Errorf("vault integrity check failed: %s", integrity)
+	}
+	if _, pragmaErr := db.ExecContext(ctx, "PRAGMA secure_delete = ON"); pragmaErr != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("enable secure_delete: %w", pragmaErr)
+	}
 	return &SQLiteStore{db: db, dbPath: dbPath}, nil
 }
 
-func (s *SQLiteStore) exec(query string, args ...any) (sql.Result, error) {
-	ctx := context.Background()
-	s.mu.Lock()
-	tx := s.currentTx
-	s.mu.Unlock()
-	if tx != nil {
+func (s *SQLiteStore) exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	if tx := s.currentTx.Load(); tx != nil {
 		return tx.ExecContext(ctx, query, args...)
 	}
 	return s.db.ExecContext(ctx, query, args...)
 }
 
-func (s *SQLiteStore) query(query string, args ...any) (*sql.Rows, error) {
-	ctx := context.Background()
-	s.mu.Lock()
-	tx := s.currentTx
-	s.mu.Unlock()
-	if tx != nil {
+func (s *SQLiteStore) query(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	if tx := s.currentTx.Load(); tx != nil {
 		return tx.QueryContext(ctx, query, args...)
 	}
 	return s.db.QueryContext(ctx, query, args...)
 }
 
-func (s *SQLiteStore) queryRow(query string, args ...any) *sql.Row {
-	ctx := context.Background()
-	s.mu.Lock()
-	tx := s.currentTx
-	s.mu.Unlock()
-	if tx != nil {
+func (s *SQLiteStore) queryRow(ctx context.Context, query string, args ...any) *sql.Row {
+	if tx := s.currentTx.Load(); tx != nil {
 		return tx.QueryRowContext(ctx, query, args...)
 	}
 	return s.db.QueryRowContext(ctx, query, args...)
@@ -93,25 +104,27 @@ func scanHistoryTagsAndTime(tagsJSON, archivedAtStr string) ([]string, time.Time
 }
 
 func (s *SQLiteStore) InitSchema() error {
-	err := initSchema(s.db)
-	if s.dbPath != "" {
-		if chmodErr := os.Chmod(s.dbPath, 0600); chmodErr != nil {
-			return chmodErr
-		}
-		for _, suffix := range []string{"-wal", "-shm"} {
-			p := s.dbPath + suffix
-			if _, statErr := os.Stat(p); statErr == nil {
-				if chmodErr := os.Chmod(p, 0600); chmodErr != nil {
-					return chmodErr
-				}
-			}
-		}
+	if err := initSchema(s.db); err != nil {
+		return err
 	}
-	return err
+	return s.ensureFilePermissions()
 }
 
-func (s *SQLiteStore) GetSecret(name string) (*StoredSecret, error) {
-	row := s.queryRow(
+func (s *SQLiteStore) ensureFilePermissions() error {
+	if s.dbPath == "" {
+		return nil
+	}
+	var firstErr error
+	for _, p := range []string{s.dbPath, s.dbPath + "-wal", s.dbPath + "-shm"} {
+		if chErr := os.Chmod(p, 0600); chErr != nil && !os.IsNotExist(chErr) && firstErr == nil {
+			firstErr = fmt.Errorf("chmod %s: %w", p, chErr)
+		}
+	}
+	return firstErr
+}
+
+func (s *SQLiteStore) GetSecret(ctx context.Context, name string) (*StoredSecret, error) {
+	row := s.queryRow(ctx,
 		"SELECT name, encrypted_value, iv, tags, created_at, updated_at FROM secrets WHERE name = ?",
 		name,
 	)
@@ -134,8 +147,11 @@ func (s *SQLiteStore) GetSecret(name string) (*StoredSecret, error) {
 	return &sec, nil
 }
 
-func (s *SQLiteStore) GetAllSecrets() ([]StoredSecret, error) {
-	rows, err := s.query("SELECT name, encrypted_value, iv, tags, created_at, updated_at FROM secrets ORDER BY name")
+func (s *SQLiteStore) GetAllSecrets(ctx context.Context) ([]StoredSecret, error) {
+	rows, err := s.query(
+		ctx,
+		"SELECT name, encrypted_value, iv, tags, created_at, updated_at FROM secrets ORDER BY name",
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -162,15 +178,18 @@ func (s *SQLiteStore) GetAllSecrets() ([]StoredSecret, error) {
 		sec.UpdatedAt = updated
 		result = append(result, sec)
 	}
+	if err2 := rows.Err(); err2 != nil {
+		return nil, err2
+	}
 	return result, nil
 }
 
-func (s *SQLiteStore) SetSecret(name string, encValue, iv []byte, tags []string) error {
+func (s *SQLiteStore) SetSecret(ctx context.Context, name string, encValue, iv []byte, tags []string) error {
 	tagsJSON, err := json.Marshal(tags)
 	if err != nil {
 		return fmt.Errorf("marshal tags: %w", err)
 	}
-	_, err = s.exec(
+	_, err = s.exec(ctx,
 		`INSERT INTO secrets (name, encrypted_value, iv, tags, updated_at)
 		 VALUES (?, ?, ?, ?, strftime('%Y-%m-%d %H:%M:%S','now'))
 		 ON CONFLICT(name) DO UPDATE SET
@@ -183,18 +202,18 @@ func (s *SQLiteStore) SetSecret(name string, encValue, iv []byte, tags []string)
 	return err
 }
 
-func (s *SQLiteStore) DeleteSecret(name string) error {
-	_, err := s.exec("DELETE FROM secrets WHERE name = ?", name)
+func (s *SQLiteStore) DeleteSecret(ctx context.Context, name string) error {
+	_, err := s.exec(ctx, "DELETE FROM secrets WHERE name = ?", name)
 	return err
 }
 
-func (s *SQLiteStore) DeleteHistory(name string) error {
-	_, err := s.exec("DELETE FROM secrets_history WHERE name = ?", name)
+func (s *SQLiteStore) DeleteHistory(ctx context.Context, name string) error {
+	_, err := s.exec(ctx, "DELETE FROM secrets_history WHERE name = ?", name)
 	return err
 }
 
-func (s *SQLiteStore) ListSecrets() ([]SecretMeta, error) {
-	rows, err := s.query("SELECT name, tags, created_at, updated_at FROM secrets ORDER BY name")
+func (s *SQLiteStore) ListSecrets(ctx context.Context) ([]SecretMeta, error) {
+	rows, err := s.query(ctx, "SELECT name, tags, created_at, updated_at FROM secrets ORDER BY name")
 	if err != nil {
 		return nil, err
 	}
@@ -217,11 +236,15 @@ func (s *SQLiteStore) ListSecrets() ([]SecretMeta, error) {
 		m.UpdatedAt = updated
 		result = append(result, m)
 	}
+	if err2 := rows.Err(); err2 != nil {
+		return nil, err2
+	}
 	return result, nil
 }
 
-func (s *SQLiteStore) GetHistory(name string) ([]HistoryEntry, error) {
+func (s *SQLiteStore) GetHistory(ctx context.Context, name string) ([]HistoryEntry, error) {
 	rows, err := s.query(
+		ctx,
 		"SELECT id, name, version, encrypted_value, iv, tags, archived_at FROM secrets_history WHERE name = ? ORDER BY version DESC",
 		name,
 	)
@@ -250,23 +273,32 @@ func (s *SQLiteStore) GetHistory(name string) ([]HistoryEntry, error) {
 		e.ArchivedAt = archived
 		result = append(result, e)
 	}
+	if err2 := rows.Err(); err2 != nil {
+		return nil, err2
+	}
 	return result, nil
 }
 
-func (s *SQLiteStore) AddHistory(name string, version int, encValue, iv []byte, tags []string) error {
+func (s *SQLiteStore) AddHistory(
+	ctx context.Context,
+	name string,
+	version int,
+	encValue, iv []byte,
+	tags []string,
+) error {
 	tagsJSON, err := json.Marshal(tags)
 	if err != nil {
 		return fmt.Errorf("marshal tags: %w", err)
 	}
-	_, err = s.exec(
+	_, err = s.exec(ctx,
 		"INSERT INTO secrets_history (name, version, encrypted_value, iv, tags) VALUES (?, ?, ?, ?, ?)",
 		name, version, encValue, iv, string(tagsJSON),
 	)
 	return err
 }
 
-func (s *SQLiteStore) PruneHistory(name string, keepVersions int) error {
-	_, err := s.exec(
+func (s *SQLiteStore) PruneHistory(ctx context.Context, name string, keepVersions int) error {
+	_, err := s.exec(ctx,
 		`DELETE FROM secrets_history WHERE name = ? AND version <= (
 			SELECT MAX(version) - ? FROM secrets_history WHERE name = ?
 		)`,
@@ -276,54 +308,65 @@ func (s *SQLiteStore) PruneHistory(name string, keepVersions int) error {
 }
 
 func (s *SQLiteStore) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.db.Close()
 }
 
-func (s *SQLiteStore) setCurrentTx(tx *sql.Tx) {
-	s.mu.Lock()
-	s.currentTx = tx
-	s.mu.Unlock()
-}
-
+// ExecTx executes fn within a database transaction.
+// fn MUST NOT call ExecTx recursively — the mutex is not reentrant.
 func (s *SQLiteStore) ExecTx(fn func() error) error {
 	s.mu.Lock()
-	nested := s.currentTx != nil
-	s.mu.Unlock()
-	if nested {
-		return fn()
-	}
-
-	s.txMu.Lock()
-	defer s.txMu.Unlock()
+	defer s.mu.Unlock()
 
 	tx, err := s.db.BeginTx(context.Background(), nil)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 
-	s.setCurrentTx(tx)
+	s.currentTx.Store(tx)
+	defer s.currentTx.Store(nil)
 
-	fnErr := fn()
-	s.setCurrentTx(nil)
-	if fnErr != nil {
+	if fnErr := fn(); fnErr != nil {
 		_ = tx.Rollback()
 		return fnErr
 	}
-	return tx.Commit()
+	if commitErr := tx.Commit(); commitErr != nil {
+		return commitErr
+	}
+	return nil
 }
 
-func (s *SQLiteStore) GetMeta(key string) (string, error) {
+func (s *SQLiteStore) GetMeta(ctx context.Context, key string) (string, error) {
 	var value string
-	err := s.queryRow("SELECT value FROM vault_meta WHERE key = ?", key).Scan(&value)
+	err := s.queryRow(ctx, "SELECT value FROM vault_meta WHERE key = ?", key).Scan(&value)
 	if err == sql.ErrNoRows {
 		return "", nil
 	}
 	return value, err
 }
 
-func (s *SQLiteStore) SetMeta(key, value string) error {
+func (s *SQLiteStore) SetMeta(ctx context.Context, key, value string) error {
 	q := `INSERT INTO vault_meta (key, value) VALUES (?, ?)
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value`
-	_, err := s.exec(q, key, value)
+	_, err := s.exec(ctx, q, key, value)
 	return err
+}
+
+func (s *SQLiteStore) IncrementMetaInt(ctx context.Context, key string, increment int) (int, error) {
+	q := `INSERT INTO vault_meta (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + ? AS TEXT)`
+	_, err := s.exec(ctx, q, key, strconv.Itoa(increment), increment)
+	if err != nil {
+		return 0, err
+	}
+	val, err := s.GetMeta(ctx, key)
+	if err != nil {
+		return 0, err
+	}
+	n, atoiErr := strconv.Atoi(val)
+	if atoiErr != nil {
+		return 0, fmt.Errorf("increment meta %q: invalid integer %q: %w", key, val, atoiErr)
+	}
+	return n, nil
 }

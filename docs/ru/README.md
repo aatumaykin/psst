@@ -44,7 +44,6 @@ sudo install psst /usr/local/bin/
 ### Требования
 
 - Go 1.26+ (для сборки)
-- gcc (для CGo — mattn/go-sqlite3)
 - На Linux: заголовки `libsecret` (для поддержки OS keyring)
 
 ## Быстрый старт
@@ -84,12 +83,15 @@ psst run -- ./deploy.sh             # внедрить все секреты
 ### Управление секретами
 
 ```bash
-psst init [--global] [--env <name>]   # Создать vault
+psst init [--global] [--env <name>] [--vault-path <path>]   # Создать vault
 psst set <NAME> [--stdin] [--tag T]   # Добавить/обновить секрет
-psst get <NAME>                       # Показать значение (для отладки)
+psst get <NAME>                       # Показать значение (только интерактивный терминал)
+psst verify <NAME> --expected <val>   # Проверить значение без раскрытия
+psst verify <NAME> --hash <sha256>    # Проверить по SHA-256 хешу
 psst list [--tag T]                   # Список имён секретов
 psst rm <NAME>                        # Удалить секрет + историю
 psst migrate                          # Обновить vault до последней версии KDF
+psst completion <shell>               # Генерация скрипта автодополнения
 ```
 
 ### Использование секретов
@@ -105,7 +107,7 @@ psst <СЕКРЕТ>... -- <команда> [аргументы] # Запусти
 psst import .env                      # Импорт из .env файла
 psst import --stdin                   # Импорт из stdin
 psst import --from-env                # Импорт из переменных окружения
-psst export                           # Экспорт в stdout (.env формат)
+psst export                           # Экспорт в stdout (только интерактивный терминал)
 psst export --env-file .env           # Экспорт в файл
 ```
 
@@ -123,6 +125,14 @@ psst tag <NAME> <TAG>                 # Добавить тег
 psst untag <NAME> <TAG>               # Удалить тег
 psst list --tag prod                  # Фильтр по тегу (логика OR)
 psst --tag aws -- aws s3 ls           # Запустить только с тегированными секретами
+```
+
+### Автообновление
+
+```bash
+psst update check                     # Проверить наличие обновления
+psst update install                   # Скачать и установить последнюю версию
+psst update install --force           # Переустановить текущую версию
 ```
 
 ### Сканер утечек
@@ -147,6 +157,19 @@ psst list-envs                        # Список всех окружений
 ```
 
 Хранятся в `.psst/envs/<name>/vault.db` (или `~/.psst/envs/<name>/` с `--global`).
+
+### Произвольный путь к vault
+
+Когда стандартное разрешение пути (локальный или глобальный) не подходит (например, cron-задачи или кастомная структура директорий), можно указать путь к директории vault напрямую. Файл vault всегда называется `vault.db`:
+
+```bash
+psst init --vault-path /opt/secrets
+psst --vault-path /opt/secrets set API_KEY --stdin
+psst --vault-path /opt/secrets list
+psst --vault-path /opt/secrets API_KEY -- curl ...
+```
+
+`--vault-path` имеет приоритет над `--global` и `--env`.
 
 ### Git-хранилище (несколько машин)
 
@@ -248,11 +271,13 @@ psst sync --accept-rotation                 # на каждой другой м�
 Все команды поддерживают:
 
 ```
---json              Структурированный JSON-вывод
--q, --quiet         Минимальный вывод
--g, --global        Использовать глобальный vault (~/.psst/)
---env <name>        Использовать конкретное окружение
---tag <name>        Фильтр по тегу (повторяемый, логика OR)
+--json                 Структурированный JSON-вывод
+-q, --quiet            Минимальный вывод
+-g, --global           Использовать глобальный vault (~/.psst/)
+--env <name>           Использовать конкретное окружение
+--tag <name>           Фильтр по тегу (повторяемый, логика OR)
+--vault-path <path>    Путь к файлу базы данных vault
+--no-mask              Отключить маскирование вывода (для отладки)
 ```
 
 Резервные переменные окружения: `PSST_GLOBAL=1`, `PSST_ENV=<name>`.
@@ -265,9 +290,50 @@ psst sync --accept-rotation                 # на каждой другой м�
 - Ключ шифрования хранится в OS keychain (libsecret на Linux)
 - Секреты автоматически маскируются в выводе команд (`[REDACTED]`)
 - Секреты никогда не попадают в контекст агента
+- `psst get` и `psst export` требуют подтверждения в интерактивном терминале
+- `psst verify` для безопасного сравнения секретов без раскрытия значений (constant-time)
 - `PSST_PASSWORD` удаляется из окружения дочернего процесса
 - Права на файл vault БД установлены в `0600`
 - Best-effort обнуление ключей и plaintext в памяти
+
+## Резервное копирование и восстановление
+
+Vault хранит все секреты в одной зашифрованной SQLite-базе. Если этот файл или ключ шифрования утерян — секреты невосстановимы.
+
+### Ручное резервное копирование
+
+```bash
+# 1. Скопируйте базу vault
+cp .psst/vault.db /backup/vault-$(date +%Y%m%d).db
+
+# 2. Для пользователей keychain: ключ лежит в OS keychain (psst/vault-key)
+#    Дополнительная резервная копия не нужна, если keychain цел.
+
+# 3. Для пользователей PSST_PASSWORD: резервная копия — это сам пароль.
+#    Храните файл vault.db и пароль в разных местах.
+```
+
+### Восстановление
+
+```bash
+# Верните vault.db на ожидаемое место
+cp /backup/vault.db .psst/vault.db
+
+# Убедитесь, что keychain доступен (пользователи keychain)
+# ИЛИ задайте PSST_PASSWORD (пользователи пароля)
+psst list   # проверка доступа
+```
+
+### Git-хранилище
+
+Для git-хранилищ резервная копия — **сам remote**: каждый секрет лежит в репозитории зашифрованным файлом и отправляется при записи, поэтому храните remote (и пароль vault) в надёжном месте. Дополнительно сохраняйте локальные пины `.psst/<env>/config.yaml` — в них закреплены принятые машиной соль и параметры KDF.
+
+### Резервная копия в открытом виде (внимание: раскрывает значения секретов)
+
+```bash
+psst export --env-file .env.backup   # запишет незашифрованные значения
+# Удалите .env.backup после использования!
+```
 
 ## CI / Работа без OS keychain
 
@@ -288,28 +354,32 @@ psst run -- ./deploy.sh                # секреты внедряются в 
 cmd/psst/main.go          Точка входа (DI-связывание)
 internal/
 ├── crypto/               Шифрование AES-256-GCM (интерфейс Encryptor)
-├── store/                Хранение SQLite (интерфейс SecretStore)
+├── kdf/                  Параметры Argon2id KDF
+├── store/                Хранение SQLite + Git (интерфейсы SecretStore)
 ├── keyring/              OS keychain + fallback на env var (интерфейс KeyProvider)
 ├── vault/                Фасад бизнес-логики
 ├── output/               Форматирование human/JSON/quiet
 ├── runner/               Выполнение подпроцессов + маскирование вывода
-└── cli/                  Cobra-команды (15 команд)
+├── server/               Веб-интерфейс — HTTP-обработчики, сессии, встроенный SPA
+├── render/               Подстановка шаблонов — плейсхолдеры {{KEY}}/$KEY (лист)
+├── updater/              Механизм самообновления (GitHub releases)
+├── version/              Информация о версии (ldflags)
+└── cli/                  Cobra-команды (23 корневые команды + exec-паттерн)
 ```
 
 ### Ключевые интерфейсы
 
 ```go
 type Encryptor interface {
-    Encrypt(plaintext, key []byte) (ciphertext, iv []byte, err error)
-    Decrypt(ciphertext, iv, key []byte) ([]byte, error)
+    Encrypt(plaintext []byte, key []byte, aad ...[]byte) (ciphertext, iv []byte, err error)
+    Decrypt(ciphertext, iv []byte, key []byte, aad ...[]byte) ([]byte, error)
     KeyToBuffer(key string) ([]byte, error)
-    KeyToBufferV2(key string) ([]byte, error)
+    KeyToBufferV2WithSalt(key string, salt []byte) ([]byte, error)
     GenerateKey() ([]byte, error)
 }
 
 type KeyProvider interface {
-    GetKey(service, account string) ([]byte, error)
-    GetRawKey(service, account string) (string, error)
+    GetRawKey(service, account string) ([]byte, error)
     SetKey(service, account string, key []byte) error
     IsAvailable() bool
     GenerateKey() ([]byte, error)
@@ -317,8 +387,11 @@ type KeyProvider interface {
 
 type SecretStore interface {
     InitSchema() error
-    GetSecret(name string) (*StoredSecret, error)
-    SetSecret(name string, encValue, iv []byte, tags []string) error
+    GetSecret(ctx context.Context, name string) (*StoredSecret, error)
+    GetAllSecrets(ctx context.Context) ([]StoredSecret, error)
+    ListSecrets(ctx context.Context) ([]SecretMeta, error)
+    SetSecret(ctx context.Context, name string, encValue, iv []byte, tags []string) error
+    DeleteSecret(ctx context.Context, name string) error
     // ... (полный интерфейс в internal/store/store.go)
 }
 ```
@@ -340,7 +413,7 @@ make build-linux-arm64
 | Пакет | Назначение |
 |-------|------------|
 | `spf13/cobra` | CLI-фреймворк |
-| `mattn/go-sqlite3` | SQLite-драйвер (CGo) |
+| `modernc.org/sqlite` | Pure Go SQLite-драйвер (без CGo) |
 | `zalando/go-keyring` | Интеграция с OS keychain |
 | `golang.org/x/term` | Безопасный ввод в терминале |
 | `golang.org/x/crypto` | Argon2id KDF |
@@ -379,7 +452,7 @@ CREATE TABLE secrets_history (
 | Свойство | Оригинал (TS) | Здесь (Go) |
 |----------|---------------|------------|
 | Runtime | Bun | Статический бинарник |
-| SQLite | bun:sqlite / better-sqlite3 | mattn/go-sqlite3 |
+| SQLite | bun:sqlite / better-sqlite3 | modernc.org/sqlite (pure Go) |
 | Криптография | Web Crypto API | stdlib crypto/aes + crypto/cipher |
 | Keychain | Вызов CLI-утилит | zalando/go-keyring |
 | CLI | Ручной парсинг аргументов | spf13/cobra |

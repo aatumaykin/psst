@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"errors"
 	"os"
@@ -32,15 +33,17 @@ func hasFile(t *testing.T, g *GitStore, rel string) bool {
 }
 
 func TestGitStoreCRUD(t *testing.T) {
+	ctx := context.Background()
+
 	g, _ := newGitStore(t)
 	iv := make([]byte, 12)
-	if err := g.SetSecret("API_KEY", []byte("ct1"), iv, nil); err != nil {
+	if err := g.SetSecret(ctx, "API_KEY", []byte("ct1"), iv, nil); err != nil {
 		t.Fatalf("set: %v", err)
 	}
-	if err := g.SetSecret("DB_PASS", []byte("ct2"), iv, []string{"prod"}); err != nil {
+	if err := g.SetSecret(ctx, "DB_PASS", []byte("ct2"), iv, []string{"prod"}); err != nil {
 		t.Fatalf("set tagged: %v", err)
 	}
-	sec, err := g.GetSecret("DB_PASS")
+	sec, err := g.GetSecret(ctx, "DB_PASS")
 	if err != nil || sec == nil {
 		t.Fatalf("get: %v %v", sec, err)
 	}
@@ -50,40 +53,44 @@ func TestGitStoreCRUD(t *testing.T) {
 	if sec.Name != "DB_PASS" || !hasFile(t, g, filepath.Join("secrets", "prod", "DB_PASS.enc")) {
 		t.Fatalf("file layout wrong: %s", sec.Name)
 	}
-	all, err := g.GetAllSecrets()
+	all, err := g.GetAllSecrets(ctx)
 	if err != nil || len(all) != 2 {
 		t.Fatalf("all = %v %v", all, err)
 	}
-	metas, err := g.ListSecrets()
+	metas, err := g.ListSecrets(ctx)
 	if err != nil || len(metas) != 2 {
 		t.Fatalf("list = %v %v", metas, err)
 	}
-	if err := g.DeleteSecret("API_KEY"); err != nil {
+	if err := g.DeleteSecret(ctx, "API_KEY"); err != nil {
 		t.Fatalf("rm: %v", err)
 	}
-	if sec, _ = g.GetSecret("API_KEY"); sec != nil {
+	if sec, _ = g.GetSecret(ctx, "API_KEY"); sec != nil {
 		t.Fatal("deleted secret must be gone")
 	}
 }
 
 func TestGitStoreMultiTagRejected(t *testing.T) {
+	ctx := context.Background()
+
 	g, _ := newGitStore(t)
 	iv := make([]byte, 12)
-	if err := g.SetSecret("KEY", []byte("ct"), iv, []string{"a", "b"}); err == nil {
+	if err := g.SetSecret(ctx, "KEY", []byte("ct"), iv, []string{"a", "b"}); err == nil {
 		t.Fatal("multi-tag must fail closed")
 	}
 }
 
 func TestGitStoreRejectsInvalidNameLookups(t *testing.T) {
+	ctx := context.Background()
+
 	g, repo := newGitStore(t)
 	iv := make([]byte, 12)
-	if err := g.SetSecret("KEY", []byte("ct"), iv, nil); err != nil {
+	if err := g.SetSecret(ctx, "KEY", []byte("ct"), iv, nil); err != nil {
 		t.Fatalf("set: %v", err)
 	}
-	if sec, err := g.GetSecret("../KEY"); err != nil || sec != nil {
+	if sec, err := g.GetSecret(ctx, "../KEY"); err != nil || sec != nil {
 		t.Fatalf("invalid name must be not-found, got %v %v", sec, err)
 	}
-	if err := g.DeleteSecret("../psst.yaml"); err == nil {
+	if err := g.DeleteSecret(ctx, "../psst.yaml"); err == nil {
 		t.Fatal("invalid name delete must fail")
 	}
 	if _, err := os.Stat(filepath.Join(repo, "psst.yaml")); err != nil {
@@ -92,12 +99,14 @@ func TestGitStoreRejectsInvalidNameLookups(t *testing.T) {
 }
 
 func TestGitStoreTagReplaceMovesFile(t *testing.T) {
+	ctx := context.Background()
+
 	g, _ := newGitStore(t)
 	iv := make([]byte, 12)
-	if err := g.SetSecret("KEY", []byte("ct"), iv, []string{"prod"}); err != nil {
+	if err := g.SetSecret(ctx, "KEY", []byte("ct"), iv, []string{"prod"}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
-	if err := g.SetSecret("KEY", []byte("ct"), iv, []string{"test"}); err != nil {
+	if err := g.SetSecret(ctx, "KEY", []byte("ct"), iv, []string{"test"}); err != nil {
 		t.Fatalf("retag: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(g.repoDir, "secrets", "prod", "KEY.enc")); !os.IsNotExist(err) {
@@ -109,11 +118,13 @@ func TestGitStoreTagReplaceMovesFile(t *testing.T) {
 }
 
 func TestGitStoreExecTxBatch(t *testing.T) {
+	ctx := context.Background()
+
 	g, _ := newGitStore(t)
 	iv := make([]byte, 12)
 	err := g.ExecTx(func() error {
 		for _, n := range []string{"A1", "B2", "C3"} {
-			if err := g.SetSecret(n, []byte("ct"), iv, nil); err != nil {
+			if err := g.SetSecret(ctx, n, []byte("ct"), iv, nil); err != nil {
 				return err
 			}
 		}
@@ -132,22 +143,24 @@ func TestGitStoreExecTxBatch(t *testing.T) {
 }
 
 func TestGitStoreMeta(t *testing.T) {
+	ctx := context.Background()
+
 	g, _ := newGitStore(t)
-	v, err := g.GetMeta("kdf_version")
+	v, err := g.GetMeta(ctx, "kdf_version")
 	if err != nil || v != "2" {
 		t.Fatalf("kdf_version = %q %v", v, err)
 	}
-	salt, _ := g.GetMeta("kdf_salt")
+	salt, _ := g.GetMeta(ctx, "kdf_salt")
 	if salt == "" {
 		t.Fatal("salt exposed")
 	}
-	if aad, _ := g.GetMeta("vault_aad"); aad == "" {
+	if aad, _ := g.GetMeta(ctx, "vault_aad"); aad == "" {
 		t.Fatal("aad exposed")
 	}
-	if tv, _ := g.GetMeta("kdf_time"); tv != "3" {
+	if tv, _ := g.GetMeta(ctx, "kdf_time"); tv != "3" {
 		t.Fatalf("kdf_time = %q", tv)
 	}
-	if _, err := g.GetMeta("nope"); err != nil {
+	if _, err := g.GetMeta(ctx, "nope"); err != nil {
 		t.Fatalf("unknown key must return empty: %v", err)
 	}
 	if fp := g.FingerprintOfCurrent(); fp == "" {
@@ -156,6 +169,7 @@ func TestGitStoreMeta(t *testing.T) {
 }
 
 func TestGitStoreInitSchemaNonDestructive(t *testing.T) {
+
 	g, repo := newGitStore(t)
 	if err := g.InitSchema(); err != nil {
 		t.Fatalf("idempotent: %v", err)
@@ -173,9 +187,11 @@ func TestGitStoreInitSchemaNonDestructive(t *testing.T) {
 }
 
 func TestGitStoreWalkIgnoresForeignPaths(t *testing.T) {
+	ctx := context.Background()
+
 	g, repo := newGitStore(t)
 	iv := make([]byte, 12)
-	if err := g.SetSecret("KEY", []byte("ct"), iv, []string{"prod"}); err != nil {
+	if err := g.SetSecret(ctx, "KEY", []byte("ct"), iv, []string{"prod"}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 	if err := os.MkdirAll(filepath.Join(repo, "secrets", "BadTag"), 0755); err != nil {
@@ -184,7 +200,7 @@ func TestGitStoreWalkIgnoresForeignPaths(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, "secrets", "BadTag", "X.enc"), []byte("junk\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	metas, err := g.ListSecrets()
+	metas, err := g.ListSecrets(ctx)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -194,11 +210,13 @@ func TestGitStoreWalkIgnoresForeignPaths(t *testing.T) {
 }
 
 func TestGitStoreSetMetaKDFParams(t *testing.T) {
+	ctx := context.Background()
+
 	g, repo := newGitStore(t)
-	if err := g.SetMeta("kdf_time", "4"); err != nil {
+	if err := g.SetMeta(ctx, "kdf_time", "4"); err != nil {
 		t.Fatalf("setmeta: %v", err)
 	}
-	if tv, _ := g.GetMeta("kdf_time"); tv != "4" {
+	if tv, _ := g.GetMeta(ctx, "kdf_time"); tv != "4" {
 		t.Fatalf("kdf_time = %q", tv)
 	}
 	data, err := os.ReadFile(filepath.Join(repo, "psst.yaml"))
@@ -211,6 +229,27 @@ func TestGitStoreSetMetaKDFParams(t *testing.T) {
 	}
 	if m.Params.Time != 4 {
 		t.Fatalf("persisted time = %d", m.Params.Time)
+	}
+}
+
+func TestGitStoreIncrementMetaInt(t *testing.T) {
+	ctx := context.Background()
+	g, _ := newGitStore(t)
+
+	n, err := g.IncrementMetaInt(ctx, "kdf_time", 1)
+	if err != nil || n != 4 {
+		t.Fatalf("kdf_time increment = %d, %v; want 4", n, err)
+	}
+	if tv, _ := g.GetMeta(ctx, "kdf_time"); tv != "4" {
+		t.Fatalf("kdf_time = %q, want persisted 4", tv)
+	}
+
+	n, err = g.IncrementMetaInt(ctx, "unlock_attempts", 1)
+	if err != nil || n != 1 {
+		t.Fatalf("unknown key increment = %d, %v; want 1", n, err)
+	}
+	if v, _ := g.GetMeta(ctx, "unlock_attempts"); v != "" {
+		t.Fatalf("unknown key must stay unpersisted, got %q", v)
 	}
 }
 
@@ -241,118 +280,131 @@ func cloneVault(t *testing.T, remote string) *GitStore {
 }
 
 func TestGitStoreSyncRoundTrip(t *testing.T) {
+	ctx := context.Background()
+
 	remote := newBareRemote(t)
 	g1 := newSeededStore(t, remote)
 	iv := make([]byte, 12)
-	if err := g1.SetSecret("KEY", []byte("ct"), iv, nil); err != nil {
+	if err := g1.SetSecret(ctx, "KEY", []byte("ct"), iv, nil); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 	g2 := cloneVault(t, remote)
 	if err := g2.Sync(); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
-	sec, err := g2.GetSecret("KEY")
+	sec, err := g2.GetSecret(ctx, "KEY")
 	if err != nil || sec == nil {
 		t.Fatalf("get after sync: %v %v", sec, err)
 	}
 }
 
 func TestGitStoreConflictFailsClosed(t *testing.T) {
+	ctx := context.Background()
+
 	remote := newBareRemote(t)
 	g1 := newSeededStore(t, remote)
 	g2 := cloneVault(t, remote)
 	iv := make([]byte, 12)
-	if err := g1.SetSecret("KEY", []byte("one"), iv, nil); err != nil {
+	if err := g1.SetSecret(ctx, "KEY", []byte("one"), iv, nil); err != nil {
 		t.Fatalf("set one: %v", err)
 	}
 	if err := g2.Sync(); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
-	if err := g2.SetSecret("KEY", []byte("two"), iv, nil); err != nil {
+	if err := g2.SetSecret(ctx, "KEY", []byte("two"), iv, nil); err != nil {
 		t.Fatalf("set two: %v", err)
 	}
-	err := g1.SetSecret("KEY", []byte("three"), iv, nil)
+	err := g1.SetSecret(ctx, "KEY", []byte("three"), iv, nil)
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("same-key race must fail closed with ErrConflict, got %v", err)
 	}
 }
 
 func TestGitStoreDifferentKeysRebase(t *testing.T) {
+	ctx := context.Background()
+
 	remote := newBareRemote(t)
 	g1 := newSeededStore(t, remote)
 	g2 := cloneVault(t, remote)
 	iv := make([]byte, 12)
-	if err := g1.SetSecret("A1", []byte("x"), iv, nil); err != nil {
+	if err := g1.SetSecret(ctx, "A1", []byte("x"), iv, nil); err != nil {
 		t.Fatalf("set A1: %v", err)
 	}
-	if err := g2.SetSecret("B2", []byte("y"), iv, nil); err != nil {
+	if err := g2.SetSecret(ctx, "B2", []byte("y"), iv, nil); err != nil {
 		t.Fatalf("set B2 must succeed after rebase: %v", err)
 	}
 	g3 := cloneVault(t, remote)
-	if _, err := g3.GetSecret("A1"); err != nil {
+	if _, err := g3.GetSecret(ctx, "A1"); err != nil {
 		t.Fatalf("A1 lost: %v", err)
 	}
-	if _, err := g3.GetSecret("B2"); err != nil {
+	if _, err := g3.GetSecret(ctx, "B2"); err != nil {
 		t.Fatalf("B2 lost: %v", err)
 	}
 }
 
 func TestGitStoreDiscardLocalRecovers(t *testing.T) {
+	ctx := context.Background()
+
 	remote := newBareRemote(t)
 	g1 := newSeededStore(t, remote)
 	g2 := cloneVault(t, remote)
 	iv := make([]byte, 12)
-	if err := g1.SetSecret("KEY", []byte("local"), iv, nil); err != nil {
+	if err := g1.SetSecret(ctx, "KEY", []byte("local"), iv, nil); err != nil {
 		t.Fatalf("set local: %v", err)
 	}
-	if err := g2.SetSecret("KEY", []byte("remote"), iv, nil); err != nil {
+	if err := g2.SetSecret(ctx, "KEY", []byte("remote"), iv, nil); err != nil {
 		t.Fatalf("set remote: %v", err)
 	}
-	err := g1.SetSecret("OTHER", []byte("z"), iv, nil)
+	err := g1.SetSecret(ctx, "OTHER", []byte("z"), iv, nil)
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("expected conflict deadlock, got %v", err)
 	}
 	if err := g1.DiscardLocal(); err != nil {
 		t.Fatalf("discard: %v", err)
 	}
-	if err := g1.SetSecret("OTHER", []byte("z"), iv, nil); err != nil {
+	if err := g1.SetSecret(ctx, "OTHER", []byte("z"), iv, nil); err != nil {
 		t.Fatalf("recovered: %v", err)
 	}
 }
 
 func TestGitStoreStaleKeyAborts(t *testing.T) {
+	ctx := context.Background()
+
 	remote := newBareRemote(t)
 	g1 := newSeededStore(t, remote)
 	iv := make([]byte, 12)
-	if err := g1.SetSecret("KEY", []byte("ct"), iv, nil); err != nil {
+	if err := g1.SetSecret(ctx, "KEY", []byte("ct"), iv, nil); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 	g1.SetUnlockedFingerprint(g1.FingerprintOfCurrent())
 
 	g2 := cloneVault(t, remote)
-	if err := g2.SetMeta("kdf_time", "4"); err != nil {
+	if err := g2.SetMeta(ctx, "kdf_time", "4"); err != nil {
 		t.Fatalf("migrate params remotely: %v", err)
 	}
 
-	err := g1.SetSecret("KEY2", []byte("ct"), iv, nil)
+	err := g1.SetSecret(ctx, "KEY2", []byte("ct"), iv, nil)
 	if !errors.Is(err, ErrRemoteMetaChanged) {
 		t.Fatalf("stale write = %v, want ErrRemoteMetaChanged", err)
 	}
 }
 
 func TestGitStoreSyncConflictErrors(t *testing.T) {
+	ctx := context.Background()
+
 	remote := newBareRemote(t)
 	g1 := newSeededStore(t, remote)
 	g2 := cloneVault(t, remote)
 	iv := make([]byte, 12)
-	_ = g1.SetSecret("KEY", []byte("a"), iv, nil)
-	_ = g2.SetSecret("KEY", []byte("b"), iv, nil)
+	_ = g1.SetSecret(ctx, "KEY", []byte("a"), iv, nil)
+	_ = g2.SetSecret(ctx, "KEY", []byte("b"), iv, nil)
 	if err := g1.Sync(); !errors.Is(err, ErrConflict) {
 		t.Fatalf("sync on conflicted clone = %v, want ErrConflict", err)
 	}
 }
 
 func TestGitStoreSyncNoRemote(t *testing.T) {
+
 	g, _ := newGitStore(t)
 	if err := g.Sync(); !errors.Is(err, ErrNoRemote) {
 		t.Fatalf("local-only sync = %v, want ErrNoRemote", err)
@@ -360,12 +412,14 @@ func TestGitStoreSyncNoRemote(t *testing.T) {
 }
 
 func TestGitStoreGetHistory(t *testing.T) {
+	ctx := context.Background()
+
 	g, _ := newGitStore(t)
 	iv := make([]byte, 12)
-	_ = g.SetSecret("KEY", []byte("v1"), iv, nil)
-	_ = g.SetSecret("KEY", []byte("v2"), iv, nil)
-	_ = g.SetSecret("KEY", []byte("v3"), iv, nil)
-	h, err := g.GetHistory("KEY")
+	_ = g.SetSecret(ctx, "KEY", []byte("v1"), iv, nil)
+	_ = g.SetSecret(ctx, "KEY", []byte("v2"), iv, nil)
+	_ = g.SetSecret(ctx, "KEY", []byte("v3"), iv, nil)
+	h, err := g.GetHistory(ctx, "KEY")
 	if err != nil {
 		t.Fatalf("history: %v", err)
 	}
@@ -387,37 +441,42 @@ func TestGitStoreGetHistory(t *testing.T) {
 }
 
 func TestGitStoreOfflineRead(t *testing.T) {
+	ctx := context.Background()
+
 	remote := newBareRemote(t)
 	g := newSeededStore(t, remote)
 	iv := make([]byte, 12)
-	_ = g.SetSecret("KEY", []byte("ct"), iv, nil)
+	_ = g.SetSecret(ctx, "KEY", []byte("ct"), iv, nil)
 	if _, err := NewGitRunner(g.repoDir).Run("config", "remote.origin.url", "/nonexistent/remote.git"); err != nil {
 		t.Fatal(err)
 	}
-	sec, err := g.GetSecret("KEY")
+	sec, err := g.GetSecret(ctx, "KEY")
 	if err != nil || sec == nil {
 		t.Fatalf("offline read must work: %v %v", sec, err)
 	}
 }
 
 func TestGitStoreDates(t *testing.T) {
+	ctx := context.Background()
+
 	g, _ := newGitStore(t)
 	iv := make([]byte, 12)
-	_ = g.SetSecret("KEY", []byte("ct"), iv, nil)
-	metas, err := g.ListSecrets()
+	_ = g.SetSecret(ctx, "KEY", []byte("ct"), iv, nil)
+	metas, err := g.ListSecrets(ctx)
 	if err != nil || len(metas) != 1 {
 		t.Fatalf("list: %v %v", metas, err)
 	}
 	if metas[0].CreatedAt.IsZero() || metas[0].UpdatedAt.IsZero() {
 		t.Fatalf("dates must be populated: %+v", metas[0])
 	}
-	sec, _ := g.GetSecret("KEY")
+	sec, _ := g.GetSecret(ctx, "KEY")
 	if sec.CreatedAt.IsZero() {
 		t.Fatal("GetSecret dates populated")
 	}
 }
 
 func TestCloneEmptyRemoteOnboarding(t *testing.T) {
+
 	remote := newBareRemote(t)
 	repo := filepath.Join(t.TempDir(), "repo")
 	g, err := CloneGitVault(remote, repo, GitOptions{Remote: remote})
@@ -433,10 +492,12 @@ func TestCloneEmptyRemoteOnboarding(t *testing.T) {
 }
 
 func TestCloneGitVaultRelativePath(t *testing.T) {
+	ctx := context.Background()
+
 	remote := newBareRemote(t)
 	g := newClonedStore(t, remote)
 	iv := make([]byte, 12)
-	if err := g.SetSecret("KEY", []byte("ct"), iv, nil); err != nil {
+	if err := g.SetSecret(ctx, "KEY", []byte("ct"), iv, nil); err != nil {
 		t.Fatal(err)
 	}
 	work := t.TempDir()
@@ -451,19 +512,21 @@ func TestCloneGitVaultRelativePath(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(work, "nested", "repo", "nested")); err == nil {
 		t.Fatal("nested duplication bug still present")
 	}
-	got, err := rel.GetSecret("KEY")
+	got, err := rel.GetSecret(ctx, "KEY")
 	if err != nil || got == nil {
 		t.Fatalf("get after clone: %v %v", got, err)
 	}
 }
 
 func TestGitStoreListUpdatedBy(t *testing.T) {
+	ctx := context.Background()
+
 	g, _ := newGitStore(t)
 	iv := make([]byte, 12)
-	if err := g.SetSecret("KEY", []byte("ct"), iv, nil); err != nil {
+	if err := g.SetSecret(ctx, "KEY", []byte("ct"), iv, nil); err != nil {
 		t.Fatalf("set: %v", err)
 	}
-	metas, err := g.ListSecrets()
+	metas, err := g.ListSecrets(ctx)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -492,6 +555,7 @@ func newClonedStore(t *testing.T, remote string) *GitStore {
 }
 
 func TestGitStoreHasRemote(t *testing.T) {
+
 	g := newClonedStore(t, newBareRemote(t))
 	if !g.HasRemote() {
 		t.Fatal("cloned store must report remote")
@@ -503,6 +567,8 @@ func TestGitStoreHasRemote(t *testing.T) {
 }
 
 func TestGitStorePushFailedSentinel(t *testing.T) {
+	ctx := context.Background()
+
 	remote := newBareRemote(t)
 	g := newClonedStore(t, remote)
 	if err := os.Chmod(remote, 0o555); err != nil {
@@ -510,7 +576,7 @@ func TestGitStorePushFailedSentinel(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(remote, 0o755) })
 	iv := make([]byte, 12)
-	err := g.SetSecret("KEY", []byte("ct"), iv, nil)
+	err := g.SetSecret(ctx, "KEY", []byte("ct"), iv, nil)
 	if err == nil {
 		t.Fatal("push to read-only remote must fail")
 	}
@@ -523,10 +589,12 @@ func TestGitStorePushFailedSentinel(t *testing.T) {
 }
 
 func TestGitStoreExecTxMsg(t *testing.T) {
+	ctx := context.Background()
+
 	g, _ := newGitStore(t)
 	iv := make([]byte, 12)
-	err := g.ExecTxMsg("psst: rotate", func() error {
-		return g.SetSecret("KEY", []byte("ct"), iv, nil)
+	err := g.ExecTxMsg(ctx, "psst: rotate", func() error {
+		return g.SetSecret(ctx, "KEY", []byte("ct"), iv, nil)
 	})
 	if err != nil {
 		t.Fatalf("tx: %v", err)
@@ -538,50 +606,56 @@ func TestGitStoreExecTxMsg(t *testing.T) {
 }
 
 func TestGitStoreRotateSalt(t *testing.T) {
+	ctx := context.Background()
+
 	g, _ := newGitStore(t)
-	if err := g.RotateSalt("MDEyMzQ1Njc4OWFiY2RlZg=="); err == nil {
+	if err := g.RotateSalt(ctx, "MDEyMzQ1Njc4OWFiY2RlZg=="); err == nil {
 		t.Fatal("rotate outside tx must fail")
 	}
 	newSalt := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 16))
-	err := g.ExecTxMsg("psst: rotate", func() error {
-		return g.RotateSalt(newSalt)
+	err := g.ExecTxMsg(ctx, "psst: rotate", func() error {
+		return g.RotateSalt(ctx, newSalt)
 	})
 	if err != nil {
 		t.Fatalf("rotate: %v", err)
 	}
-	salt, err := g.GetMeta("kdf_salt")
+	salt, err := g.GetMeta(ctx, "kdf_salt")
 	if err != nil || salt != newSalt {
 		t.Fatalf("salt = %q %v", salt, err)
 	}
-	if err := g.ExecTxMsg("t", func() error {
-		return g.RotateSalt("c2hvcnQ=")
+	if err := g.ExecTxMsg(ctx, "t", func() error {
+		return g.RotateSalt(ctx, "c2hvcnQ=")
 	}); err == nil {
 		t.Fatal("short salt must fail inside tx")
 	}
-	if err := g.ExecTxMsg("t", func() error {
-		return g.RotateSalt("!!!notbase64!!!")
+	if err := g.ExecTxMsg(ctx, "t", func() error {
+		return g.RotateSalt(ctx, "!!!notbase64!!!")
 	}); err == nil {
 		t.Fatal("invalid base64 salt must fail")
 	}
 }
 
 func TestGitStoreSyncAcceptRotationNoRotation(t *testing.T) {
+	ctx := context.Background()
+
 	remote := newBareRemote(t)
 	g := newClonedStore(t, remote)
-	meta, err := g.SyncAcceptRotation()
+	meta, err := g.SyncAcceptRotation(ctx)
 	if err != nil {
 		t.Fatalf("accept: %v", err)
 	}
-	salt, _ := g.GetMeta("kdf_salt")
+	salt, _ := g.GetMeta(ctx, "kdf_salt")
 	if salt != meta.SaltB64 {
 		t.Fatalf("cache not updated: %q vs %q", salt, meta.SaltB64)
 	}
 }
 
 func TestGitStoreSyncAcceptRotationRejectsWeaker(t *testing.T) {
+	ctx := context.Background()
+
 	remote := newBareRemote(t)
 	g := newClonedStore(t, remote)
-	if err := g.SetMeta("kdf_time", "4"); err != nil {
+	if err := g.SetMeta(ctx, "kdf_time", "4"); err != nil {
 		t.Fatalf("strengthen: %v", err)
 	}
 	params := kdf.Default()
@@ -589,25 +663,27 @@ func TestGitStoreSyncAcceptRotationRejectsWeaker(t *testing.T) {
 	pin := &Pin{SaltB64: g.meta.SaltB64, Params: params}
 	g.opts.LoadPins = func() *Pin { return pin }
 	other := cloneVault(t, remote)
-	if err := other.SetMeta("kdf_time", "3"); err != nil {
+	if err := other.SetMeta(ctx, "kdf_time", "3"); err != nil {
 		t.Fatalf("weaken: %v", err)
 	}
-	_, err := g.SyncAcceptRotation()
+	_, err := g.SyncAcceptRotation(ctx)
 	if !errors.Is(err, ErrKDFWeakened) {
 		t.Fatalf("err = %v, want ErrKDFWeakened", err)
 	}
 }
 
 func TestGitStoreAheadOfUpstream(t *testing.T) {
+	ctx := context.Background()
+
 	remote := newBareRemote(t)
 	g := newClonedStore(t, remote)
-	if g.AheadOfUpstream() {
+	if g.AheadOfUpstream(ctx) {
 		t.Fatal("synced clone must not be ahead")
 	}
 	if _, err := NewGitRunner(g.repoDir).Run("commit", "--allow-empty", "-m", "local"); err != nil {
 		t.Fatal(err)
 	}
-	if !g.AheadOfUpstream() {
+	if !g.AheadOfUpstream(ctx) {
 		t.Fatal("clone with local commit must be ahead")
 	}
 }

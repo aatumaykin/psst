@@ -9,6 +9,7 @@ import (
 	"github.com/aatumaykin/psst/internal/version"
 )
 
+// UpdateInfo holds information about an available update.
 type UpdateInfo struct {
 	CurrentVersion string
 	LatestVersion  string
@@ -17,6 +18,7 @@ type UpdateInfo struct {
 	AssetName      string
 }
 
+// ReleaseInfo represents a GitHub release.
 type ReleaseInfo struct {
 	TagName string `json:"tag_name"`
 	Assets  []struct {
@@ -25,6 +27,7 @@ type ReleaseInfo struct {
 	} `json:"assets"`
 }
 
+// CheckForUpdate checks GitHub for the latest release and returns update info.
 func CheckForUpdate() (*UpdateInfo, error) {
 	release, err := fetchLatestRelease()
 	if err != nil {
@@ -59,6 +62,7 @@ func CheckForUpdate() (*UpdateInfo, error) {
 	}, nil
 }
 
+// IsNewer reports whether the latest version is newer than the current version.
 func (u *UpdateInfo) IsNewer() bool {
 	return compareVersions(u.LatestVersion, u.CurrentVersion) > 0
 }
@@ -102,11 +106,37 @@ func compareVersions(a, b string) int {
 	if bPre == "" {
 		return -1
 	}
-	if aPre < bPre {
-		return -1
-	}
-	if aPre > bPre {
+	aPri := prereleasePriority(aPre)
+	bPri := prereleasePriority(bPre)
+	if aPri != bPri {
+		if aPri < bPri {
+			return -1
+		}
 		return 1
+	}
+	return 0
+}
+
+const (
+	prereleaseDev   = 0
+	prereleaseAlpha = 1
+	prereleaseBeta  = 2
+	prereleaseRC    = 3
+)
+
+var prereleaseOrder = map[string]int{
+	"dev":   prereleaseDev,
+	"alpha": prereleaseAlpha,
+	"beta":  prereleaseBeta,
+	"rc":    prereleaseRC,
+}
+
+func prereleasePriority(s string) int {
+	lower := strings.ToLower(s)
+	for prefix, prio := range prereleaseOrder {
+		if strings.HasPrefix(lower, prefix) {
+			return prio
+		}
 	}
 	return 0
 }

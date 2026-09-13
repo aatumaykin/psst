@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/aatumaykin/psst/internal/crypto"
+	"github.com/aatumaykin/psst/internal/keyring"
 	"github.com/aatumaykin/psst/internal/store"
 	"github.com/aatumaykin/psst/internal/vault"
 )
@@ -167,11 +169,11 @@ func TestHostMiddleware(t *testing.T) {
 
 func seedGitSecret(t *testing.T, gs *store.GitStore) {
 	t.Helper()
-	v := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, gs)
-	if err := v.Unlock(); err != nil {
+	v := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), gs)
+	if err := v.Unlock(context.Background()); err != nil {
 		t.Fatalf("seed unlock: %v", err)
 	}
-	if err := v.SetSecret("API_KEY", []byte("secret123"), []string{"prod"}); err != nil {
+	if err := v.SetSecret(context.Background(), "API_KEY", []byte("secret123"), []string{"prod"}); err != nil {
 		t.Fatalf("seed set: %v", err)
 	}
 }
@@ -403,11 +405,11 @@ func TestListLockedNoValues(t *testing.T) {
 func TestHistoryLockedNoValues(t *testing.T) {
 	s, gs := newTestServer(t)
 	seedGitSecret(t, gs)
-	v := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, gs)
-	if err := v.Unlock(); err != nil {
+	v := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), gs)
+	if err := v.Unlock(context.Background()); err != nil {
 		t.Fatalf("unlock: %v", err)
 	}
-	if err := v.SetSecret("API_KEY", []byte("secret456"), []string{"prod"}); err != nil {
+	if err := v.SetSecret(context.Background(), "API_KEY", []byte("secret456"), []string{"prod"}); err != nil {
 		t.Fatalf("set2: %v", err)
 	}
 	h := s.Handler()
@@ -473,7 +475,7 @@ func TestWriteCycle(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("edit+retag = %d %s", rec.Code, rec.Body.String())
 	}
-	metas, _ := gs.ListSecrets()
+	metas, _ := gs.ListSecrets(context.Background())
 	for _, m := range metas {
 		if m.Name == "NEW_KEY" && (len(m.Tags) != 1 || m.Tags[0] != "stage") {
 			t.Fatalf("retag = %+v", m.Tags)
@@ -483,7 +485,7 @@ func TestWriteCycle(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("tag-only move = %d %s", rec.Code, rec.Body.String())
 	}
-	metas, _ = gs.ListSecrets()
+	metas, _ = gs.ListSecrets(context.Background())
 	for _, m := range metas {
 		if m.Name == "NEW_KEY" && (len(m.Tags) != 1 || m.Tags[0] != "prod2") {
 			t.Fatalf("tag-only = %+v", m.Tags)
@@ -493,7 +495,7 @@ func TestWriteCycle(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("untag = %d %s", rec.Code, rec.Body.String())
 	}
-	metas, _ = gs.ListSecrets()
+	metas, _ = gs.ListSecrets(context.Background())
 	for _, m := range metas {
 		if m.Name == "NEW_KEY" && len(m.Tags) != 0 {
 			t.Fatalf("untag left tags: %+v", m)
@@ -524,11 +526,11 @@ func TestWriteCycle(t *testing.T) {
 func TestRollbackEndpoint(t *testing.T) {
 	s, gs := newTestServer(t)
 	seedGitSecret(t, gs)
-	v := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, gs)
-	if err := v.Unlock(); err != nil {
+	v := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), gs)
+	if err := v.Unlock(context.Background()); err != nil {
 		t.Fatalf("unlock: %v", err)
 	}
-	if err := v.SetSecret("API_KEY", []byte("secret456"), []string{"prod"}); err != nil {
+	if err := v.SetSecret(context.Background(), "API_KEY", []byte("secret456"), []string{"prod"}); err != nil {
 		t.Fatalf("set2: %v", err)
 	}
 	h := s.Handler()
@@ -540,7 +542,7 @@ func TestRollbackEndpoint(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("rollback = %d %s", rec.Code, rec.Body.String())
 	}
-	got, err := v.GetSecret("API_KEY")
+	got, err := v.GetSecret(context.Background(), "API_KEY")
 	if err != nil || string(got.Value) != "secret123" {
 		t.Fatalf("rollback value = %q %v", got.Value, err)
 	}
@@ -588,11 +590,11 @@ func TestRemoteMetaChangedRecovery(t *testing.T) {
 	if err := gs.InitSchema(); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	seed := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, gs)
-	if err := seed.Unlock(); err != nil {
+	seed := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), gs)
+	if err := seed.Unlock(context.Background()); err != nil {
 		t.Fatalf("seed unlock: %v", err)
 	}
-	if err := seed.SetSecret("API_KEY", []byte("secret123"), nil); err != nil {
+	if err := seed.SetSecret(context.Background(), "API_KEY", []byte("secret123"), nil); err != nil {
 		t.Fatalf("seed set (pushes): %v", err)
 	}
 
@@ -619,26 +621,26 @@ func TestRemoteMetaChangedRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("other: %v", err)
 	}
-	oldV := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, other)
-	if err := oldV.Unlock(); err != nil {
+	oldV := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), other)
+	if err := oldV.Unlock(context.Background()); err != nil {
 		t.Fatalf("old unlock: %v", err)
 	}
-	got, err := oldV.GetSecret("API_KEY")
+	got, err := oldV.GetSecret(context.Background(), "API_KEY")
 	if err != nil {
 		t.Fatalf("old-key decrypt: %v", err)
 	}
-	if err := other.SetMeta("kdf_time", "4"); err != nil {
+	if err := other.SetMeta(context.Background(), "kdf_time", "4"); err != nil {
 		t.Fatalf("strengthen: %v", err)
 	}
 	fresh, err := store.NewGitStore(repo2, store.GitOptions{Remote: remote})
 	if err != nil {
 		t.Fatalf("fresh: %v", err)
 	}
-	mig := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, fresh)
-	if err := mig.Unlock(); err != nil {
+	mig := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), fresh)
+	if err := mig.Unlock(context.Background()); err != nil {
 		t.Fatalf("mig unlock: %v", err)
 	}
-	if err := mig.SetSecret("API_KEY", got.Value, got.Tags); err != nil {
+	if err := mig.SetSecret(context.Background(), "API_KEY", got.Value, got.Tags); err != nil {
 		t.Fatalf("mig re-encrypt+push: %v", err)
 	}
 
@@ -674,11 +676,11 @@ func TestRemoteMetaChangedRecoveryPrecheck(t *testing.T) {
 	if err := gs.InitSchema(); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	seed := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, gs)
-	if err := seed.Unlock(); err != nil {
+	seed := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), gs)
+	if err := seed.Unlock(context.Background()); err != nil {
 		t.Fatalf("seed unlock: %v", err)
 	}
-	if err := seed.SetSecret("API_KEY", []byte("secret123"), nil); err != nil {
+	if err := seed.SetSecret(context.Background(), "API_KEY", []byte("secret123"), nil); err != nil {
 		t.Fatalf("seed set (pushes): %v", err)
 	}
 
@@ -705,26 +707,26 @@ func TestRemoteMetaChangedRecoveryPrecheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("other: %v", err)
 	}
-	oldV := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, other)
-	if err := oldV.Unlock(); err != nil {
+	oldV := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), other)
+	if err := oldV.Unlock(context.Background()); err != nil {
 		t.Fatalf("old unlock: %v", err)
 	}
-	got, err := oldV.GetSecret("API_KEY")
+	got, err := oldV.GetSecret(context.Background(), "API_KEY")
 	if err != nil {
 		t.Fatalf("old-key decrypt: %v", err)
 	}
-	if err := other.SetMeta("kdf_time", "4"); err != nil {
+	if err := other.SetMeta(context.Background(), "kdf_time", "4"); err != nil {
 		t.Fatalf("strengthen: %v", err)
 	}
 	fresh, err := store.NewGitStore(repo2, store.GitOptions{Remote: remote})
 	if err != nil {
 		t.Fatalf("fresh: %v", err)
 	}
-	mig := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, fresh)
-	if err := mig.Unlock(); err != nil {
+	mig := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), fresh)
+	if err := mig.Unlock(context.Background()); err != nil {
 		t.Fatalf("mig unlock: %v", err)
 	}
-	if err := mig.SetSecret("API_KEY", got.Value, got.Tags); err != nil {
+	if err := mig.SetSecret(context.Background(), "API_KEY", got.Value, got.Tags); err != nil {
 		t.Fatalf("mig re-encrypt+push: %v", err)
 	}
 
@@ -760,11 +762,11 @@ func TestServeSelfHealAfterRotation(t *testing.T) {
 	if err := gs.InitSchema(); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	seed := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, gs)
-	if err := seed.Unlock(); err != nil {
+	seed := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), gs)
+	if err := seed.Unlock(context.Background()); err != nil {
 		t.Fatalf("seed unlock: %v", err)
 	}
-	if err := seed.SetSecret("API_KEY", []byte("secret123"), nil); err != nil {
+	if err := seed.SetSecret(context.Background(), "API_KEY", []byte("secret123"), nil); err != nil {
 		t.Fatalf("seed set: %v", err)
 	}
 	digest := sha256.Sum256([]byte(testToken))
@@ -785,14 +787,14 @@ func TestServeSelfHealAfterRotation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("other: %v", err)
 	}
-	rot := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, other)
-	if err := rot.Unlock(); err != nil {
+	rot := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), other)
+	if err := rot.Unlock(context.Background()); err != nil {
 		t.Fatalf("rot unlock: %v", err)
 	}
-	if _, err := rot.Rotate("new-password", nil); err != nil {
+	if _, err := rot.Rotate(context.Background(), "new-password", nil); err != nil {
 		t.Fatalf("rotate: %v", err)
 	}
-	if _, err := gs.SyncAcceptRotation(); err != nil {
+	if _, err := gs.SyncAcceptRotation(context.Background()); err != nil {
 		t.Fatalf("accept on server host: %v", err)
 	}
 
@@ -826,11 +828,11 @@ func TestDivergedWarning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("other: %v", err)
 	}
-	otherV := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, other)
-	if err := otherV.Unlock(); err != nil {
+	otherV := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), other)
+	if err := otherV.Unlock(context.Background()); err != nil {
 		t.Fatalf("other unlock: %v", err)
 	}
-	if err := otherV.SetSecret("OTHER_KEY", []byte("other-secret123"), nil); err != nil {
+	if err := otherV.SetSecret(context.Background(), "OTHER_KEY", []byte("other-secret123"), nil); err != nil {
 		t.Fatalf("other set (pushes): %v", err)
 	}
 	if out, err := exec.Command("git", "-C", repo, "commit", "--allow-empty", "-m", "local-only").CombinedOutput(); err != nil {

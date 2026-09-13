@@ -1,39 +1,34 @@
 package cli
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
+
+	"github.com/aatumaykin/psst/internal/crypto"
+	"github.com/aatumaykin/psst/internal/output"
+	"github.com/aatumaykin/psst/internal/vault"
 )
 
 var getCmd = &cobra.Command{
 	Use:   "get <name>",
 	Short: "Get a secret value",
 	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
-		f := getFormatter(jsonOut, quiet)
+	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-
-		if !validName.MatchString(name) {
-			exitWithError(fmt.Sprintf("Invalid secret name %q. Must match [A-Z][A-Z0-9_]*", name))
+		if err := requireValidName(name); err != nil {
+			return err
 		}
-
-		v, err := getUnlockedVault(cmd, jsonOut, quiet, global, env)
-		if err != nil {
-			exitWithError(err.Error())
+		if err := confirmReveal("secret value"); err != nil {
+			return err
 		}
-		defer v.Close()
-
-		sec, err := v.GetSecret(name)
-		if err != nil {
-			exitWithError(err.Error())
-		}
-		if sec == nil {
-			exitWithError(fmt.Sprintf("Secret %q not found", name))
-		}
-
-		f.SecretValue(name, string(sec.Value))
+		return withVault(cmd, func(v vault.Interface, f *output.Formatter) error {
+			sec, err := v.GetSecret(cmd.Context(), name)
+			if err != nil {
+				return exitWithError(err.Error())
+			}
+			defer crypto.ZeroBytes(sec.Value)
+			f.SecretValue(name, string(sec.Value))
+			return nil
+		})
 	},
 }
 

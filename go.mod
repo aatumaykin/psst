@@ -1,11 +1,11 @@
 module github.com/aatumaykin/psst
 
-go 1.26.0
+go 1.26.3
 
 require (
 	github.com/spf13/cobra v1.10.2
 	github.com/zalando/go-keyring v0.2.8
-	golang.org/x/crypto v0.37.0
+	golang.org/x/crypto v0.50.0
 	golang.org/x/term v0.42.0
 	modernc.org/sqlite v1.38.0
 )

@@ -43,3 +43,7 @@ make clean          # Remove binary
 ```
 
 Module path: `github.com/aatumaykin/psst`
+
+## Commands (23 root + exec pattern)
+
+`init`, `set`, `get`, `verify`, `list`, `rm`, `run`, `export`, `import`, `render`, `history`, `rollback`, `tag`, `untag`, `scan`, `migrate`, `rotate`, `sync`, `serve`, `completion`, `version`, `list-envs`, `update` (with `check`/`install` sub-commands).

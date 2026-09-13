@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -57,65 +58,64 @@ func readNewPassword(useStdin bool) (string, error) {
 var rotateCmd = &cobra.Command{
 	Use:   "rotate",
 	Short: "Rotate vault key: new salt, all secrets re-encrypted in one commit",
-	Run: func(cmd *cobra.Command, _ []string) {
-		jsonOut, quiet, global, env, _ := getGlobalFlags(cmd)
-		f := getFormatter(jsonOut, quiet)
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		cfg := getGlobalFlags(cmd)
+		f := getFormatter(cfg.JSON, cfg.Quiet)
+		ctx := cmd.Context()
 		useStdin, _ := cmd.Flags().GetBool("stdin")
 		useKDF, _ := cmd.Flags().GetBool("kdf")
 
-		envDir, err := vault.FindVaultDir(global, env)
+		envDir, err := vault.FindVaultDir(cfg.Global, cfg.Env)
 		if err != nil {
-			exitWithError(err.Error())
+			return exitWithError(err.Error())
 		}
-		storage, err := ResolveStorage(getStorageFlag(cmd), envDir)
+		storage, err := ResolveStorage(cfg.Storage, envDir)
 		if err != nil {
-			exitWithError(err.Error())
+			return exitWithError(err.Error())
 		}
 		if storage != "git" {
-			exitWithError("psst rotate requires git storage; run 'psst migrate storage --to git'")
+			return exitWithError("psst rotate requires git storage; run 'psst migrate storage --to git'")
 		}
 		if !statExists(filepath.Join(envDir, "repo", ".git")) {
-			printNoVault(jsonOut, quiet)
-			//nolint:mnd // exit code for missing vault
-			os.Exit(3)
+			printNoVault(cfg.JSON, cfg.Quiet)
+			return &exitError{code: ExitNoVault}
 		}
 		s, gs, err := OpenVaultStore(envDir, "git", "", false)
 		if err != nil {
-			exitWithError(fmt.Sprintf("open vault: %v", err))
+			return exitWithError(fmt.Sprintf("open vault: %v", err))
 		}
 		if err := s.InitSchema(); err != nil {
-			exitWithError(err.Error())
+			return exitWithError(err.Error())
 		}
 		enc := crypto.NewAESGCM()
 		v := vault.New(enc, keyring.NewPasswordProvider(enc, true), s)
-		if err := v.Unlock(); err != nil {
-			printAuthFailed(jsonOut, quiet)
-			//nolint:mnd // exit code for auth failure
-			os.Exit(5)
+		if err := v.Unlock(ctx); err != nil {
+			printAuthFailed(cfg.JSON, cfg.Quiet)
+			return &exitError{code: ExitAuthFailed}
 		}
 		defer v.Close()
 
-		metas, err := v.ListSecrets()
+		metas, err := v.ListSecrets(ctx)
 		if err != nil {
-			exitWithError(err.Error())
+			return exitWithError(err.Error())
 		}
-		if err := v.VerifyAllDecryptable(); err != nil {
-			exitWithError("rotate aborted: " + err.Error())
+		if err := v.VerifyAllDecryptable(ctx); err != nil {
+			return exitWithError("rotate aborted: " + err.Error())
 		}
 		newPassword, err := readNewPassword(useStdin)
 		if err != nil {
-			exitWithError(err.Error())
+			return exitWithError(err.Error())
 		}
 		var target *crypto.KDFParams
 		if useKDF {
 			defaults := crypto.DefaultKDFParams()
 			target = &defaults
 		}
-		n, err := v.Rotate(newPassword, target)
+		n, err := v.Rotate(ctx, newPassword, target)
 		if err != nil {
-			exitWithError(err.Error() + "; working tree may be dirty; run 'psst sync --discard-local' to reset to the remote (pre-rotation) state")
+			return exitWithError(err.Error() + "; working tree may be dirty; run 'psst sync --discard-local' to reset to the remote (pre-rotation) state")
 		}
-		repinErr := repinVault(envDir, gs)
+		repinErr := repinVault(ctx, envDir, gs)
 		msg := fmt.Sprintf("Rotated: %d secrets re-encrypted", n)
 		if repinErr != nil {
 			f.Warning("Re-pin failed: " + repinErr.Error() + "; run 'psst sync --accept-rotation'")
@@ -127,11 +127,12 @@ var rotateCmd = &cobra.Command{
 			msg += " (password not verified: vault is empty)"
 		}
 		f.Success(msg)
+		return nil
 	},
 }
 
-func repinVault(envDir string, gs *store.GitStore) error {
-	saltB64, err := gs.GetMeta("kdf_salt")
+func repinVault(ctx context.Context, envDir string, gs *store.GitStore) error {
+	saltB64, err := gs.GetMeta(ctx, "kdf_salt")
 	if err != nil {
 		return err
 	}
@@ -140,9 +141,9 @@ func repinVault(envDir string, gs *store.GitStore) error {
 		return err
 	}
 	cfg.PinSalt = saltB64
-	tv, _ := gs.GetMeta("kdf_time")
-	mv, _ := gs.GetMeta("kdf_memory")
-	th, _ := gs.GetMeta("kdf_threads")
+	tv, _ := gs.GetMeta(ctx, "kdf_time")
+	mv, _ := gs.GetMeta(ctx, "kdf_memory")
+	th, _ := gs.GetMeta(ctx, "kdf_threads")
 	cfg.PinKDF.Time = uint32(atoiDefault(tv))
 	cfg.PinKDF.Memory = uint32(atoiDefault(mv))
 	cfg.PinKDF.Threads = uint8(atoiDefault(th))

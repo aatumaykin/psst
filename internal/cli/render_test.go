@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -44,5 +45,34 @@ func TestWriteRenderedOutputPerms(t *testing.T) {
 	data, _ := os.ReadFile(path)
 	if string(data) != "secret123" {
 		t.Fatalf("content = %q", data)
+	}
+}
+
+func TestWriteRenderedOutputRefusesSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink refusal is disabled on windows")
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.env")
+	if err := os.WriteFile(target, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link.env")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink: %v", err)
+	}
+	err := writeRenderedOutput(link, []byte("secret123"))
+	if err == nil {
+		t.Fatal("write through symlink must be refused")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("message = %v", err)
+	}
+	data, readErr := os.ReadFile(target)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(data) != "old" {
+		t.Fatalf("symlink target modified: %q", data)
 	}
 }

@@ -22,22 +22,22 @@ func TestIsLoopbackHost(t *testing.T) {
 
 func TestResolveServeToken(t *testing.T) {
 	t.Setenv("PSST_SERVE_TOKEN", "")
-	tok, generated := resolveServeToken("flag-token")
-	if tok != "flag-token" || generated {
-		t.Fatalf("flag precedence: %q %v", tok, generated)
+	tok, generated, err := resolveServeToken("flag-token")
+	if err != nil || tok != "flag-token" || generated {
+		t.Fatalf("flag precedence: %q %v %v", tok, generated, err)
 	}
 	t.Setenv("PSST_SERVE_TOKEN", "env-token")
-	tok, generated = resolveServeToken("")
-	if tok != "env-token" || generated {
-		t.Fatalf("env precedence: %q %v", tok, generated)
+	tok, generated, err = resolveServeToken("")
+	if err != nil || tok != "env-token" || generated {
+		t.Fatalf("env precedence: %q %v %v", tok, generated, err)
 	}
 	t.Setenv("PSST_SERVE_TOKEN", "")
-	tok, generated = resolveServeToken("")
-	if len(tok) != 43 || !generated {
-		t.Fatalf("generated: len=%d generated=%v", len(tok), generated)
+	tok, generated, err = resolveServeToken("")
+	if err != nil || len(tok) != 43 || !generated {
+		t.Fatalf("generated: len=%d generated=%v err=%v", len(tok), generated, err)
 	}
-	tok2, _ := resolveServeToken("")
-	if tok == tok2 {
+	tok2, _, err := resolveServeToken("")
+	if err != nil || tok == tok2 {
 		t.Fatal("tokens must be random")
 	}
 }

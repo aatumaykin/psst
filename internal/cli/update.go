@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"strconv"
 
 	"github.com/spf13/cobra"
@@ -19,73 +18,75 @@ var updateCmd = &cobra.Command{
 var updateCheckCmd = &cobra.Command{
 	Use:   "check",
 	Short: "Check if a newer version is available",
-	Run: func(cmd *cobra.Command, _ []string) {
-		jsonOut, quiet, _, _, _ := getGlobalFlags(cmd)
-		f := getFormatter(jsonOut, quiet)
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		cfg := getGlobalFlags(cmd)
+		f := getFormatter(cfg.JSON, cfg.Quiet)
 
 		info, err := updater.CheckForUpdate()
 		if err != nil {
-			exitWithError(fmt.Sprintf("Update check failed: %v", err))
+			return exitWithError(fmt.Sprintf("Update check failed: %v", err))
 		}
 
-		if jsonOut {
+		if cfg.JSON {
 			f.PrintJSON(map[string]string{
 				"current": version.Version,
 				"latest":  info.LatestVersion,
 				"update":  strconv.FormatBool(info.IsNewer()),
 			})
-			return
+			return nil
 		}
 
-		if quiet {
+		if cfg.Quiet {
 			if info.IsNewer() {
-				fmt.Fprintln(os.Stdout, info.LatestVersion)
+				f.Print(info.LatestVersion)
 			}
-			return
+			return nil
 		}
 
-		fmt.Fprintf(os.Stdout, "Current: v%s\n", info.CurrentVersion)
-		fmt.Fprintf(os.Stdout, "Latest:  v%s\n", info.LatestVersion)
+		f.Print(fmt.Sprintf("Current: v%s", info.CurrentVersion))
+		f.Print(fmt.Sprintf("Latest:  v%s", info.LatestVersion))
 
 		if info.IsNewer() {
-			fmt.Fprintf(os.Stdout, "\nUpdate available! Run: psst update install\n")
+			f.Print("\nUpdate available! Run: psst update install")
 		} else {
-			fmt.Fprintf(os.Stdout, "\nAlready up to date.\n")
+			f.Print("\nAlready up to date.")
 		}
+		return nil
 	},
 }
 
 var updateInstallCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Download and install the latest version",
-	Run: func(cmd *cobra.Command, _ []string) {
-		jsonOut, quiet, _, _, _ := getGlobalFlags(cmd)
-		_ = getFormatter(jsonOut, quiet)
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		cfg := getGlobalFlags(cmd)
+		f := getFormatter(false, cfg.Quiet)
 		force, _ := cmd.Flags().GetBool("force")
 
 		info, err := updater.CheckForUpdate()
 		if err != nil {
-			exitWithError(fmt.Sprintf("Update check failed: %v", err))
+			return exitWithError(fmt.Sprintf("Update check failed: %v", err))
 		}
 
 		if !force && !info.IsNewer() {
-			if !quiet {
-				fmt.Fprintf(os.Stdout, "Already up to date (v%s). Use --force to reinstall.\n", info.CurrentVersion)
+			if !cfg.Quiet {
+				f.Print(fmt.Sprintf("Already up to date (v%s). Use --force to reinstall.", info.CurrentVersion))
 			}
-			return
+			return nil
 		}
 
-		if !quiet {
-			fmt.Fprintf(os.Stdout, "Updating from v%s to v%s...\n", info.CurrentVersion, info.LatestVersion)
+		if !cfg.Quiet {
+			f.Print(fmt.Sprintf("Updating from v%s to v%s...", info.CurrentVersion, info.LatestVersion))
 		}
 
 		if updateErr := updater.PerformUpdate(info, force); updateErr != nil {
-			exitWithError(fmt.Sprintf("Update failed: %v", updateErr))
+			return exitWithError(fmt.Sprintf("Update failed: %v", updateErr))
 		}
 
-		if !quiet {
-			fmt.Fprintf(os.Stdout, "Successfully updated to v%s!\n", info.LatestVersion)
+		if !cfg.Quiet {
+			f.Print(fmt.Sprintf("Successfully updated to v%s!", info.LatestVersion))
 		}
+		return nil
 	},
 }
 

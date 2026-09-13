@@ -65,8 +65,15 @@ func TestGitStorageLifecycle(t *testing.T) {
 	if out, code = e.gitRun("untag", "API_KEY"); code != 0 {
 		t.Fatalf("untag: %s", out)
 	}
-	if out, code = e.gitRun("get", "API_KEY"); code != 0 || !strings.Contains(out, "secret-value") {
-		t.Fatalf("get: %s (%d)", out, code)
+	if out, code = e.gitRun("export", "--env-file", "verify.env"); code != 0 {
+		t.Fatalf("export: %s (%d)", out, code)
+	}
+	data, err := os.ReadFile(filepath.Join(e.dir, "work", "verify.env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "API_KEY=secret-value") {
+		t.Fatalf("export content: %s", string(data))
 	}
 }
 
@@ -147,8 +154,15 @@ func TestMigrateStorage(t *testing.T) {
 	if !strings.Contains(out, "OLD_KEY") {
 		t.Fatalf("migrated secret missing: %s", out)
 	}
-	if out, code := e.gitRun("get", "OLD_KEY"); code != 0 {
-		t.Fatalf("get after migrate: %s", out)
+	if out, code := e.gitRun("export", "--env-file", "verify.env"); code != 0 {
+		t.Fatalf("export after migrate: %s (%d)", out, code)
+	}
+	data, err := os.ReadFile(filepath.Join(e.dir, "work", "verify.env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "OLD_KEY=secret-value") {
+		t.Fatalf("export content after migrate: %s", string(data))
 	}
 }
 

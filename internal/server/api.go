@@ -1,11 +1,13 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/aatumaykin/psst/internal/crypto"
 	"github.com/aatumaykin/psst/internal/store"
 )
 
@@ -69,8 +71,8 @@ func validNameOr400(w http.ResponseWriter, name string) bool {
 	return true
 }
 
-func (s *Server) secretExists(w http.ResponseWriter, name string) bool {
-	sec, err := s.cfg.Store.GetSecret(name)
+func (s *Server) secretExists(ctx context.Context, w http.ResponseWriter, name string) bool {
+	sec, err := s.cfg.Store.GetSecret(ctx, name)
 	if err != nil {
 		s.writeStoreError(w, err)
 		return false
@@ -82,7 +84,7 @@ func (s *Server) secretExists(w http.ResponseWriter, name string) bool {
 	return true
 }
 
-func (s *Server) handleList(w http.ResponseWriter, _ *http.Request, _ *session) {
+func (s *Server) handleList(w http.ResponseWriter, r *http.Request, _ *session) {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	resp := map[string]any{"secrets": []secretItem{}}
@@ -91,7 +93,7 @@ func (s *Server) handleList(w http.ResponseWriter, _ *http.Request, _ *session) 
 		s.writeStoreError(w, err)
 		return
 	}
-	metas, err := s.cfg.Store.ListSecrets()
+	metas, err := s.cfg.Store.ListSecrets(r.Context())
 	if err != nil {
 		s.writeStoreError(w, err)
 		return
@@ -123,10 +125,10 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request, _ *sessio
 		s.writeStoreError(w, err)
 		return
 	}
-	if !s.secretExists(w, name) {
+	if !s.secretExists(r.Context(), w, name) {
 		return
 	}
-	entries, err := s.cfg.Store.GetHistory(name)
+	entries, err := s.cfg.Store.GetHistory(r.Context(), name)
 	if err != nil {
 		s.writeStoreError(w, err)
 		return
@@ -197,14 +199,14 @@ func (s *Server) handleSet(w http.ResponseWriter, r *http.Request, sess *session
 	case req.Value != nil && *req.Value != "":
 		tags := tagsFrom(req.Tag)
 		if req.Tag == nil {
-			tags = s.currentTagsLocked(name)
+			tags = s.currentTagsLocked(r.Context(), name)
 		}
-		err = v.SetSecret(name, []byte(*req.Value), tags)
+		err = v.SetSecret(r.Context(), name, []byte(*req.Value), tags)
 	case req.Tag != nil:
-		if !s.secretExists(w, name) {
+		if !s.secretExists(r.Context(), w, name) {
 			return
 		}
-		err = v.RetagSecret(name, tagsFrom(req.Tag))
+		err = v.RetagSecret(r.Context(), name, tagsFrom(req.Tag))
 	default:
 		writeErr(w, http.StatusBadRequest, "nothing to set")
 		return
@@ -220,8 +222,8 @@ func (s *Server) handleSet(w http.ResponseWriter, r *http.Request, sess *session
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (s *Server) currentTagsLocked(name string) []string {
-	metas, err := s.cfg.Store.ListSecrets()
+func (s *Server) currentTagsLocked(ctx context.Context, name string) []string {
+	metas, err := s.cfg.Store.ListSecrets(ctx)
 	if err != nil {
 		return nil
 	}
@@ -245,10 +247,10 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request, sess *sess
 		writeErr(w, http.StatusForbidden, "vault is locked")
 		return
 	}
-	if !s.secretExists(w, name) {
+	if !s.secretExists(r.Context(), w, name) {
 		return
 	}
-	if err := v.DeleteSecret(name); err != nil {
+	if err := v.DeleteSecret(r.Context(), name); err != nil {
 		s.writeStoreError(w, err)
 		return
 	}
@@ -271,14 +273,15 @@ func (s *Server) handleValue(w http.ResponseWriter, r *http.Request, sess *sessi
 		writeErr(w, http.StatusForbidden, "vault is locked")
 		return
 	}
-	if !s.secretExists(w, name) {
+	if !s.secretExists(r.Context(), w, name) {
 		return
 	}
-	sec, err := v.GetSecret(name)
+	sec, err := v.GetSecret(r.Context(), name)
 	if err != nil {
 		s.writeStoreError(w, err)
 		return
 	}
+	defer crypto.ZeroBytes(sec.Value)
 	s.cfg.Log.Printf("reveal %s", name)
 	writeJSON(w, http.StatusOK, map[string]string{"value": string(sec.Value)})
 }
@@ -304,10 +307,10 @@ func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request, sess *se
 		writeErr(w, http.StatusForbidden, "vault is locked")
 		return
 	}
-	if !s.secretExists(w, name) {
+	if !s.secretExists(r.Context(), w, name) {
 		return
 	}
-	if err := v.Rollback(name, req.Version); err != nil {
+	if err := v.Rollback(r.Context(), name, req.Version); err != nil {
 		msg := err.Error()
 		if strings.Contains(msg, "predates a KDF migration") {
 			writeErr(w, http.StatusConflict, msg)
