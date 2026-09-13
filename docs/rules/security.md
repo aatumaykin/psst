@@ -27,7 +27,7 @@ This is a **security-critical** project — a secrets manager. Security rules ap
 ### In Configuration
 
 - `.env` and `.env.*` are in `.gitignore` — never commit them.
-- `*.db` files are in `.gitignore` — vault databases must never be committed.
+- `*.db`, `*.db-wal`, `*.db-shm` are in `.gitignore` — vault databases and WAL sidecars must never be committed; `InitSchema` enforces 0600 on the db and on any existing `-wal`/`-shm` sidecars.
 - Use `PSST_PASSWORD` env var for headless environments, never bake it into scripts.
 
 ## Output Masking

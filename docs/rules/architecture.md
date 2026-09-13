@@ -95,7 +95,7 @@ No DI container, no global state. Each command creates its own instances.
 
 ## Storage
 
-- SQLite with WAL mode (`?_journal_mode=WAL`).
+- SQLite with WAL mode via modernc `_pragma=journal_mode(WAL)` DSN pragmas; busy_timeout 5000ms.
 - Tables: `secrets` (name PK), `secrets_history` (versioned backup, max 10 versions per secret).
 - Tags stored as JSON array in `TEXT` column.
 - Schema migration via `migrations.go` — checks column existence before ALTER.
