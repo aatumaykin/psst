@@ -22,7 +22,7 @@ type SQLiteStore struct {
 }
 
 func NewSQLite(dbPath string) (*SQLiteStore, error) {
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
@@ -97,6 +97,14 @@ func (s *SQLiteStore) InitSchema() error {
 	if s.dbPath != "" {
 		if chmodErr := os.Chmod(s.dbPath, 0600); chmodErr != nil {
 			return chmodErr
+		}
+		for _, suffix := range []string{"-wal", "-shm"} {
+			p := s.dbPath + suffix
+			if _, statErr := os.Stat(p); statErr == nil {
+				if chmodErr := os.Chmod(p, 0600); chmodErr != nil {
+					return chmodErr
+				}
+			}
 		}
 	}
 	return err

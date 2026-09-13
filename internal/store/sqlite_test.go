@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -248,6 +249,37 @@ func TestVaultFileCreated(t *testing.T) {
 	s.Close()
 	if _, statErr := os.Stat(dbPath); os.IsNotExist(statErr) {
 		t.Fatal("vault.db should be created")
+	}
+}
+
+func TestSQLiteJournalModeWAL(t *testing.T) {
+	s := setupTestStore(t)
+	var mode string
+	if err := s.db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil {
+		t.Fatalf("pragma: %v", err)
+	}
+	if !strings.EqualFold(mode, "wal") {
+		t.Fatalf("journal_mode = %q, want wal", mode)
+	}
+}
+
+func TestSQLiteSidecarPerms(t *testing.T) {
+	s := setupTestStore(t)
+	if err := s.SetSecret("KEY", []byte("ct"), make([]byte, 12), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.InitSchema(); err != nil {
+		t.Fatal(err)
+	}
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		p := s.dbPath + suffix
+		st, err := os.Stat(p)
+		if err != nil {
+			continue
+		}
+		if st.Mode().Perm() != 0o600 {
+			t.Fatalf("%s mode = %o, want 600", p, st.Mode().Perm())
+		}
 	}
 }
 

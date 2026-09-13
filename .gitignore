@@ -1,6 +1,8 @@
 /psst
 /psst-*
 *.db
+*.db-wal
+*.db-shm
 *.test
 dist/
 .env
