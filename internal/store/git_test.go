@@ -432,6 +432,31 @@ func TestCloneEmptyRemoteOnboarding(t *testing.T) {
 	}
 }
 
+func TestCloneGitVaultRelativePath(t *testing.T) {
+	remote := newBareRemote(t)
+	g := newClonedStore(t, remote)
+	iv := make([]byte, 12)
+	if err := g.SetSecret("KEY", []byte("ct"), iv, nil); err != nil {
+		t.Fatal(err)
+	}
+	work := t.TempDir()
+	t.Chdir(work)
+	rel, err := CloneGitVault(remote, filepath.Join("nested", "repo"), GitOptions{Remote: remote})
+	if err != nil {
+		t.Fatalf("clone: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(work, "nested", "repo", ".git")); err != nil {
+		t.Fatalf("repo not at expected path: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(work, "nested", "repo", "nested")); err == nil {
+		t.Fatal("nested duplication bug still present")
+	}
+	got, err := rel.GetSecret("KEY")
+	if err != nil || got == nil {
+		t.Fatalf("get after clone: %v %v", got, err)
+	}
+}
+
 func TestGitStoreListUpdatedBy(t *testing.T) {
 	g, _ := newGitStore(t)
 	iv := make([]byte, 12)
