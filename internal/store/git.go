@@ -45,6 +45,11 @@ type GitStore struct {
 }
 
 func CloneGitVault(remote, repoDir string, opts GitOptions) (*GitStore, error) {
+	abs, err := filepath.Abs(repoDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve vault path: %w", err)
+	}
+	repoDir = abs
 	if err := os.MkdirAll(filepath.Dir(repoDir), 0o700); err != nil {
 		return nil, fmt.Errorf("create vault directory: %w", err)
 	}
