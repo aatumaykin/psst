@@ -6,7 +6,7 @@
 - Repository: `github.com/aatumaykin/psst`
 - License: MIT
 - Go version: 1.25+
-- Requires CGo (mattn/go-sqlite3)
+- Pure Go (CGo-free); SQLite via modernc.org/sqlite
 
 ## Repository Structure
 
@@ -52,7 +52,7 @@ make build-linux-arm64  # Cross-compile for Linux arm64
 | Package | Purpose |
 |---------|---------|
 | `spf13/cobra` | CLI framework |
-| `mattn/go-sqlite3` | SQLite driver (CGo) |
+| `modernc.org/sqlite` | SQLite driver (pure Go, CGo-free) |
 | `zalando/go-keyring` | OS keychain integration |
 | `golang.org/x/sys` | System calls (indirect) |
 
