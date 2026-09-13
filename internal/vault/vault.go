@@ -463,6 +463,90 @@ func (v *Vault) Close() error {
 	return v.store.Close()
 }
 
+func (v *Vault) VerifyAllDecryptable() error {
+	all, err := v.store.GetAllSecrets()
+	if err != nil {
+		return fmt.Errorf("get secrets: %w", err)
+	}
+	for _, s := range all {
+		plaintext, err := v.decrypt(s.EncryptedValue, s.IV)
+		if err != nil {
+			return fmt.Errorf("secret %s is undecryptable under the current key", s.Name)
+		}
+		for i := range plaintext {
+			plaintext[i] = 0
+		}
+	}
+	return nil
+}
+
+func (v *Vault) Rotate(newPassword string) (int, error) {
+	if v.key == nil {
+		return 0, errors.New("vault is locked")
+	}
+	gs, ok := v.store.(*store.GitStore)
+	if !ok {
+		return 0, errors.New("rotate requires git storage")
+	}
+	params := crypto.KDFParams{
+		Time:    uint32(metaAtoi(v.store, "kdf_time")),
+		Memory:  uint32(metaAtoi(v.store, "kdf_memory")),
+		Threads: uint8(metaAtoi(v.store, "kdf_threads")),
+	}
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		return 0, fmt.Errorf("generate salt: %w", err)
+	}
+	newSaltB64 := base64.StdEncoding.EncodeToString(salt)
+	newKey, err := v.enc.DeriveKeyFromPassword(newPassword, salt, params)
+	if err != nil {
+		return 0, fmt.Errorf("derive key: %w", err)
+	}
+	newAAD := []byte("psst:v1:argon2id:" + newSaltB64)
+	rotated := 0
+	success := false
+	defer func() {
+		if !success {
+			for i := range newKey {
+				newKey[i] = 0
+			}
+		}
+	}()
+	err = gs.ExecTxMsg("psst: rotate", func() error {
+		all, err := v.store.GetAllSecrets()
+		if err != nil {
+			return fmt.Errorf("get secrets: %w", err)
+		}
+		for _, s := range all {
+			plaintext, derr := v.decrypt(s.EncryptedValue, s.IV)
+			if derr != nil {
+				return fmt.Errorf("secret %s is undecryptable under the current key", s.Name)
+			}
+			var ct, iv []byte
+			ct, iv, derr = v.enc.EncryptWithAAD(plaintext, newKey, newAAD)
+			for i := range plaintext {
+				plaintext[i] = 0
+			}
+			if derr != nil {
+				return fmt.Errorf("encrypt %s: %w", s.Name, derr)
+			}
+			if err := v.store.SetSecret(s.Name, ct, iv, s.Tags); err != nil {
+				return fmt.Errorf("update %s: %w", s.Name, err)
+			}
+			rotated++
+		}
+		return gs.RotateSalt(newSaltB64)
+	})
+	if err != nil {
+		return rotated, err
+	}
+	success = true
+	v.key = newKey
+	v.aad = newAAD
+	gs.SetUnlockedFingerprint(gs.FingerprintOfCurrent())
+	return rotated, nil
+}
+
 func (v *Vault) MigrateKDF() error {
 	if v.key == nil {
 		return errors.New("vault is locked")
