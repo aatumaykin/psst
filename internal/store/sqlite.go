@@ -15,6 +15,7 @@ import (
 
 type SQLiteStore struct {
 	mu        sync.Mutex
+	txMu      sync.Mutex
 	db        *sql.DB
 	currentTx *sql.Tx
 	dbPath    string
@@ -30,24 +31,33 @@ func NewSQLite(dbPath string) (*SQLiteStore, error) {
 
 func (s *SQLiteStore) exec(query string, args ...any) (sql.Result, error) {
 	ctx := context.Background()
-	if s.currentTx != nil {
-		return s.currentTx.ExecContext(ctx, query, args...)
+	s.mu.Lock()
+	tx := s.currentTx
+	s.mu.Unlock()
+	if tx != nil {
+		return tx.ExecContext(ctx, query, args...)
 	}
 	return s.db.ExecContext(ctx, query, args...)
 }
 
 func (s *SQLiteStore) query(query string, args ...any) (*sql.Rows, error) {
 	ctx := context.Background()
-	if s.currentTx != nil {
-		return s.currentTx.QueryContext(ctx, query, args...)
+	s.mu.Lock()
+	tx := s.currentTx
+	s.mu.Unlock()
+	if tx != nil {
+		return tx.QueryContext(ctx, query, args...)
 	}
 	return s.db.QueryContext(ctx, query, args...)
 }
 
 func (s *SQLiteStore) queryRow(query string, args ...any) *sql.Row {
 	ctx := context.Background()
-	if s.currentTx != nil {
-		return s.currentTx.QueryRowContext(ctx, query, args...)
+	s.mu.Lock()
+	tx := s.currentTx
+	s.mu.Unlock()
+	if tx != nil {
+		return tx.QueryRowContext(ctx, query, args...)
 	}
 	return s.db.QueryRowContext(ctx, query, args...)
 }
@@ -261,34 +271,37 @@ func (s *SQLiteStore) Close() error {
 	return s.db.Close()
 }
 
+func (s *SQLiteStore) setCurrentTx(tx *sql.Tx) {
+	s.mu.Lock()
+	s.currentTx = tx
+	s.mu.Unlock()
+}
+
 func (s *SQLiteStore) ExecTx(fn func() error) error {
 	s.mu.Lock()
-	if s.currentTx != nil {
-		s.mu.Unlock()
+	nested := s.currentTx != nil
+	s.mu.Unlock()
+	if nested {
 		return fn()
 	}
 
+	s.txMu.Lock()
+	defer s.txMu.Unlock()
+
 	tx, err := s.db.BeginTx(context.Background(), nil)
 	if err != nil {
-		s.mu.Unlock()
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 
-	s.currentTx = tx
-	s.mu.Unlock()
+	s.setCurrentTx(tx)
 
-	if fnErr := fn(); fnErr != nil {
+	fnErr := fn()
+	s.setCurrentTx(nil)
+	if fnErr != nil {
 		_ = tx.Rollback()
-		s.mu.Lock()
-		s.currentTx = nil
-		s.mu.Unlock()
 		return fnErr
 	}
-	err = tx.Commit()
-	s.mu.Lock()
-	s.currentTx = nil
-	s.mu.Unlock()
-	return err
+	return tx.Commit()
 }
 
 func (s *SQLiteStore) GetMeta(key string) (string, error) {
