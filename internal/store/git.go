@@ -614,6 +614,10 @@ func (g *GitStore) markDirty() {
 }
 
 func (g *GitStore) ExecTx(fn func() error) error {
+	return g.ExecTxMsg("psst: batch", fn)
+}
+
+func (g *GitStore) ExecTxMsg(msg string, fn func() error) error {
 	g.mu.Lock()
 	nested := g.txDepth > 0
 	g.mu.Unlock()
@@ -639,13 +643,103 @@ func (g *GitStore) ExecTx(fn func() error) error {
 	if err := fn(); err != nil {
 		return err
 	}
-	if err := g.commit("psst: batch"); err != nil {
+	if err := g.commit(msg); err != nil {
 		return err
 	}
 	if err := g.push(); err != nil && !errors.Is(err, ErrNoRemote) {
 		return err
 	}
 	return nil
+}
+
+func (g *GitStore) RotateSalt(saltB64 string) error {
+	g.mu.Lock()
+	inTx := g.txDepth > 0
+	g.mu.Unlock()
+	if !inTx {
+		return errors.New("rotate salt must run inside a transaction")
+	}
+	salt, err := base64.StdEncoding.DecodeString(saltB64)
+	if err != nil {
+		return fmt.Errorf("decode salt: %w", err)
+	}
+	if len(salt) < 16 {
+		return fmt.Errorf("salt must be at least 16 bytes")
+	}
+	g.mu.Lock()
+	if g.meta == nil {
+		err := g.metaErr
+		g.mu.Unlock()
+		if err != nil {
+			return fmt.Errorf("vault metadata missing or invalid: %w", err)
+		}
+		return errors.New("vault metadata missing or invalid")
+	}
+	g.meta.SaltB64 = saltB64
+	encoded := g.meta.Encode()
+	g.mu.Unlock()
+	if err := os.WriteFile(filepath.Join(g.repoDir, "psst.yaml"), encoded, 0o600); err != nil {
+		return fmt.Errorf("write vault metadata: %w", err)
+	}
+	if _, err := g.git.Run("add", "psst.yaml"); err != nil {
+		return fmt.Errorf("git add psst.yaml: %w", err)
+	}
+	g.markDirty()
+	return nil
+}
+
+func (g *GitStore) SyncAcceptRotation() (*VaultMeta, error) {
+	lock, err := LockRepo(g.repoDir)
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Unlock()
+	if _, err := g.git.Run("pull", "--rebase", "--autostash"); err != nil {
+		g.git.Run("rebase", "--abort")
+		msg := err.Error()
+		if strings.Contains(msg, "CONFLICT") || strings.Contains(msg, "could not apply") || strings.Contains(msg, "Rebase") {
+			return nil, ErrConflict
+		}
+		return nil, fmt.Errorf("pull failed: %w", err)
+	}
+	data, err := os.ReadFile(filepath.Join(g.repoDir, "psst.yaml"))
+	if err != nil {
+		return nil, fmt.Errorf("read vault metadata: %w", err)
+	}
+	newMeta, err := ParseVaultMeta(data)
+	if err != nil {
+		return nil, fmt.Errorf("invalid vault metadata: %w", err)
+	}
+	if g.opts.LoadPins != nil {
+		if pin := g.opts.LoadPins(); pin != nil {
+			if newMeta.SaltB64 == pin.SaltB64 {
+				if err := CheckPinned(newMeta, pin); err != nil {
+					return nil, fmt.Errorf("vault KDF parameters: %w", err)
+				}
+			} else {
+				p, m := pin.Params, newMeta.Params
+				if m.Time < p.Time || m.Memory < p.Memory || m.Threads < p.Threads {
+					return nil, fmt.Errorf("rotation weakens KDF parameters: %w", ErrKDFWeakened)
+				}
+			}
+		}
+	}
+	g.mu.Lock()
+	g.meta = newMeta
+	g.mu.Unlock()
+	return newMeta, nil
+}
+
+func (g *GitStore) AheadOfUpstream() bool {
+	out, err := g.git.Run("status", "-sb")
+	if err != nil {
+		return false
+	}
+	first := out
+	if i := strings.IndexByte(out, '\n'); i >= 0 {
+		first = out[:i]
+	}
+	return strings.Contains(first, "[ahead")
 }
 
 func (g *GitStore) SetSecret(name string, encValue, iv []byte, tags []string) error {
