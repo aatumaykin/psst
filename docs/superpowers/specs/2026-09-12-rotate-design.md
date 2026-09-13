@@ -56,8 +56,10 @@ psst rotate [--stdin]
    - `func (g *GitStore) ExecTxMsg(msg string, fn func() error) error` — the existing `ExecTx` machinery with a caller-supplied commit message; `ExecTx` becomes `ExecTxMsg("psst: batch", fn)`. Needed because the tx path commits with a fixed message today.
    - `func (g *GitStore) RotateSalt(saltB64 string) error` — validates base64/16 bytes, updates the in-memory meta salt, rewrites `psst.yaml`, `git add psst.yaml`, `markDirty`; MUST be called inside an open transaction (error `rotate salt must run inside a transaction` otherwise). Salt immutability elsewhere is untouched — `SetMeta` still refuses `kdf_salt`.
    - `func (g *GitStore) SyncAcceptRotation() (*VaultMeta, error)` — §2 step 1. Never touches pins (the CLI re-pins after the probe).
-2. `internal/vault/vault.go` — `func (v *Vault) Rotate(newPassword string) error`:
-   - Non-GitStore store → hard error `rotate requires git storage` (defense in depth under the CLI gate).
+2. `internal/vault/vault.go` — two methods:
+   - `func (v *Vault) VerifyAllDecryptable() error` — the pre-flight: iterates store-level ciphertext, decrypts each entry with the current key, zeroes the plaintext buffer, fails naming the first undecryptable secret.
+   - `func (v *Vault) Rotate(newPassword string) (int, error)` — returns the number of re-encrypted secrets (for the summary line):
+     - Non-GitStore store → hard error `rotate requires git storage` (defense in depth under the CLI gate).
    - Mints the new salt (16 bytes `crypto/rand` → base64), derives the new key (`DeriveKeyFromPassword(newPassword, newSalt, <current params>`) and new AAD (`psst:v1:argon2id:<newSaltB64>`); KDF params are preserved.
    - Wraps everything in `ExecTxMsg("psst: rotate", …)` whose **first statement re-derives the authoritative secret set** from the post-pull working tree (store-level ciphertext), then per secret: decrypt with the old key (failure → fail-closed abort; recovery §1), encrypt with the new key + new AAD, `store.SetSecret` (tags preserved); finally `store.RotateSalt(newSaltB64)`.
    - On failure, zeroes the derived new-key material and the new password buffer (mirroring `Vault.Close`); on success swaps `v.key`/`v.aad` and immediately calls `SetUnlockedFingerprint(gs.FingerprintOfCurrent())` (the in-memory meta already holds the new salt) — a post-rotate write in the same process must not trip `ErrRemoteMetaChanged`.
