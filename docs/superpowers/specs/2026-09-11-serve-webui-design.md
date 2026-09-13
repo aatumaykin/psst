@@ -206,7 +206,7 @@ Standard `testing` + `net/http/httptest`, real temporary git repositories (bare 
 ## 10. Non-goals
 
 - No TLS on the server (loopback + SSH-tunnel model).
-- No WebSocket/live updates; the UI refreshes on navigation/action.
+- No WebSocket/live push. The secret list auto-refreshes via lightweight polling (every 30 s, only while the tab is visible and the list view is shown); auto-refresh requests carry the `X-Psst-Auto: 1` header and do NOT extend the unlock inactivity timer (2.2) — only user-driven requests refresh it. Everything else refreshes on navigation/action.
 - No multi-user accounts, no per-secret permissions, no audit log persistence.
 - No `PSST_PASSWORD` auto-unlock in serve (barrier 2 is interactive by design).
 - No tag management beyond the single tag field (git backend model: one tag = one directory).
