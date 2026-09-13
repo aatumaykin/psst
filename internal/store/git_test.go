@@ -528,8 +528,15 @@ func TestGitStoreRotateSalt(t *testing.T) {
 	if err != nil || salt != newSalt {
 		t.Fatalf("salt = %q %v", salt, err)
 	}
-	if err := g.RotateSalt("c2hvcnQ="); err == nil {
-		t.Fatal("short salt must fail")
+	if err := g.ExecTxMsg("t", func() error {
+		return g.RotateSalt("c2hvcnQ=")
+	}); err == nil {
+		t.Fatal("short salt must fail inside tx")
+	}
+	if err := g.ExecTxMsg("t", func() error {
+		return g.RotateSalt("!!!notbase64!!!")
+	}); err == nil {
+		t.Fatal("invalid base64 salt must fail")
 	}
 }
 

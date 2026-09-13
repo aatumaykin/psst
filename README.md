@@ -224,13 +224,15 @@ psst sync --accept-rotation                 # on every other machine
   verifies the NEW password before the pin moves — a wrong password leaves the clone
   refused (never silently re-pinned) and can be retried.
 - Acceptance refuses when the clone has unpushed local commits (rebasing old-key
-  commits onto the rotation would mix keys permanently): push them with `psst sync`
-  or drop them with `psst sync --discard-local` (values remain in the reflog).
+  commits onto the rotation would mix keys permanently): drop them with
+  `psst sync --discard-local` (values remain in the reflog), then retry — plain
+  `psst sync` cannot push old-key commits once the rotation has landed.
 - If `psst rotate` aborts midway, the remote is untouched — upstream IS the
   pre-rotation state; reset the working tree with `psst sync --discard-local`.
-- A running `psst serve` needs no restart: the next operation returns a re-unlock
-  error; after `psst sync --accept-rotation` on the server host, unlock with the new
-  password.
+- A running `psst serve` needs no restart: until the rotation is accepted on the
+  server host, the next operation fails naming `psst sync --accept-rotation` and
+  drops all unlocks; after accepting there, one re-unlock prompt may appear, then
+  unlock works with the new password.
 
 ### Global Flags
 

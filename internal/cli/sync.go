@@ -68,7 +68,7 @@ var syncCmd = &cobra.Command{
 				return
 			}
 			if gs.AheadOfUpstream() {
-				exitWithError("cannot accept rotation with unpushed local commits; run 'psst sync' first to push them, or 'psst sync --discard-local' to drop them (reflog retains values), then retry")
+				exitWithError("cannot accept rotation with unpushed local commits (their values remain in the reflog); run 'psst sync --discard-local' to drop them, then retry — plain 'psst sync' cannot push old-key commits once the rotation has landed")
 			}
 			meta, err := gs.SyncAcceptRotation()
 			if err != nil {

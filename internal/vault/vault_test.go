@@ -611,6 +611,8 @@ func TestVaultRotate(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldSalt, _ := gs.GetMeta("kdf_salt")
+	oldTime, _ := gs.GetMeta("kdf_time")
+	oldMemory, _ := gs.GetMeta("kdf_memory")
 
 	n, err := v.Rotate("new-password")
 	if err != nil {
@@ -622,6 +624,11 @@ func TestVaultRotate(t *testing.T) {
 	newSalt, _ := gs.GetMeta("kdf_salt")
 	if newSalt == oldSalt || newSalt == "" {
 		t.Fatalf("salt unchanged: %q", newSalt)
+	}
+	newTime, _ := gs.GetMeta("kdf_time")
+	newMemory, _ := gs.GetMeta("kdf_memory")
+	if newTime != oldTime || newMemory != oldMemory {
+		t.Fatalf("params changed: %s/%s was %s/%s", newTime, newMemory, oldTime, oldMemory)
 	}
 	out, _ := store.NewGitRunner(repo).Run("log", "--format=%s", "-2")
 	lines := strings.Split(strings.TrimSpace(out), "\n")
@@ -675,11 +682,11 @@ func TestVaultRotateIncludesInTxArrivals(t *testing.T) {
 	if err := other.InitSchema(); err != nil {
 		t.Fatal(err)
 	}
-	ov := vaultFromPassword(t, other, "test-password")
-	if err := ov.SetSecret("LATE", []byte("late-secret456"), nil); err != nil {
+	if err := v.VerifyAllDecryptable(); err != nil {
 		t.Fatal(err)
 	}
-	if err := v.VerifyAllDecryptable(); err != nil {
+	ov := vaultFromPassword(t, other, "test-password")
+	if err := ov.SetSecret("LATE", []byte("late-secret456"), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := v.Rotate("new-password"); err != nil {
@@ -692,12 +699,14 @@ func TestVaultRotateIncludesInTxArrivals(t *testing.T) {
 }
 
 func TestVaultRotateAbortsOnUndecryptable(t *testing.T) {
-	g, _ := newGitVaultStore(t)
+	g, repo := newGitVaultStore(t)
 	iv := make([]byte, 12)
 	if err := g.SetSecret("BAD", []byte("garbage-not-base64!"), iv, nil); err != nil {
 		t.Fatal(err)
 	}
 	v := vaultFromPassword(t, g, "test-password")
+	saltBefore, _ := g.GetMeta("kdf_salt")
+	logBefore, _ := store.NewGitRunner(repo).Run("log", "--format=%H")
 	if err := v.VerifyAllDecryptable(); err == nil {
 		t.Fatal("pre-flight must fail on garbage")
 	}
@@ -705,8 +714,12 @@ func TestVaultRotateAbortsOnUndecryptable(t *testing.T) {
 		t.Fatal("rotate must abort")
 	}
 	salt, _ := g.GetMeta("kdf_salt")
-	if salt == "" {
-		t.Fatal("salt lost")
+	if salt != saltBefore {
+		t.Fatalf("salt changed on abort: %q was %q", salt, saltBefore)
+	}
+	logAfter, _ := store.NewGitRunner(repo).Run("log", "--format=%H")
+	if logAfter != logBefore {
+		t.Fatal("commits landed on abort")
 	}
 }
 

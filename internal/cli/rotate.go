@@ -109,10 +109,14 @@ var rotateCmd = &cobra.Command{
 		if err != nil {
 			exitWithError(err.Error() + "; working tree may be dirty; run 'psst sync --discard-local' to reset to the remote (pre-rotation) state")
 		}
-		if err := repinVault(envDir, gs); err != nil {
-			f.Warning("Re-pin failed: " + err.Error() + "; run 'psst sync --accept-rotation'")
+		repinErr := repinVault(envDir, gs)
+		msg := fmt.Sprintf("Rotated: %d secrets re-encrypted", n)
+		if repinErr != nil {
+			f.Warning("Re-pin failed: " + repinErr.Error() + "; run 'psst sync --accept-rotation'")
+			msg += "; re-pin failed — run 'psst sync --accept-rotation'"
+		} else {
+			msg += ", new salt pinned"
 		}
-		msg := fmt.Sprintf("Rotated: %d secrets re-encrypted, new salt pinned", n)
 		if len(metas) == 0 {
 			msg += " (password not verified: vault is empty)"
 		}

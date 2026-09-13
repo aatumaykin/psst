@@ -248,6 +248,22 @@ func TestAcceptRotationOfflineRefusal(t *testing.T) {
 	if code != 1 || !strings.Contains(out, "unpushed local commits") {
 		t.Fatalf("offline accept = %d %s", code, out)
 	}
+	_, _, _ = tc.b.run("sync", "--discard-local", "--confirm")
+	out, code = runAccept(t, tc.b, "new-password")
+	if code != 0 || !strings.Contains(out, "Rotation accepted") {
+		t.Fatalf("accept after discard = %d %s", code, out)
+	}
+}
+
+func TestAcceptRotationEmptyVaultNote(t *testing.T) {
+	tc := newTwoClones(t)
+	if out, code := runRotateStdin(t, tc.a, "test-password", "new-password"); code != 0 {
+		t.Fatalf("rotate: %s", out)
+	}
+	out, code := runAccept(t, tc.b, "new-password")
+	if code != 0 || !strings.Contains(out, "vault is empty") {
+		t.Fatalf("empty accept = %d %s", code, out)
+	}
 }
 
 func TestAcceptRotationNoopAndFlags(t *testing.T) {
