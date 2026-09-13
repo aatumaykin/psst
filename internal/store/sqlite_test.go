@@ -2,9 +2,12 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 )
 
 func setupTestStore(t *testing.T) *SQLiteStore {
@@ -245,5 +248,38 @@ func TestVaultFileCreated(t *testing.T) {
 	s.Close()
 	if _, statErr := os.Stat(dbPath); os.IsNotExist(statErr) {
 		t.Fatal("vault.db should be created")
+	}
+}
+
+func TestExecTx_Concurrent(t *testing.T) {
+	s := setupTestStore(t)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			time.Sleep(time.Duration(i) * 5 * time.Millisecond)
+			errs <- s.ExecTx(func() error {
+				time.Sleep(40 * time.Millisecond)
+				return s.SetSecret(fmt.Sprintf("KEY_%d", i), []byte("ct"), make([]byte, 12), nil)
+			})
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("ExecTx: %v", err)
+		}
+	}
+
+	metas, err := s.ListSecrets()
+	if err != nil {
+		t.Fatalf("ListSecrets: %v", err)
+	}
+	if len(metas) != 8 {
+		t.Fatalf("metas = %d, want 8", len(metas))
 	}
 }
