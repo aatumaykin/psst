@@ -18,16 +18,19 @@ Changing the shared password with the same salt gains nothing against attackers 
 | Scope | Git storage only (`psst rotate`/`sync` on SQLite → existing git-only errors); `vault.Rotate` itself hard-errors on a non-GitStore (defense in depth) |
 | KDF params | Preserved by rotation (strengthening stays a separate `psst migrate kdf`); a rotation commit carrying weaker params than the local pin is rejected on acceptance |
 | Same old/new password | Allowed — salt rotation alone is the security operation; the summary notes `password unchanged` |
+| KDF params in rotate | Preserved by default; `--kdf` strengthens to defaults in the same commit (never weakens — hard error) |
 | Server invalidation | No new mechanism: with a live unlock the phase-2 `ErrRemoteMetaChanged` 409 recovery closes all UI unlocks and refreshes the cache; with no unlock the next pull refreshes silently (worst case one 500 during the accept race, cache untouched then). After `sync --accept-rotation` on the server host, unlocks derive the new key — no restart |
 
 ## 1. `psst rotate`
 
 ```
-psst rotate [--stdin]
+psst rotate [--stdin] [--kdf]
 ```
 
+- `--kdf`: strengthen the KDF parameters to `crypto.DefaultKDFParams()` IN THE SAME single commit as the salt/password rotation (one re-encryption pass instead of rotate + `migrate kdf`). Rotation never weakens: a target below the current params is a hard error at `Rotate` before anything is staged. Acceptance needs no change — `SyncAcceptRotation` already enforces equal-or-stronger vs the local pin.
+
 - Requires git storage (SQLite → error pointing at `psst migrate storage --to git`), vault present (exit 3 path as usual), unlock with the OLD password (`PSST_PASSWORD` or prompt; exit 5 on failure).
-- New password: interactive `New password:` / `Confirm:` via `term.ReadPassword` (both hidden; mismatch or empty → abort); with `--stdin`, one line from stdin (trailing newline stripped; empty → abort). Non-TTY without `--stdin` → error with the `--stdin` hint. The CLI collects ONLY the new password — salt/key/AAD are minted inside `vault.Rotate` (§4.2).
+- New password: interactive `New password:` / `Confirm:` via `term.ReadPassword` (both hidden; mismatch or empty → abort); with `--stdin`, one line from stdin (trailing newline stripped; empty → abort). Non-TTY without `--stdin` → error with the `--stdin` hint. The CLI collects ONLY the new password (and, with `--kdf`, the target params) — salt/key/AAD are minted inside `vault.Rotate` (§4.2).
 - **Salt/key minting and the whole rotation live in `vault.Rotate` (§4.2)**; the CLI calls it and then self re-pins.
 - **Pre-flight is a UX pre-check only.** It iterates store-level ciphertext (`store.GetAllSecrets()`), decrypts each entry with the old key, verifies, and zeroes the plaintext buffer immediately — a full plaintext map is never materialized. Any failure → `rotate aborted: secret <NAME> is undecryptable under the current key`, exit 1, nothing staged. **The authoritative set is (re)derived INSIDE the transaction as its first statement** (post-pull working tree; `SyncPullRead` no-ops at `txDepth > 0`): any secret that arrived with the in-tx pull is part of the rotation, and any decrypt failure inside the tx aborts fail-closed. On a non-empty vault a wrong OLD password dies at the pre-flight; on an **empty vault the old password cannot be verified** (documented residual — same class as serve's empty-vault unlock; the summary notes `password not verified: vault is empty`).
 - An empty vault rotates trivially (salt + `psst.yaml` only) in one commit.
@@ -58,7 +61,7 @@ psst rotate [--stdin]
    - `func (g *GitStore) SyncAcceptRotation() (*VaultMeta, error)` — §2 step 1. Never touches pins (the CLI re-pins after the probe).
 2. `internal/vault/vault.go` — two methods:
    - `func (v *Vault) VerifyAllDecryptable() error` — the pre-flight: iterates store-level ciphertext, decrypts each entry with the current key, zeroes the plaintext buffer, fails naming the first undecryptable secret.
-   - `func (v *Vault) Rotate(newPassword string) (int, error)` — returns the number of re-encrypted secrets (for the summary line):
+   - `func (v *Vault) Rotate(newPassword string, params *kdf.Params) (int, error)` — returns the number of re-encrypted secrets (for the summary line); `params == nil` preserves the current params (all pre-existing callers), non-nil uses the given target and hard-errors if any field is below the current params (`rotation must not weaken KDF parameters`):
      - Non-GitStore store → hard error `rotate requires git storage` (defense in depth under the CLI gate).
    - Mints the new salt (16 bytes `crypto/rand` → base64), derives the new key (`DeriveKeyFromPassword(newPassword, newSalt, <current params>`) and new AAD (`psst:v1:argon2id:<newSaltB64>`); KDF params are preserved.
    - Wraps everything in `ExecTxMsg("psst: rotate", …)` whose **first statement re-derives the authoritative secret set** from the post-pull working tree (store-level ciphertext), then per secret: decrypt with the old key (failure → fail-closed abort; recovery §1), encrypt with the new key + new AAD, `store.SetSecret` (tags preserved); finally `store.RotateSalt(newSaltB64)`.
@@ -83,7 +86,8 @@ psst rotate [--stdin]
 
 Real temporary git repos (bare remote pattern), fake values only, `PSST_NO_KEYCHAIN=1` (`make test`).
 
-- Rotate happy path (store/vault level): two tagged secrets; `Rotate("new-password")` → exactly ONE new commit with subject `psst: rotate`; every value/tag round-trips under the new password; `psst.yaml` salt changed; params unchanged; a follow-up write in the same process succeeds (fingerprint freshness — the store/vault-level tests build stores with `GitOptions{}` nil pins, or run the re-pin first: with production pins the write trips `ErrSaltChanged` until re-pinned, which is the specified behavior, not a failure).
+- Rotate happy path (store/vault level): two tagged secrets; `Rotate("new-password", nil)` → exactly ONE new commit with subject `psst: rotate`; every value/tag round-trips under the new password; `psst.yaml` salt changed; params unchanged; a follow-up write in the same process succeeds (fingerprint freshness — the store/vault-level tests build stores with `GitOptions{}` nil pins, or run the re-pin first: with production pins the write trips `ErrSaltChanged` until re-pinned, which is the specified behavior, not a failure).
+- `--kdf` rotation: `Rotate("new-password", &defaults)` on a store with weaker pinned params → params become defaults in `psst.yaml`, values re-encrypted under the new key derived with the new params, one commit; second-clone `sync --accept-rotation` succeeds. Target below current params → hard error, nothing staged.
 - Old-key death: after rotation, deriving with the old password fails to decrypt (AAD/salt binding).
 - Pre-flight abort: seed an undecryptable secret (raw garbage as ciphertext via store-level `SetSecret`); `Rotate` errors naming it; commit count unchanged; salt unchanged.
 - **In-tx arrival**: seed a second store, and between the pre-flight and the tx (via a store hook or by pre-arranging the remote push) land a new secret; assert the rotation commit re-encrypts it too (decryptable under the new password). Implementable deterministically: push the extra secret from clone B AFTER clone A's pre-flight reads but before A's `Rotate` tx pull — or by injecting through `ExecTxMsg` ordering in a unit-style test.
