@@ -60,6 +60,11 @@ This is a **security-critical** project — a secrets manager. Security rules ap
 - Git vaults derive keys strictly from the password via Argon2id — no base64
   passthrough, no OS keychain.
 - A repo lock (`flock`) serializes all git mutations on a clone.
+- Key rotation (`psst rotate`): new salt + re-encryption of every secret + updated
+  `psst.yaml` as ONE commit; the rotating machine re-pins itself. Every other machine
+  must adopt explicitly: `psst sync --accept-rotation` (password-verified probe before
+  the pin moves) or a fresh clone. Unpushed local commits block acceptance (recovery:
+  `psst sync` or `--discard-local`). Pre-rotation history stays fail-closed for rollback.
 
 ## What NOT To Do
 

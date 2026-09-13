@@ -723,6 +723,66 @@ func TestRemoteMetaChangedRecoveryPrecheck(t *testing.T) {
 	}
 }
 
+func TestServeSelfHealAfterRotation(t *testing.T) {
+	remote := newBareRemote(t)
+	repo := filepath.Join(t.TempDir(), "repo")
+	gs, err := store.NewGitStore(repo, store.GitOptions{Remote: remote})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	if err := gs.InitSchema(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	seed := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, gs)
+	if err := seed.Unlock(); err != nil {
+		t.Fatalf("seed unlock: %v", err)
+	}
+	if err := seed.SetSecret("API_KEY", []byte("secret123"), nil); err != nil {
+		t.Fatalf("seed set: %v", err)
+	}
+	digest := sha256.Sum256([]byte(testToken))
+	s := New(Config{
+		Store: gs, Enc: crypto.NewAESGCM(),
+		Host: "127.0.0.1", Port: "7788", TokenDigest: digest,
+		UnlockTimeout: 30 * time.Minute, SessionTTL: 24 * time.Hour,
+		Now: time.Now, Log: log.New(io.Discard, "", 0),
+	})
+	t.Cleanup(s.Close)
+	h := s.Handler()
+	ck := loginOK(t, h)
+	if rec := unlockVault(t, h, ck, "test-password"); rec.Code != 200 {
+		t.Fatalf("unlock: %d", rec.Code)
+	}
+
+	other, err := store.CloneGitVault(remote, filepath.Join(t.TempDir(), "repo2"), store.GitOptions{Remote: remote})
+	if err != nil {
+		t.Fatalf("other: %v", err)
+	}
+	rot := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, other)
+	if err := rot.Unlock(); err != nil {
+		t.Fatalf("rot unlock: %v", err)
+	}
+	if _, err := rot.Rotate("new-password"); err != nil {
+		t.Fatalf("rotate: %v", err)
+	}
+	if _, err := gs.SyncAcceptRotation(); err != nil {
+		t.Fatalf("accept on server host: %v", err)
+	}
+
+	rec := do(t, h, http.MethodPost, "/api/secrets/NEW_KEY", `{"value":"x"}`, ck)
+	if rec.Code != 409 || !strings.Contains(rec.Body.String(), "reunlock") {
+		t.Fatalf("stale write = %d %s", rec.Code, rec.Body.String())
+	}
+	rec = unlockVault(t, h, ck, "new-password")
+	if rec.Code != 200 {
+		t.Fatalf("unlock after rotation = %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodGet, "/api/secrets/API_KEY/value", "", ck)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "secret123") {
+		t.Fatalf("reveal after rotation = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestDivergedWarning(t *testing.T) {
 	remote := newBareRemote(t)
 	repo := filepath.Join(t.TempDir(), "repo")
