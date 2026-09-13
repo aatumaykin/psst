@@ -210,6 +210,30 @@ psst render --in deploy.env.tpl --out deploy.env    # file generation
 docker --env-file <(psst export) run ...            # container env
 ```
 
+### Key rotation
+
+```bash
+echo "new-password" | psst rotate --stdin   # old password via PSST_PASSWORD or prompt
+psst sync --accept-rotation                 # on every other machine
+```
+
+- `psst rotate` (git storage only) mints a new salt and re-encrypts every secret plus
+  the updated `psst.yaml` as ONE commit; the rotating machine re-pins itself.
+- On every other machine the old password fails with
+  `vault salt changed; run 'psst sync --accept-rotation' (or re-clone)`. Acceptance
+  verifies the NEW password before the pin moves — a wrong password leaves the clone
+  refused (never silently re-pinned) and can be retried.
+- Acceptance refuses when the clone has unpushed local commits (rebasing old-key
+  commits onto the rotation would mix keys permanently): drop them with
+  `psst sync --discard-local` (values remain in the reflog), then retry — plain
+  `psst sync` cannot push old-key commits once the rotation has landed.
+- If `psst rotate` aborts midway, the remote is untouched — upstream IS the
+  pre-rotation state; reset the working tree with `psst sync --discard-local`.
+- A running `psst serve` needs no restart: until the rotation is accepted on the
+  server host, the next operation fails naming `psst sync --accept-rotation` and
+  drops all unlocks; after accepting there, one re-unlock prompt may appear, then
+  unlock works with the new password.
+
 ### Global Flags
 
 All commands support:

@@ -146,8 +146,11 @@ func getUnlockedVault(cmd *cobra.Command, jsonOut, quiet bool, global bool, env 
 
 	if schemaErr := s.InitSchema(); schemaErr != nil {
 		_ = s.Close()
-		if errors.Is(schemaErr, store.ErrSaltChanged) || errors.Is(schemaErr, store.ErrKDFWeakened) {
-			exitWithError(fmt.Sprintf("vault metadata changed since last open: %v; see rotation procedure in docs", schemaErr))
+		if errors.Is(schemaErr, store.ErrSaltChanged) {
+			exitWithError(schemaErr.Error() + "; run 'psst sync --accept-rotation' (or re-clone)")
+		}
+		if errors.Is(schemaErr, store.ErrKDFWeakened) {
+			exitWithError(schemaErr.Error() + "; see rotation procedure in docs")
 		}
 		return nil, fmt.Errorf("init schema: %w", schemaErr)
 	}

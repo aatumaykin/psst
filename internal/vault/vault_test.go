@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -555,5 +556,181 @@ func TestVaultBatchSingleCommit(t *testing.T) {
 	metas, _ := v.ListSecrets()
 	if len(metas) != 2 {
 		t.Fatalf("metas = %d", len(metas))
+	}
+}
+
+func newBareRemoteVault(t *testing.T) string {
+	t.Helper()
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	if out, err := exec.Command("git", "init", "--bare", remote).CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v\n%s", err, out)
+	}
+	return remote
+}
+
+func newGitVaultStore(t *testing.T) (*store.GitStore, string) {
+	t.Helper()
+	repo := filepath.Join(t.TempDir(), "repo")
+	g, err := store.NewGitStore(repo, store.GitOptions{})
+	if err != nil {
+		t.Fatalf("git store: %v", err)
+	}
+	if err := g.InitSchema(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	return g, repo
+}
+
+func vaultFromPassword(t *testing.T, gs *store.GitStore, password string) *Vault {
+	t.Helper()
+	enc := crypto.NewAESGCM()
+	v := New(enc, keyring.NewPasswordProvider(enc, false), gs)
+	t.Setenv("PSST_PASSWORD", password)
+	if err := v.Unlock(); err != nil {
+		t.Fatalf("unlock %q: %v", password, err)
+	}
+	t.Cleanup(func() { _ = v.Close() })
+	return v
+}
+
+func TestVaultRotate(t *testing.T) {
+	remote := newBareRemoteVault(t)
+	repo := filepath.Join(t.TempDir(), "repo")
+	gs, err := store.NewGitStore(repo, store.GitOptions{Remote: remote})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gs.InitSchema(); err != nil {
+		t.Fatal(err)
+	}
+	v := vaultFromPassword(t, gs, "test-password")
+	if err := v.SetSecret("API_KEY", []byte("secret123"), []string{"prod"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.SetSecret("DB_PASS", []byte("test-password"), nil); err != nil {
+		t.Fatal(err)
+	}
+	oldSalt, _ := gs.GetMeta("kdf_salt")
+	oldTime, _ := gs.GetMeta("kdf_time")
+	oldMemory, _ := gs.GetMeta("kdf_memory")
+
+	n, err := v.Rotate("new-password")
+	if err != nil {
+		t.Fatalf("rotate: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("rotated = %d, want 2", n)
+	}
+	newSalt, _ := gs.GetMeta("kdf_salt")
+	if newSalt == oldSalt || newSalt == "" {
+		t.Fatalf("salt unchanged: %q", newSalt)
+	}
+	newTime, _ := gs.GetMeta("kdf_time")
+	newMemory, _ := gs.GetMeta("kdf_memory")
+	if newTime != oldTime || newMemory != oldMemory {
+		t.Fatalf("params changed: %s/%s was %s/%s", newTime, newMemory, oldTime, oldMemory)
+	}
+	out, _ := store.NewGitRunner(repo).Run("log", "--format=%s", "-2")
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) < 2 || lines[0] != "psst: rotate" {
+		t.Fatalf("log = %q", out)
+	}
+	got, err := v.GetSecret("API_KEY")
+	if err != nil || string(got.Value) != "secret123" || got.Tags[0] != "prod" {
+		t.Fatalf("roundtrip = %q %v", got.Value, err)
+	}
+	if err := v.SetSecret("AFTER", []byte("x"), nil); err != nil {
+		t.Fatalf("same-process write: %v", err)
+	}
+}
+
+func TestVaultRotateOldKeyDies(t *testing.T) {
+	remote := newBareRemoteVault(t)
+	repo := filepath.Join(t.TempDir(), "repo")
+	gs, _ := store.NewGitStore(repo, store.GitOptions{Remote: remote})
+	if err := gs.InitSchema(); err != nil {
+		t.Fatal(err)
+	}
+	v := vaultFromPassword(t, gs, "test-password")
+	if err := v.SetSecret("API_KEY", []byte("secret123"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.Rotate("new-password"); err != nil {
+		t.Fatal(err)
+	}
+	old := vaultFromPassword(t, gs, "test-password")
+	if _, err := old.GetSecret("API_KEY"); err == nil {
+		t.Fatal("old password must not decrypt after rotation")
+	}
+}
+
+func TestVaultRotateIncludesInTxArrivals(t *testing.T) {
+	remote := newBareRemoteVault(t)
+	repo := filepath.Join(t.TempDir(), "repo")
+	gs, _ := store.NewGitStore(repo, store.GitOptions{Remote: remote})
+	if err := gs.InitSchema(); err != nil {
+		t.Fatal(err)
+	}
+	v := vaultFromPassword(t, gs, "test-password")
+	if err := v.SetSecret("API_KEY", []byte("secret123"), nil); err != nil {
+		t.Fatal(err)
+	}
+	other, err := store.CloneGitVault(remote, filepath.Join(t.TempDir(), "repo2"), store.GitOptions{Remote: remote})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := other.InitSchema(); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.VerifyAllDecryptable(); err != nil {
+		t.Fatal(err)
+	}
+	ov := vaultFromPassword(t, other, "test-password")
+	if err := ov.SetSecret("LATE", []byte("late-secret456"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.Rotate("new-password"); err != nil {
+		t.Fatalf("rotate: %v", err)
+	}
+	got, err := v.GetSecret("LATE")
+	if err != nil || string(got.Value) != "late-secret456" {
+		t.Fatalf("late arrival not rotated: %q %v", got.Value, err)
+	}
+}
+
+func TestVaultRotateAbortsOnUndecryptable(t *testing.T) {
+	g, repo := newGitVaultStore(t)
+	iv := make([]byte, 12)
+	if err := g.SetSecret("BAD", []byte("garbage-not-base64!"), iv, nil); err != nil {
+		t.Fatal(err)
+	}
+	v := vaultFromPassword(t, g, "test-password")
+	saltBefore, _ := g.GetMeta("kdf_salt")
+	logBefore, _ := store.NewGitRunner(repo).Run("log", "--format=%H")
+	if err := v.VerifyAllDecryptable(); err == nil {
+		t.Fatal("pre-flight must fail on garbage")
+	}
+	if _, err := v.Rotate("new-password"); err == nil {
+		t.Fatal("rotate must abort")
+	}
+	salt, _ := g.GetMeta("kdf_salt")
+	if salt != saltBefore {
+		t.Fatalf("salt changed on abort: %q was %q", salt, saltBefore)
+	}
+	logAfter, _ := store.NewGitRunner(repo).Run("log", "--format=%H")
+	if logAfter != logBefore {
+		t.Fatal("commits landed on abort")
+	}
+}
+
+func TestVaultRotateEmptyVault(t *testing.T) {
+	g, _ := newGitVaultStore(t)
+	v := vaultFromPassword(t, g, "test-password")
+	n, err := v.Rotate("new-password")
+	if err != nil || n != 0 {
+		t.Fatalf("empty rotate = %d %v", n, err)
+	}
+	if err := v.SetSecret("FIRST", []byte("x"), nil); err != nil {
+		t.Fatalf("write after empty rotate: %v", err)
 	}
 }

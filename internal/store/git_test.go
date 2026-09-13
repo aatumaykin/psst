@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"os"
 	"path/filepath"
@@ -493,6 +494,96 @@ func TestGitStorePushFailedSentinel(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "run `psst sync` later") {
 		t.Fatalf("message text changed: %v", err)
+	}
+}
+
+func TestGitStoreExecTxMsg(t *testing.T) {
+	g, _ := newGitStore(t)
+	iv := make([]byte, 12)
+	err := g.ExecTxMsg("psst: rotate", func() error {
+		return g.SetSecret("KEY", []byte("ct"), iv, nil)
+	})
+	if err != nil {
+		t.Fatalf("tx: %v", err)
+	}
+	out, _ := NewGitRunner(g.repoDir).Run("log", "--format=%s", "-1")
+	if strings.TrimSpace(out) != "psst: rotate" {
+		t.Fatalf("subject = %q", strings.TrimSpace(out))
+	}
+}
+
+func TestGitStoreRotateSalt(t *testing.T) {
+	g, _ := newGitStore(t)
+	if err := g.RotateSalt("MDEyMzQ1Njc4OWFiY2RlZg=="); err == nil {
+		t.Fatal("rotate outside tx must fail")
+	}
+	newSalt := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 16))
+	err := g.ExecTxMsg("psst: rotate", func() error {
+		return g.RotateSalt(newSalt)
+	})
+	if err != nil {
+		t.Fatalf("rotate: %v", err)
+	}
+	salt, err := g.GetMeta("kdf_salt")
+	if err != nil || salt != newSalt {
+		t.Fatalf("salt = %q %v", salt, err)
+	}
+	if err := g.ExecTxMsg("t", func() error {
+		return g.RotateSalt("c2hvcnQ=")
+	}); err == nil {
+		t.Fatal("short salt must fail inside tx")
+	}
+	if err := g.ExecTxMsg("t", func() error {
+		return g.RotateSalt("!!!notbase64!!!")
+	}); err == nil {
+		t.Fatal("invalid base64 salt must fail")
+	}
+}
+
+func TestGitStoreSyncAcceptRotationNoRotation(t *testing.T) {
+	remote := newBareRemote(t)
+	g := newClonedStore(t, remote)
+	meta, err := g.SyncAcceptRotation()
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	salt, _ := g.GetMeta("kdf_salt")
+	if salt != meta.SaltB64 {
+		t.Fatalf("cache not updated: %q vs %q", salt, meta.SaltB64)
+	}
+}
+
+func TestGitStoreSyncAcceptRotationRejectsWeaker(t *testing.T) {
+	remote := newBareRemote(t)
+	g := newClonedStore(t, remote)
+	if err := g.SetMeta("kdf_time", "4"); err != nil {
+		t.Fatalf("strengthen: %v", err)
+	}
+	params := kdf.Default()
+	params.Time = 4
+	pin := &Pin{SaltB64: g.meta.SaltB64, Params: params}
+	g.opts.LoadPins = func() *Pin { return pin }
+	other := cloneVault(t, remote)
+	if err := other.SetMeta("kdf_time", "3"); err != nil {
+		t.Fatalf("weaken: %v", err)
+	}
+	_, err := g.SyncAcceptRotation()
+	if !errors.Is(err, ErrKDFWeakened) {
+		t.Fatalf("err = %v, want ErrKDFWeakened", err)
+	}
+}
+
+func TestGitStoreAheadOfUpstream(t *testing.T) {
+	remote := newBareRemote(t)
+	g := newClonedStore(t, remote)
+	if g.AheadOfUpstream() {
+		t.Fatal("synced clone must not be ahead")
+	}
+	if _, err := NewGitRunner(g.repoDir).Run("commit", "--allow-empty", "-m", "local"); err != nil {
+		t.Fatal(err)
+	}
+	if !g.AheadOfUpstream() {
+		t.Fatal("clone with local commit must be ahead")
 	}
 }
 
