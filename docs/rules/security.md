@@ -40,6 +40,8 @@ This is a **security-critical** project — a secrets manager. Security rules ap
 - Lock duration increases with each cycle of failed attempts.
 - Successful unlock resets the attempt counter.
 
+Git-storage vaults keep no lockout counters (nothing secret-derived is committed on unlock); Argon2id is the brute-force defense for cloned ciphertext — wrong passwords fail at first decrypt.
+
 ### In Tests
 
 - Use fake/dummy values in tests (`"secret123"`, `"test-password"`).

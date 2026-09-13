@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -30,6 +32,11 @@ func formatUnresolved(unresolved []render.Unresolved) string {
 }
 
 func writeRenderedOutput(path string, data []byte) error {
+	if runtime.GOOS != "windows" {
+		if info, statErr := os.Lstat(path); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+			return errors.New("Refusing to write to symlink: " + path)
+		}
+	}
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return fmt.Errorf("create output file: %w", err)
@@ -104,6 +111,7 @@ var renderCmd = &cobra.Command{
 				return exitWithError(err.Error())
 			}
 		}
+		defer zeroSecretMap(values)
 
 		result, unresolved, subs := render.Render(tmpl, values)
 		var report []render.Unresolved

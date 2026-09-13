@@ -62,29 +62,31 @@ var untagCmd = &cobra.Command{
 
 		return withVault(cmd, func(v vault.Interface, f *output.Formatter) error {
 			if isGit {
+				metas, listErr := v.ListSecrets(cmd.Context())
+				if listErr != nil {
+					return exitWithError(listErr.Error())
+				}
+				var tags []string
+				found := false
+				for _, m := range metas {
+					if m.Name == name {
+						tags = m.Tags
+						found = true
+						break
+					}
+				}
+				if !found {
+					return exitWithError(fmt.Sprintf("secret %q not found", name))
+				}
 				tag := ""
 				if len(args) == 2 {
 					tag = args[1]
-					sec, getErr := v.GetSecret(cmd.Context(), name)
-					if getErr != nil {
-						return exitWithError(getErr.Error())
-					}
-					if sec == nil {
-						return exitWithError(fmt.Sprintf("secret %q not found", name))
-					}
-					if len(sec.Tags) != 1 || sec.Tags[0] != tag {
-						return exitWithError(fmt.Sprintf("secret %s has tag %v, not %q", name, sec.Tags, tag))
+					if len(tags) != 1 || tags[0] != tag {
+						return exitWithError(fmt.Sprintf("secret %s has tag %v, not %q", name, tags, tag))
 					}
 				} else {
-					sec, getErr := v.GetSecret(cmd.Context(), name)
-					if getErr != nil {
-						return exitWithError(getErr.Error())
-					}
-					if sec == nil {
-						return exitWithError(fmt.Sprintf("secret %q not found", name))
-					}
-					if len(sec.Tags) == 1 {
-						tag = sec.Tags[0]
+					if len(tags) == 1 {
+						tag = tags[0]
 					}
 					if tag == "" {
 						return exitWithError(fmt.Sprintf("secret %s has no tag", name))

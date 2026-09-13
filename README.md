@@ -319,6 +319,10 @@ cp /backup/vault.db .psst/vault.db
 psst list   # verify access
 ```
 
+### Git storage
+
+For git-storage vaults the remote **is** the backup: every secret is an encrypted file pushed on write, so keep the remote (plus the vault password) safe. Also back up the local pin state in `.psst/<env>/config.yaml` — it records the pinned salt/KDF parameters adopted by this machine.
+
 ### Plaintext backup (warning: exposes secret values)
 
 ```bash

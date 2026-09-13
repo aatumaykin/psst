@@ -68,3 +68,27 @@ func (p *PasswordProvider) GenerateKey() ([]byte, error) {
 	}
 	return nil, errors.New("no key deriver available")
 }
+
+type fixedProvider struct {
+	password string
+}
+
+func NewFixedProvider(password string) KeyProvider {
+	return &fixedProvider{password: password}
+}
+
+func (p *fixedProvider) GetRawKey(_, _ string) ([]byte, error) {
+	return []byte(p.password), nil
+}
+
+func (p *fixedProvider) SetKey(_, _ string, _ []byte) error {
+	return errors.New("fixed provider is read-only")
+}
+
+func (p *fixedProvider) IsAvailable() bool {
+	return true
+}
+
+func (p *fixedProvider) GenerateKey() ([]byte, error) {
+	return nil, errors.New("fixed provider cannot generate keys")
+}

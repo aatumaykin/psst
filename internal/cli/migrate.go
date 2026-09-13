@@ -140,6 +140,11 @@ var migrateStorageCmd = &cobra.Command{
 		if err != nil {
 			return exitWithError(err.Error())
 		}
+		if emptyErr := ensureRemoteEmpty(repoPath); emptyErr != nil {
+			_ = gs.Close()
+			_ = os.RemoveAll(repoPath)
+			return exitWithError(emptyErr.Error())
+		}
 		if err := gs.InitSchema(); err != nil {
 			return exitWithError(err.Error())
 		}
@@ -147,7 +152,7 @@ var migrateStorageCmd = &cobra.Command{
 		enc := crypto.NewAESGCM()
 		var v2kp keyring.KeyProvider = keyring.NewPasswordProvider(enc, true)
 		if envPassword != "" {
-			v2kp = &fixedPasswordProvider{password: envPassword}
+			v2kp = keyring.NewFixedProvider(envPassword)
 		}
 		v2 := vault.New(enc, v2kp, gs)
 		if err := v2.Unlock(ctx); err != nil {
@@ -184,26 +189,12 @@ var migrateStorageCmd = &cobra.Command{
 	},
 }
 
-type fixedPasswordProvider struct {
-	password string
-}
-
-var _ keyring.KeyProvider = (*fixedPasswordProvider)(nil)
-
-func (p *fixedPasswordProvider) GetRawKey(_, _ string) ([]byte, error) {
-	return []byte(p.password), nil
-}
-
-func (p *fixedPasswordProvider) SetKey(_, _ string, _ []byte) error {
-	return errors.New("fixed provider is read-only")
-}
-
-func (p *fixedPasswordProvider) IsAvailable() bool {
-	return true
-}
-
-func (p *fixedPasswordProvider) GenerateKey() ([]byte, error) {
-	return nil, errors.New("fixed provider cannot generate keys")
+func ensureRemoteEmpty(repoPath string) error {
+	if statExists(filepath.Join(repoPath, "psst.yaml")) {
+		return errors.New("remote is not an empty vault; init a fresh remote or " +
+			"clone it with 'psst init --storage git --remote ...'")
+	}
+	return nil
 }
 
 //nolint:gochecknoinits // cobra command registration

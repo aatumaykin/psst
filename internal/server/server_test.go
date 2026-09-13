@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/aatumaykin/psst/internal/crypto"
+	"github.com/aatumaykin/psst/internal/keyring"
 	"github.com/aatumaykin/psst/internal/store"
 	"github.com/aatumaykin/psst/internal/vault"
 )
@@ -168,7 +169,7 @@ func TestHostMiddleware(t *testing.T) {
 
 func seedGitSecret(t *testing.T, gs *store.GitStore) {
 	t.Helper()
-	v := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, gs)
+	v := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), gs)
 	if err := v.Unlock(context.Background()); err != nil {
 		t.Fatalf("seed unlock: %v", err)
 	}
@@ -404,7 +405,7 @@ func TestListLockedNoValues(t *testing.T) {
 func TestHistoryLockedNoValues(t *testing.T) {
 	s, gs := newTestServer(t)
 	seedGitSecret(t, gs)
-	v := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, gs)
+	v := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), gs)
 	if err := v.Unlock(context.Background()); err != nil {
 		t.Fatalf("unlock: %v", err)
 	}
@@ -525,7 +526,7 @@ func TestWriteCycle(t *testing.T) {
 func TestRollbackEndpoint(t *testing.T) {
 	s, gs := newTestServer(t)
 	seedGitSecret(t, gs)
-	v := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, gs)
+	v := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), gs)
 	if err := v.Unlock(context.Background()); err != nil {
 		t.Fatalf("unlock: %v", err)
 	}
@@ -589,7 +590,7 @@ func TestRemoteMetaChangedRecovery(t *testing.T) {
 	if err := gs.InitSchema(); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	seed := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, gs)
+	seed := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), gs)
 	if err := seed.Unlock(context.Background()); err != nil {
 		t.Fatalf("seed unlock: %v", err)
 	}
@@ -620,7 +621,7 @@ func TestRemoteMetaChangedRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("other: %v", err)
 	}
-	oldV := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, other)
+	oldV := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), other)
 	if err := oldV.Unlock(context.Background()); err != nil {
 		t.Fatalf("old unlock: %v", err)
 	}
@@ -635,7 +636,7 @@ func TestRemoteMetaChangedRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fresh: %v", err)
 	}
-	mig := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, fresh)
+	mig := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), fresh)
 	if err := mig.Unlock(context.Background()); err != nil {
 		t.Fatalf("mig unlock: %v", err)
 	}
@@ -675,7 +676,7 @@ func TestRemoteMetaChangedRecoveryPrecheck(t *testing.T) {
 	if err := gs.InitSchema(); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	seed := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, gs)
+	seed := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), gs)
 	if err := seed.Unlock(context.Background()); err != nil {
 		t.Fatalf("seed unlock: %v", err)
 	}
@@ -706,7 +707,7 @@ func TestRemoteMetaChangedRecoveryPrecheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("other: %v", err)
 	}
-	oldV := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, other)
+	oldV := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), other)
 	if err := oldV.Unlock(context.Background()); err != nil {
 		t.Fatalf("old unlock: %v", err)
 	}
@@ -721,7 +722,7 @@ func TestRemoteMetaChangedRecoveryPrecheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fresh: %v", err)
 	}
-	mig := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, fresh)
+	mig := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), fresh)
 	if err := mig.Unlock(context.Background()); err != nil {
 		t.Fatalf("mig unlock: %v", err)
 	}
@@ -761,7 +762,7 @@ func TestServeSelfHealAfterRotation(t *testing.T) {
 	if err := gs.InitSchema(); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	seed := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, gs)
+	seed := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), gs)
 	if err := seed.Unlock(context.Background()); err != nil {
 		t.Fatalf("seed unlock: %v", err)
 	}
@@ -786,7 +787,7 @@ func TestServeSelfHealAfterRotation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("other: %v", err)
 	}
-	rot := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, other)
+	rot := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), other)
 	if err := rot.Unlock(context.Background()); err != nil {
 		t.Fatalf("rot unlock: %v", err)
 	}
@@ -827,7 +828,7 @@ func TestDivergedWarning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("other: %v", err)
 	}
-	otherV := vault.New(crypto.NewAESGCM(), &fixedPasswordProvider{password: "test-password"}, other)
+	otherV := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), other)
 	if err := otherV.Unlock(context.Background()); err != nil {
 		t.Fatalf("other unlock: %v", err)
 	}

@@ -33,7 +33,7 @@ psst is a local-only secrets manager for AI agents. Key security properties:
 - **Key derivation:** Argon2id KDF with per-vault random 16-byte salt. Legacy SHA-256 KDF is supported for migration only.
 - **Output masking:** Secret values are replaced with `[REDACTED]` in subprocess stdout/stderr by default.
 - **Memory safety:** Secret values are handled as `[]byte` and zeroed after use. No immutable `string` conversions.
-- **Brute-force protection:** Failed unlock attempts are tracked; exponential lockout after repeated failures.
+- **Brute-force protection:** Failed unlock attempts are tracked; exponential lockout after repeated failures. Git-storage vaults keep no lockout counters (nothing secret-derived is committed on unlock); Argon2id is the brute-force defense for cloned ciphertext — wrong passwords fail at first decrypt.
 - **Local-only:** No network calls, no telemetry, no crash reporting. Secrets never leave the machine.
 
 ## Threat Model

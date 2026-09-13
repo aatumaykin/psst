@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aatumaykin/psst/internal/crypto"
 	"github.com/aatumaykin/psst/internal/store"
 )
 
@@ -280,6 +281,7 @@ func (s *Server) handleValue(w http.ResponseWriter, r *http.Request, sess *sessi
 		s.writeStoreError(w, err)
 		return
 	}
+	defer crypto.ZeroBytes(sec.Value)
 	s.cfg.Log.Printf("reveal %s", name)
 	writeJSON(w, http.StatusOK, map[string]string{"value": string(sec.Value)})
 }

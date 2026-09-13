@@ -1,34 +1,11 @@
 package server
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/aatumaykin/psst/internal/keyring"
 	"github.com/aatumaykin/psst/internal/vault"
 )
-
-type fixedPasswordProvider struct {
-	password string
-}
-
-var _ keyring.KeyProvider = (*fixedPasswordProvider)(nil)
-
-func (p *fixedPasswordProvider) GetRawKey(_, _ string) ([]byte, error) {
-	return []byte(p.password), nil
-}
-
-func (p *fixedPasswordProvider) SetKey(_, _ string, _ []byte) error {
-	return errors.New("fixed provider is read-only")
-}
-
-func (p *fixedPasswordProvider) IsAvailable() bool {
-	return true
-}
-
-func (p *fixedPasswordProvider) GenerateKey() ([]byte, error) {
-	return nil, errors.New("fixed provider cannot generate keys")
-}
 
 type unlockRequest struct {
 	Password string `json:"password"`
@@ -54,7 +31,7 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request, sess *sess
 		s.writeStoreError(w, err)
 		return
 	}
-	v := vault.New(s.cfg.Enc, &fixedPasswordProvider{password: req.Password}, s.cfg.Store)
+	v := vault.New(s.cfg.Enc, keyring.NewFixedProvider(req.Password), s.cfg.Store)
 	if err := v.Unlock(r.Context()); err != nil {
 		writeErr(w, http.StatusInternalServerError, "unlock failed")
 		return

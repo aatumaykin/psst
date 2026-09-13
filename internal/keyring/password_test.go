@@ -32,3 +32,23 @@ func TestPasswordProviderEmptyFails(t *testing.T) {
 		t.Fatal("not available without env or prompt")
 	}
 }
+
+func TestNewFixedProvider(t *testing.T) {
+	p := NewFixedProvider("test-password")
+	raw, err := p.GetRawKey("psst", "vault-key")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if string(raw) != "test-password" {
+		t.Fatalf("raw = %q", raw)
+	}
+	if !p.IsAvailable() {
+		t.Fatal("available")
+	}
+	if err := p.SetKey("psst", "vault-key", []byte("x")); err == nil {
+		t.Fatal("SetKey must fail")
+	}
+	if _, err := p.GenerateKey(); err == nil {
+		t.Fatal("GenerateKey must fail")
+	}
+}
