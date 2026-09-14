@@ -13,7 +13,10 @@ import (
 	"github.com/aatumaykin/psst/internal/render"
 )
 
-const unresolvedEchoCap = 32
+const (
+	unresolvedEchoCap = 32
+	renderOutPerm     = 0o600
+)
 
 func formatUnresolved(unresolved []render.Unresolved) string {
 	parts := make([]string, 0, len(unresolved))
@@ -37,15 +40,15 @@ func writeRenderedOutput(path string, data []byte) error {
 			return errors.New("Refusing to write to symlink: " + path)
 		}
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, renderOutPerm)
 	if err != nil {
 		return fmt.Errorf("create output file: %w", err)
 	}
-	if err := f.Chmod(0o600); err != nil {
+	if err = f.Chmod(renderOutPerm); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("chmod output file: %w", err)
 	}
-	if _, err := f.Write(data); err != nil {
+	if _, err = f.Write(data); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("write output file: %w", err)
 	}
@@ -123,7 +126,7 @@ var renderCmd = &cobra.Command{
 		if len(report) > 0 {
 			return exitWithError("unresolved placeholders: " + formatUnresolved(report))
 		}
-		if err := writeRenderedOutput(out, result); err != nil {
+		if err = writeRenderedOutput(out, result); err != nil {
 			return exitWithError(err.Error())
 		}
 		f.Success(fmt.Sprintf("Rendered %d placeholders → %s", subs, out))

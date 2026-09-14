@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
@@ -37,16 +38,21 @@ func TestParseVaultMetaRoundTrip(t *testing.T) {
 
 func TestParseVaultMetaRejects(t *testing.T) {
 	cases := map[string]string{
-		"bad version":   strings.Replace(validMetaYAML(), "version: 1", "version: 2", 1),
-		"bad cipher":    strings.Replace(validMetaYAML(), "aes-256-gcm", "aes-128", 1),
-		"bad algo":      strings.Replace(validMetaYAML(), "argon2id", "scrypt", 1),
-		"weak memory":   strings.Replace(validMetaYAML(), "kdf_memory: 65536", "kdf_memory: 1024", 1),
-		"weak time":     strings.Replace(validMetaYAML(), "kdf_time: 3", "kdf_time: 1", 1),
-		"short salt":    strings.Replace(validMetaYAML(), "MDEyMzQ1Njc4OWFiY2RlZg==", "c2hvcnQ=", 1),
-		"missing salt":  strings.Replace(validMetaYAML(), "salt: MDEyMzQ1Njc4OWFiY2RlZg==\n", "", 1),
-		"unknown key":   validMetaYAML() + "extra: 1\n",
-		"duplicate key": strings.Replace(validMetaYAML(), "cipher: aes-256-gcm", "cipher: aes-256-gcm\ncipher: aes-256-gcm", 1),
-		"garbage":       "not a yaml at all",
+		"bad version":  strings.Replace(validMetaYAML(), "version: 1", "version: 2", 1),
+		"bad cipher":   strings.Replace(validMetaYAML(), "aes-256-gcm", "aes-128", 1),
+		"bad algo":     strings.Replace(validMetaYAML(), "argon2id", "scrypt", 1),
+		"weak memory":  strings.Replace(validMetaYAML(), "kdf_memory: 65536", "kdf_memory: 1024", 1),
+		"weak time":    strings.Replace(validMetaYAML(), "kdf_time: 3", "kdf_time: 1", 1),
+		"short salt":   strings.Replace(validMetaYAML(), "MDEyMzQ1Njc4OWFiY2RlZg==", "c2hvcnQ=", 1),
+		"missing salt": strings.Replace(validMetaYAML(), "salt: MDEyMzQ1Njc4OWFiY2RlZg==\n", "", 1),
+		"unknown key":  validMetaYAML() + "extra: 1\n",
+		"duplicate key": strings.Replace(
+			validMetaYAML(),
+			"cipher: aes-256-gcm",
+			"cipher: aes-256-gcm\ncipher: aes-256-gcm",
+			1,
+		),
+		"garbage": "not a yaml at all",
 	}
 	for name, y := range cases {
 		if _, err := ParseVaultMeta([]byte(y)); err == nil {
@@ -77,7 +83,7 @@ func TestCheckPinned(t *testing.T) {
 		t.Fatal("mixed change must be rejected")
 	}
 	otherSalt := &Pin{SaltB64: "QUFBQUFBQUFBQUFBQUFBUEE9PQ==", Params: meta.Params}
-	if err := CheckPinned(meta, otherSalt); err != ErrSaltChanged {
+	if err := CheckPinned(meta, otherSalt); !errors.Is(err, ErrSaltChanged) {
 		t.Fatalf("salt change = %v, want ErrSaltChanged", err)
 	}
 }
@@ -107,10 +113,10 @@ func TestSecretFileCodec(t *testing.T) {
 	if !bytes.Equal(gotCT, ct) || !bytes.Equal(gotIV, iv) {
 		t.Fatal("roundtrip mismatch")
 	}
-	if _, _, err := DecodeSecretFile([]byte("!!!notbase64!!!\n")); err == nil {
+	if _, _, err = DecodeSecretFile([]byte("!!!notbase64!!!\n")); err == nil {
 		t.Fatal("invalid base64 must error")
 	}
-	if _, _, err := DecodeSecretFile([]byte("c2hvcnQ=\n")); err == nil {
+	if _, _, err = DecodeSecretFile([]byte("c2hvcnQ=\n")); err == nil {
 		t.Fatal("IV < 12 bytes must error")
 	}
 }
@@ -132,7 +138,7 @@ func TestSecretPath(t *testing.T) {
 		{"API_KEY", "Prod"},
 		{"API_KEY", "my tag"},
 	} {
-		if _, err := SecretPath("/repo/secrets", bad.name, bad.tag); err == nil {
+		if _, err = SecretPath("/repo/secrets", bad.name, bad.tag); err == nil {
 			t.Fatalf("name=%q tag=%q must error", bad.name, bad.tag)
 		}
 	}

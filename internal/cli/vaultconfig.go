@@ -53,23 +53,23 @@ func LoadVaultConfig(envDir string) (*VaultConfig, error) {
 		case "pin_salt":
 			cfg.PinSalt = value
 		case "pin_kdf_time":
-			n, err := strconv.ParseUint(value, 10, 32)
-			if err != nil {
-				return nil, fmt.Errorf("invalid vault config: pin_kdf_time: %w", err)
+			n, perr := strconv.ParseUint(value, 10, 32)
+			if perr != nil {
+				return nil, fmt.Errorf("invalid vault config: pin_kdf_time: %w", perr)
 			}
 			cfg.PinKDF.Time = uint32(n)
 		case "pin_kdf_memory":
-			n, err := strconv.ParseUint(value, 10, 32)
-			if err != nil {
-				return nil, fmt.Errorf("invalid vault config: pin_kdf_memory: %w", err)
+			n, perr := strconv.ParseUint(value, 10, 32)
+			if perr != nil {
+				return nil, fmt.Errorf("invalid vault config: pin_kdf_memory: %w", perr)
 			}
 			cfg.PinKDF.Memory = uint32(n)
 		case "pin_kdf_threads":
-			n, err := strconv.ParseUint(value, 10, 16)
-			if err != nil {
-				return nil, fmt.Errorf("invalid vault config: pin_kdf_threads: %w", err)
+			n, perr := strconv.ParseUint(value, 10, 16)
+			if perr != nil {
+				return nil, fmt.Errorf("invalid vault config: pin_kdf_threads: %w", perr)
 			}
-			cfg.PinKDF.Threads = uint8(n)
+			cfg.PinKDF.Threads = uint8(n) //nolint:gosec // n is parsed with bit size 16 above
 		}
 	}
 	cfg.HasPin = cfg.PinSalt != ""
@@ -105,7 +105,7 @@ func SaveVaultConfig(envDir string, cfg VaultConfig) error {
 
 func ResolveStorage(flagVal string, envDir string) (string, error) {
 	if flagVal != "" {
-		if flagVal != "sqlite" && flagVal != "git" {
+		if flagVal != storageSQLite && flagVal != storageGit {
 			return "", fmt.Errorf("invalid storage %q: must be sqlite or git", flagVal)
 		}
 		return flagVal, nil
@@ -115,7 +115,7 @@ func ResolveStorage(flagVal string, envDir string) (string, error) {
 		return "", err
 	}
 	if cfg.Storage != "" {
-		if cfg.Storage != "sqlite" && cfg.Storage != "git" {
+		if cfg.Storage != storageSQLite && cfg.Storage != storageGit {
 			return "", fmt.Errorf("invalid storage %q in config: must be sqlite or git", cfg.Storage)
 		}
 		return cfg.Storage, nil
@@ -127,9 +127,9 @@ func ResolveStorage(flagVal string, envDir string) (string, error) {
 		return "", fmt.Errorf("conflicting storage markers in %s", envDir)
 	}
 	if yamlExists {
-		return "git", nil
+		return storageGit, nil
 	}
-	return "sqlite", nil
+	return storageSQLite, nil
 }
 
 func statExists(path string) bool {
@@ -155,11 +155,12 @@ func ValidateRemoteScheme(remote string, allowInsecure bool) error {
 	if statExists(remote) {
 		return nil
 	}
-	return fmt.Errorf("unsupported remote %q: allowed are ssh://, https://, git@host:path, http:// (with --allow-insecure-remote) and existing filesystem paths", remote)
+	return fmt.Errorf("unsupported remote %q: allowed are ssh://, https://, git@host:path, "+
+		"http:// (with --allow-insecure-remote) and existing filesystem paths", remote)
 }
 
 func OpenVaultStore(envDir, storage, remote string, allowInsecure bool) (store.SecretStore, *store.GitStore, error) {
-	if storage == "git" {
+	if storage == storageGit {
 		if err := ValidateRemoteScheme(remote, allowInsecure); err != nil {
 			return nil, nil, err
 		}
@@ -172,8 +173,8 @@ func OpenVaultStore(envDir, storage, remote string, allowInsecure bool) (store.S
 			effRemote = cfg.Remote
 		}
 		loadPins := func() *store.Pin {
-			cur, err := LoadVaultConfig(envDir)
-			if err != nil {
+			cur, lerr := LoadVaultConfig(envDir)
+			if lerr != nil {
 				if cfg.PinSalt == "" {
 					return nil
 				}
@@ -185,9 +186,9 @@ func OpenVaultStore(envDir, storage, remote string, allowInsecure bool) (store.S
 			return &store.Pin{SaltB64: cur.PinSalt, Params: cur.PinKDF}
 		}
 		savePins := func(p store.Pin) error {
-			cur, err := LoadVaultConfig(envDir)
-			if err != nil {
-				return err
+			cur, serr := LoadVaultConfig(envDir)
+			if serr != nil {
+				return serr
 			}
 			cur.PinSalt = p.SaltB64
 			cur.HasPin = p.SaltB64 != ""

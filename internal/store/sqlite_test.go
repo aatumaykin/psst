@@ -341,15 +341,13 @@ func TestExecTx_Concurrent(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, 8)
 	for i := range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			time.Sleep(time.Duration(i) * 5 * time.Millisecond)
 			errs <- s.ExecTx(func() error {
 				time.Sleep(40 * time.Millisecond)
 				return s.SetSecret(ctx, fmt.Sprintf("KEY_%d", i), []byte("ct"), make([]byte, 12), nil)
 			})
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)

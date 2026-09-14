@@ -1460,7 +1460,7 @@ func newTestGitVault(t *testing.T) *Vault {
 	if err != nil {
 		t.Fatalf("git store: %v", err)
 	}
-	if err := s.InitSchema(); err != nil {
+	if err = s.InitSchema(); err != nil {
 		t.Fatalf("init: %v", err)
 	}
 	enc := crypto.NewAESGCM()
@@ -1505,12 +1505,17 @@ func TestVaultGitAADActuallyBinds(t *testing.T) {
 	if salt == "" {
 		t.Fatal("salt")
 	}
-	forgedKey, err := v.enc.DeriveKeyFromPassword("test-password", []byte("othersalt-16byte"), crypto.DefaultKDFParams())
+	forgedKey, err := v.enc.DeriveKeyFromPassword(
+		"test-password",
+		[]byte("othersalt-16byte"),
+		crypto.DefaultKDFParams(),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	stored, _ := v.store.GetSecret(ctx, "KEY")
-	if _, err = v.enc.DecryptWithAAD(stored.EncryptedValue, stored.IV, forgedKey, []byte("psst:v1:argon2id:"+salt)); err == nil {
+	if _, err = v.enc.DecryptWithAAD(stored.EncryptedValue, stored.IV, forgedKey,
+		[]byte("psst:v1:argon2id:"+salt)); err == nil {
 		t.Fatal("wrong key must fail via AAD+GCM")
 	}
 }
@@ -1610,7 +1615,7 @@ func newGitVaultStore(t *testing.T) (*store.GitStore, string) {
 	if err != nil {
 		t.Fatalf("git store: %v", err)
 	}
-	if err := g.InitSchema(); err != nil {
+	if err = g.InitSchema(); err != nil {
 		t.Fatalf("init: %v", err)
 	}
 	return g, repo
@@ -1635,15 +1640,15 @@ func TestVaultRotate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := gs.InitSchema(); err != nil {
+	if err = gs.InitSchema(); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
 	v := vaultFromPassword(t, gs, "test-password")
-	if err := v.SetSecret(ctx, "API_KEY", []byte("secret123"), []string{"prod"}); err != nil {
+	if err = v.SetSecret(ctx, "API_KEY", []byte("secret123"), []string{"prod"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := v.SetSecret(ctx, "DB_PASS", []byte("test-password"), nil); err != nil {
+	if err = v.SetSecret(ctx, "DB_PASS", []byte("test-password"), nil); err != nil {
 		t.Fatal(err)
 	}
 	oldSalt, _ := gs.GetMeta(ctx, "kdf_salt")
@@ -1675,7 +1680,7 @@ func TestVaultRotate(t *testing.T) {
 	if err != nil || string(got.Value) != "secret123" || got.Tags[0] != "prod" {
 		t.Fatalf("roundtrip = %q %v", got.Value, err)
 	}
-	if err := v.SetSecret(ctx, "AFTER", []byte("x"), nil); err != nil {
+	if err = v.SetSecret(ctx, "AFTER", []byte("x"), nil); err != nil {
 		t.Fatalf("same-process write: %v", err)
 	}
 }
@@ -1717,17 +1722,17 @@ func TestVaultRotateIncludesInTxArrivals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := other.InitSchema(); err != nil {
+	if err = other.InitSchema(); err != nil {
 		t.Fatal(err)
 	}
-	if err := v.VerifyAllDecryptable(ctx); err != nil {
+	if err = v.VerifyAllDecryptable(ctx); err != nil {
 		t.Fatal(err)
 	}
 	ov := vaultFromPassword(t, other, "test-password")
-	if err := ov.SetSecret(ctx, "LATE", []byte("late-secret456"), nil); err != nil {
+	if err = ov.SetSecret(ctx, "LATE", []byte("late-secret456"), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v.Rotate(ctx, "new-password", nil); err != nil {
+	if _, err = v.Rotate(ctx, "new-password", nil); err != nil {
 		t.Fatalf("rotate: %v", err)
 	}
 	got, err := v.GetSecret(ctx, "LATE")
@@ -1770,7 +1775,7 @@ func TestVaultRotateEmptyVault(t *testing.T) {
 	if err != nil || n != 0 {
 		t.Fatalf("empty rotate = %d %v", n, err)
 	}
-	if err := v.SetSecret(ctx, "FIRST", []byte("x"), nil); err != nil {
+	if err = v.SetSecret(ctx, "FIRST", []byte("x"), nil); err != nil {
 		t.Fatalf("write after empty rotate: %v", err)
 	}
 }
@@ -1795,12 +1800,12 @@ func TestVaultRotateKDFStrengthens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := gs.InitSchema(); err != nil {
+	if err = gs.InitSchema(); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
 	v := vaultFromPassword(t, gs, "test-password")
-	if err := v.SetSecret(ctx, "API_KEY", []byte("secret123"), []string{"prod"}); err != nil {
+	if err = v.SetSecret(ctx, "API_KEY", []byte("secret123"), []string{"prod"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1831,7 +1836,7 @@ func TestVaultRotateKDFStrengthens(t *testing.T) {
 	if err != nil || string(got.Value) != "secret123" || got.Tags[0] != "prod" {
 		t.Fatalf("roundtrip = %q %v", got.Value, err)
 	}
-	if err := v.SetSecret(ctx, "AFTER", []byte("x"), nil); err != nil {
+	if err = v.SetSecret(ctx, "AFTER", []byte("x"), nil); err != nil {
 		t.Fatalf("same-process write: %v", err)
 	}
 
@@ -1839,7 +1844,7 @@ func TestVaultRotateKDFStrengthens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("clone: %v", err)
 	}
-	if _, err := cloned.SyncAcceptRotation(context.Background()); err != nil {
+	if _, err = cloned.SyncAcceptRotation(context.Background()); err != nil {
 		t.Fatalf("accept on second clone: %v", err)
 	}
 	cv := vaultFromPassword(t, cloned, "new-password")

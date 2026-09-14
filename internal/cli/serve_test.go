@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,7 +64,7 @@ func TestServeRequiresGitStorage(t *testing.T) {
 func TestServeMissingVault(t *testing.T) {
 	envDir := filepath.Join(t.TempDir(), "env")
 	err := serveStorageGate(envDir, "")
-	if err != errNoVault {
+	if !errors.Is(err, errNoVault) {
 		t.Fatalf("missing vault = %v", err)
 	}
 }
@@ -75,10 +76,10 @@ func TestServeGitVaultPassesGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := gs.InitSchema(); err != nil {
+	if err = gs.InitSchema(); err != nil {
 		t.Fatal(err)
 	}
-	if err := serveStorageGate(envDir, ""); err != nil {
+	if err = serveStorageGate(envDir, ""); err != nil {
 		t.Fatalf("git vault rejected: %v", err)
 	}
 }

@@ -10,6 +10,8 @@ import (
 	"github.com/aatumaykin/psst/internal/vault"
 )
 
+const nameTagArgs = 2
+
 var tagCmd = &cobra.Command{
 	Use:   "tag <name> <tag>",
 	Short: "Add a tag to a secret",
@@ -79,7 +81,7 @@ var untagCmd = &cobra.Command{
 					return exitWithError(fmt.Sprintf("secret %q not found", name))
 				}
 				tag := ""
-				if len(args) == 2 {
+				if len(args) == nameTagArgs {
 					tag = args[1]
 					if len(tags) != 1 || tags[0] != tag {
 						return exitWithError(fmt.Sprintf("secret %s has tag %v, not %q", name, tags, tag))

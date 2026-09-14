@@ -73,23 +73,23 @@ var rotateCmd = &cobra.Command{
 		if err != nil {
 			return exitWithError(err.Error())
 		}
-		if storage != "git" {
+		if storage != storageGit {
 			return exitWithError("psst rotate requires git storage; run 'psst migrate storage --to git'")
 		}
 		if !statExists(filepath.Join(envDir, "repo", ".git")) {
 			printNoVault(cfg.JSON, cfg.Quiet)
 			return &exitError{code: ExitNoVault}
 		}
-		s, gs, err := OpenVaultStore(envDir, "git", "", false)
+		s, gs, err := OpenVaultStore(envDir, storageGit, "", false)
 		if err != nil {
 			return exitWithError(fmt.Sprintf("open vault: %v", err))
 		}
-		if err := s.InitSchema(); err != nil {
+		if err = s.InitSchema(); err != nil {
 			return exitWithError(err.Error())
 		}
 		enc := crypto.NewAESGCM()
 		v := vault.New(enc, keyring.NewPasswordProvider(enc, true), s)
-		if err := v.Unlock(ctx); err != nil {
+		if err = v.Unlock(ctx); err != nil {
 			printAuthFailed(cfg.JSON, cfg.Quiet)
 			return &exitError{code: ExitAuthFailed}
 		}
@@ -99,7 +99,7 @@ var rotateCmd = &cobra.Command{
 		if err != nil {
 			return exitWithError(err.Error())
 		}
-		if err := v.VerifyAllDecryptable(ctx); err != nil {
+		if err = v.VerifyAllDecryptable(ctx); err != nil {
 			return exitWithError("rotate aborted: " + err.Error())
 		}
 		newPassword, err := readNewPassword(useStdin)
@@ -113,7 +113,8 @@ var rotateCmd = &cobra.Command{
 		}
 		n, err := v.Rotate(ctx, newPassword, target)
 		if err != nil {
-			return exitWithError(err.Error() + "; working tree may be dirty; run 'psst sync --discard-local' to reset to the remote (pre-rotation) state")
+			return exitWithError(err.Error() +
+				"; working tree may be dirty; run 'psst sync --discard-local' to reset to the remote (pre-rotation) state")
 		}
 		repinErr := repinVault(ctx, envDir, gs)
 		msg := fmt.Sprintf("Rotated: %d secrets re-encrypted", n)
@@ -144,9 +145,9 @@ func repinVault(ctx context.Context, envDir string, gs *store.GitStore) error {
 	tv, _ := gs.GetMeta(ctx, "kdf_time")
 	mv, _ := gs.GetMeta(ctx, "kdf_memory")
 	th, _ := gs.GetMeta(ctx, "kdf_threads")
-	cfg.PinKDF.Time = uint32(atoiDefault(tv))
-	cfg.PinKDF.Memory = uint32(atoiDefault(mv))
-	cfg.PinKDF.Threads = uint8(atoiDefault(th))
+	cfg.PinKDF.Time = uint32(atoiDefault(tv))   //nolint:gosec // value fits: mirrors validated psst.yaml pins
+	cfg.PinKDF.Memory = uint32(atoiDefault(mv)) //nolint:gosec // value fits: mirrors validated psst.yaml pins
+	cfg.PinKDF.Threads = uint8(atoiDefault(th)) //nolint:gosec // value fits: mirrors validated psst.yaml pins
 	return SaveVaultConfig(envDir, *cfg)
 }
 

@@ -25,9 +25,15 @@ import (
 var errNoVault = errors.New("no vault found")
 
 const (
-	defaultListen   = "127.0.0.1:7788"
-	minServeTimeout = time.Minute
-	sessionTTL      = 24 * time.Hour
+	defaultListen     = "127.0.0.1:7788"
+	minServeTimeout   = time.Minute
+	sessionTTL        = 24 * time.Hour
+	tokenSize         = 32
+	readHeaderTimeout = 5 * time.Second
+	readTimeout       = 30 * time.Second
+	writeTimeout      = 60 * time.Second
+	idleTimeout       = 120 * time.Second
+	shutdownTimeout   = 5 * time.Second
 )
 
 func isLoopbackHost(host string) bool {
@@ -45,7 +51,7 @@ func resolveServeToken(flagVal string) (string, bool, error) {
 	if env := os.Getenv("PSST_SERVE_TOKEN"); env != "" {
 		return env, false, nil
 	}
-	b := make([]byte, 32)
+	b := make([]byte, tokenSize)
 	if _, err := rand.Read(b); err != nil {
 		return "", false, fmt.Errorf("generate token: %w", err)
 	}
@@ -59,7 +65,7 @@ func serveStorageGate(envDir, storageFlag string) error {
 	}
 	repoExists := statExists(filepath.Join(envDir, "repo", ".git")) ||
 		statExists(filepath.Join(envDir, "repo", "psst.yaml"))
-	if storage == "git" {
+	if storage == storageGit {
 		if !repoExists {
 			return errNoVault
 		}
@@ -94,18 +100,18 @@ var serveCmd = &cobra.Command{
 		if err != nil {
 			return exitWithError(err.Error())
 		}
-		if err := serveStorageGate(envDir, cfg.Storage); err != nil {
+		if err = serveStorageGate(envDir, cfg.Storage); err != nil {
 			if errors.Is(err, errNoVault) {
 				printNoVault(cfg.JSON, cfg.Quiet)
 				return &exitError{code: ExitNoVault}
 			}
 			return exitWithError(err.Error())
 		}
-		s, gs, err := OpenVaultStore(envDir, "git", "", false)
+		s, gs, err := OpenVaultStore(envDir, storageGit, "", false)
 		if err != nil {
 			return exitWithError(fmt.Sprintf("open vault: %v", err))
 		}
-		if err := s.InitSchema(); err != nil {
+		if err = s.InitSchema(); err != nil {
 			return exitWithError(fmt.Sprintf("init vault: %v", err))
 		}
 		host, port, err := net.SplitHostPort(listen)
@@ -113,7 +119,8 @@ var serveCmd = &cobra.Command{
 			return exitWithError(fmt.Sprintf("invalid --listen %q: %v", listen, err))
 		}
 		if !isLoopbackHost(host) {
-			fmt.Fprintln(os.Stderr, "warning: listening on a non-loopback interface; expose only via SSH tunnel (ssh -L 7788:127.0.0.1:7788)")
+			fmt.Fprintln(os.Stderr, "warning: listening on a non-loopback interface; "+
+				"expose only via SSH tunnel (ssh -L 7788:127.0.0.1:7788)")
 		}
 		token, generated, err := resolveServeToken(tokenFlag)
 		if err != nil {
@@ -128,13 +135,12 @@ var serveCmd = &cobra.Command{
 			SessionTTL:    sessionTTL,
 		})
 		httpSrv := &http.Server{
-			Addr:    listen,
-			Handler: srv.Handler(),
-			//nolint:mnd // server timeouts per spec
-			ReadHeaderTimeout: 5 * time.Second,
-			ReadTimeout:       30 * time.Second,
-			WriteTimeout:      60 * time.Second,
-			IdleTimeout:       120 * time.Second,
+			Addr:              listen,
+			Handler:           srv.Handler(),
+			ReadHeaderTimeout: readHeaderTimeout,
+			ReadTimeout:       readTimeout,
+			WriteTimeout:      writeTimeout,
+			IdleTimeout:       idleTimeout,
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
@@ -152,18 +158,18 @@ var serveCmd = &cobra.Command{
 		}()
 		errCh := make(chan error, 1)
 		go func() { errCh <- httpSrv.ListenAndServe() }()
-		fmt.Printf("psst server:  http://%s\n", listen)
+		fmt.Fprintf(os.Stdout, "psst server:  http://%s\n", listen)
 		if generated {
-			fmt.Printf("auth token:   %s   (shown once)\n", token)
+			fmt.Fprintf(os.Stdout, "auth token:   %s   (shown once)\n", token)
 		}
 		select {
-		case err := <-errCh:
-			if err != nil && !errors.Is(err, http.ErrServerClosed) {
-				return exitWithError(fmt.Sprintf("serve: %v", err))
+		case srvErr := <-errCh:
+			if srvErr != nil && !errors.Is(srvErr, http.ErrServerClosed) {
+				return exitWithError(fmt.Sprintf("serve: %v", srvErr))
 			}
 		case <-ctx.Done():
 		}
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
 		_ = httpSrv.Shutdown(shutdownCtx)
 		srv.Close()

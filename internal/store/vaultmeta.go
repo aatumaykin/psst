@@ -12,6 +12,17 @@ import (
 	"github.com/aatumaykin/psst/internal/kdf"
 )
 
+const (
+	metaKeyKDFTime    = "kdf_time"
+	metaKeyKDFMemory  = "kdf_memory"
+	metaKeyKDFThreads = "kdf_threads"
+
+	minKDFTime    = 3
+	minKDFMemory  = 65536
+	maxKDFThreads = 255
+	ivSize        = 12
+)
+
 var (
 	ErrSaltChanged  = errors.New("vault salt changed")
 	ErrKDFWeakened  = errors.New("vault KDF parameters weakened or mixed")
@@ -53,14 +64,14 @@ func ParseVaultMeta(data []byte) (*VaultMeta, error) {
 	}
 
 	m := &VaultMeta{}
-	for _, key := range []string{"version", "kdf_algo", "kdf_time", "kdf_memory", "kdf_threads", "salt", "cipher"} {
+	for _, key := range []string{"version", "kdf_algo", metaKeyKDFTime, metaKeyKDFMemory, metaKeyKDFThreads, "salt", "cipher"} {
 		if _, ok := seen[key]; !ok {
 			return nil, fmt.Errorf("invalid vault metadata: missing key %q", key)
 		}
 	}
 	for key := range seen {
 		switch key {
-		case "version", "kdf_algo", "kdf_time", "kdf_memory", "kdf_threads", "salt", "cipher":
+		case "version", "kdf_algo", metaKeyKDFTime, metaKeyKDFMemory, metaKeyKDFThreads, "salt", "cipher":
 		default:
 			return nil, fmt.Errorf("invalid vault metadata: unknown key %q", key)
 		}
@@ -77,18 +88,18 @@ func ParseVaultMeta(data []byte) (*VaultMeta, error) {
 	m.KDFAlgo = seen["kdf_algo"]
 
 	var err error
-	if m.Params.Time, err = parseUintField(seen["kdf_time"], "kdf_time", 3); err != nil {
+	if m.Params.Time, err = parseUintField(seen[metaKeyKDFTime], metaKeyKDFTime, minKDFTime); err != nil {
 		return nil, err
 	}
-	if m.Params.Memory, err = parseUintField(seen["kdf_memory"], "kdf_memory", 65536); err != nil {
+	if m.Params.Memory, err = parseUintField(seen[metaKeyKDFMemory], metaKeyKDFMemory, minKDFMemory); err != nil {
 		return nil, err
 	}
-	threads, err := parseUintField(seen["kdf_threads"], "kdf_threads", 1)
+	threads, err := parseUintField(seen[metaKeyKDFThreads], metaKeyKDFThreads, 1)
 	if err != nil {
 		return nil, err
 	}
-	if threads > 255 {
-		return nil, fmt.Errorf("invalid vault metadata: kdf_threads out of range")
+	if threads > maxKDFThreads {
+		return nil, errors.New("invalid vault metadata: kdf_threads out of range")
 	}
 	m.Params.Threads = uint8(threads)
 
@@ -96,7 +107,7 @@ func ParseVaultMeta(data []byte) (*VaultMeta, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid vault metadata: salt is not valid base64: %w", err)
 	}
-	if len(salt) < 16 {
+	if len(salt) < saltSize {
 		return nil, fmt.Errorf("invalid vault metadata: salt too short: %d bytes", len(salt))
 	}
 	m.SaltB64 = seen["salt"]
@@ -109,13 +120,13 @@ func ParseVaultMeta(data []byte) (*VaultMeta, error) {
 	return m, nil
 }
 
-func parseUintField(value, key string, min uint32) (uint32, error) {
+func parseUintField(value, key string, minimum uint32) (uint32, error) {
 	n, err := strconv.ParseUint(value, 10, 32)
 	if err != nil {
 		return 0, fmt.Errorf("invalid vault metadata: %s is not a valid number: %w", key, err)
 	}
-	if n < uint64(min) {
-		return 0, fmt.Errorf("invalid vault metadata: %s = %d is below minimum %d", key, n, min)
+	if n < uint64(minimum) {
+		return 0, fmt.Errorf("invalid vault metadata: %s = %d is below minimum %d", key, n, minimum)
 	}
 	return uint32(n), nil
 }
@@ -123,9 +134,9 @@ func parseUintField(value, key string, min uint32) (uint32, error) {
 func (m *VaultMeta) Encode() []byte {
 	return []byte("version: " + strconv.Itoa(m.Version) + "\n" +
 		"kdf_algo: " + m.KDFAlgo + "\n" +
-		"kdf_time: " + strconv.FormatUint(uint64(m.Params.Time), 10) + "\n" +
-		"kdf_memory: " + strconv.FormatUint(uint64(m.Params.Memory), 10) + "\n" +
-		"kdf_threads: " + strconv.FormatUint(uint64(m.Params.Threads), 10) + "\n" +
+		metaKeyKDFTime + ": " + strconv.FormatUint(uint64(m.Params.Time), 10) + "\n" +
+		metaKeyKDFMemory + ": " + strconv.FormatUint(uint64(m.Params.Memory), 10) + "\n" +
+		metaKeyKDFThreads + ": " + strconv.FormatUint(uint64(m.Params.Threads), 10) + "\n" +
 		"salt: " + m.SaltB64 + "\n" +
 		"cipher: " + m.Cipher + "\n")
 }
@@ -161,15 +172,15 @@ func EncodeSecretFile(ciphertext, iv []byte) []byte {
 	return []byte(base64.StdEncoding.EncodeToString(append(append([]byte{}, iv...), ciphertext...)) + "\n")
 }
 
-func DecodeSecretFile(data []byte) (ciphertext, iv []byte, err error) {
+func DecodeSecretFile(data []byte) ([]byte, []byte, error) {
 	raw, err := base64.StdEncoding.DecodeString(strings.TrimRight(string(data), " \n"))
 	if err != nil {
 		return nil, nil, fmt.Errorf("invalid secret file: %w", err)
 	}
-	if len(raw) < 12 {
-		return nil, nil, fmt.Errorf("invalid secret file: IV shorter than 12 bytes")
+	if len(raw) < ivSize {
+		return nil, nil, errors.New("invalid secret file: IV shorter than 12 bytes")
 	}
-	return raw[12:], raw[:12], nil
+	return raw[ivSize:], raw[:ivSize], nil
 }
 
 func SecretPath(secretsRoot, name, tag string) (string, error) {

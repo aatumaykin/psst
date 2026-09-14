@@ -38,11 +38,11 @@ var syncCmd = &cobra.Command{
 		if err != nil {
 			return exitWithError(err.Error())
 		}
-		if storage != "git" {
+		if storage != storageGit {
 			return exitWithError("psst sync requires a git vault")
 		}
 
-		_, gs, err := OpenVaultStore(envDir, "git", "", false)
+		_, gs, err := OpenVaultStore(envDir, storageGit, "", false)
 		if err != nil {
 			return exitWithError(err.Error())
 		}
@@ -52,12 +52,12 @@ var syncCmd = &cobra.Command{
 				return exitWithError("--discard-local requires --confirm in non-interactive use")
 			}
 			f.Warning("Discarding local changes: unpushed psst commits will be lost")
-			if err := gs.DiscardLocal(); err != nil {
-				if errors.Is(err, store.ErrNoRemote) {
+			if discardErr := gs.DiscardLocal(); discardErr != nil {
+				if errors.Is(discardErr, store.ErrNoRemote) {
 					f.Warning("Working locally, no remote configured")
 					return nil
 				}
-				return exitWithError(err.Error())
+				return exitWithError(discardErr.Error())
 			}
 			f.Success("Discarded local changes; clone reset to remote")
 			return nil
@@ -69,40 +69,46 @@ var syncCmd = &cobra.Command{
 				return nil
 			}
 			if gs.AheadOfUpstream(ctx) {
-				return exitWithError("cannot accept rotation with unpushed local commits (their values remain in the reflog); run 'psst sync --discard-local' to drop them, then retry — plain 'psst sync' cannot push old-key commits once the rotation has landed")
+				return exitWithError(
+					"cannot accept rotation with unpushed local commits (their values remain in the reflog); " +
+						"run 'psst sync --discard-local' to drop them, then retry — plain 'psst sync' cannot push old-key commits " +
+						"once the rotation has landed",
+				)
 			}
-			meta, err := gs.SyncAcceptRotation(ctx)
-			if err != nil {
-				return exitWithError(err.Error())
+			meta, acceptErr := gs.SyncAcceptRotation(ctx)
+			if acceptErr != nil {
+				return exitWithError(acceptErr.Error())
 			}
-			probeStore, err := store.NewGitStore(filepath.Join(envDir, "repo"), store.GitOptions{})
-			if err != nil {
-				return exitWithError(fmt.Sprintf("open probe store: %v", err))
+			probeStore, probeErr := store.NewGitStore(filepath.Join(envDir, "repo"), store.GitOptions{})
+			if probeErr != nil {
+				return exitWithError(fmt.Sprintf("open probe store: %v", probeErr))
 			}
 			defer probeStore.Close()
 			enc := crypto.NewAESGCM()
 			pv := vault.New(enc, keyring.NewPasswordProvider(enc, true), probeStore)
-			if err := pv.Unlock(ctx); err != nil {
-				return exitWithError("Failed to unlock vault. Set PSST_PASSWORD to the new password or run in a terminal")
+			if unlockErr := pv.Unlock(ctx); unlockErr != nil {
+				return exitWithError(
+					"Failed to unlock vault. Set PSST_PASSWORD to the new password or run in a terminal",
+				)
 			}
 			defer pv.Close()
-			metas, err := pv.ListSecrets(ctx)
-			if err != nil {
-				return exitWithError(err.Error())
+			metas, listErr := pv.ListSecrets(ctx)
+			if listErr != nil {
+				return exitWithError(listErr.Error())
 			}
 			if len(metas) > 0 {
-				if _, err := pv.GetSecret(ctx, metas[0].Name); err != nil {
+				if _, getErr := pv.GetSecret(ctx, metas[0].Name); getErr != nil {
 					return exitWithError("wrong password or undecryptable secret " + metas[0].Name)
 				}
 			}
-			vcfg, err := LoadVaultConfig(envDir)
-			if err != nil {
-				return exitWithError(err.Error())
+			vcfg, cfgErr := LoadVaultConfig(envDir)
+			if cfgErr != nil {
+				return exitWithError(cfgErr.Error())
 			}
 			vcfg.PinSalt = meta.SaltB64
 			vcfg.PinKDF = meta.Params
-			if err := SaveVaultConfig(envDir, *vcfg); err != nil {
-				return exitWithError(err.Error())
+			if saveErr := SaveVaultConfig(envDir, *vcfg); saveErr != nil {
+				return exitWithError(saveErr.Error())
 			}
 			if len(metas) == 0 {
 				f.Success("Rotation accepted (vault is empty: password not verified)")
@@ -112,7 +118,7 @@ var syncCmd = &cobra.Command{
 			return nil
 		}
 
-		if err := gs.Sync(); err != nil {
+		if err = gs.Sync(); err != nil {
 			if errors.Is(err, store.ErrNoRemote) {
 				f.Warning("Working locally, no remote configured")
 				return nil

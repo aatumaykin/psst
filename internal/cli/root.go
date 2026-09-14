@@ -145,6 +145,9 @@ func getRunner() *runner.Runner {
 const (
 	ExitNoVault    = 3
 	ExitAuthFailed = 5
+
+	storageGit    = "git"
+	storageSQLite = "sqlite"
 )
 
 func resolveVaultPath(cfg globalConfig) (string, error) {
@@ -160,7 +163,7 @@ func storageIsGit(cfg globalConfig) bool {
 		return false
 	}
 	storage, err := ResolveStorage(cfg.Storage, envDir)
-	return err == nil && storage == "git"
+	return err == nil && storage == storageGit
 }
 
 func getUnlockedVault(ctx context.Context, jsonOut, quiet bool, cfg globalConfig) (vault.Interface, error) {
@@ -169,7 +172,7 @@ func getUnlockedVault(ctx context.Context, jsonOut, quiet bool, cfg globalConfig
 		return nil, err
 	}
 
-	storage := "sqlite"
+	storage := storageSQLite
 	if cfg.VaultPath != "" {
 		envDir = cfg.VaultPath
 	} else {
@@ -182,7 +185,7 @@ func getUnlockedVault(ctx context.Context, jsonOut, quiet bool, cfg globalConfig
 	dbExists := statExists(vault.SQLitePath(envDir))
 	gitMarkerExists := statExists(filepath.Join(envDir, "repo", "psst.yaml")) ||
 		statExists(filepath.Join(envDir, "repo", ".git"))
-	if storage == "git" {
+	if storage == storageGit {
 		if !statExists(filepath.Join(envDir, "repo", ".git")) {
 			printNoVault(jsonOut, quiet)
 			return nil, &exitError{code: ExitNoVault}
@@ -211,7 +214,7 @@ func getUnlockedVault(ctx context.Context, jsonOut, quiet bool, cfg globalConfig
 	}
 
 	var kp keyring.KeyProvider
-	if storage == "git" {
+	if storage == storageGit {
 		kp = keyring.NewPasswordProvider(enc, true)
 	} else {
 		kp = keyring.NewProvider(enc)
@@ -220,7 +223,7 @@ func getUnlockedVault(ctx context.Context, jsonOut, quiet bool, cfg globalConfig
 	v := vault.New(enc, kp, s)
 	if unlockErr := v.Unlock(ctx); unlockErr != nil {
 		_ = v.Close()
-		if storage == "git" {
+		if storage == storageGit {
 			f := output.NewFormatter(jsonOut, quiet)
 			f.Error("Failed to unlock vault. Set PSST_PASSWORD or run in a terminal")
 		} else {

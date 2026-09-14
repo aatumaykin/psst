@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,7 +21,7 @@ func (e *testEnv) gitRun(args ...string) (string, int) {
 	cmd.Stdin = strings.NewReader("secret-value\n")
 	out, err := cmd.CombinedOutput()
 	code := 0
-	if exitErr, ok := err.(*exec.ExitError); ok {
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 		code = exitErr.ExitCode()
 	} else if err != nil {
 		code = -1
@@ -116,7 +117,8 @@ func TestSyncDiscardLocal(t *testing.T) {
 	os.MkdirAll(home2, 0755)
 	run2 := func(args ...string) string {
 		c := exec.Command(e.binary, args...)
-		c.Env = append(os.Environ(), "HOME="+home2, "PSST_PASSWORD=test-password", "PSST_GLOBAL=1", "PSST_NO_KEYCHAIN=1")
+		c.Env = append(os.Environ(),
+			"HOME="+home2, "PSST_PASSWORD=test-password", "PSST_GLOBAL=1", "PSST_NO_KEYCHAIN=1")
 		c.Stdin = strings.NewReader("v\n")
 		c.Dir = e.dir
 		out, _ := c.CombinedOutput()
@@ -154,7 +156,7 @@ func TestMigrateStorage(t *testing.T) {
 	if !strings.Contains(out, "OLD_KEY") {
 		t.Fatalf("migrated secret missing: %s", out)
 	}
-	if out, code := e.gitRun("export", "--env-file", "verify.env"); code != 0 {
+	if out, code = e.gitRun("export", "--env-file", "verify.env"); code != 0 {
 		t.Fatalf("export after migrate: %s (%d)", out, code)
 	}
 	data, err := os.ReadFile(filepath.Join(e.dir, "work", "verify.env"))

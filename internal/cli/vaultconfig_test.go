@@ -18,7 +18,8 @@ func mustParams(t *testing.T) crypto.KDFParams {
 
 func TestVaultConfigRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	cfg := VaultConfig{Storage: "git", Remote: "git@host:vault.git", HasPin: true, PinSalt: "c2FsdA==", PinKDF: mustParams(t)}
+	cfg := VaultConfig{Storage: "git", Remote: "git@host:vault.git",
+		HasPin: true, PinSalt: "c2FsdA==", PinKDF: mustParams(t)}
 	if err := SaveVaultConfig(dir, cfg); err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -32,7 +33,8 @@ func TestVaultConfigRoundTrip(t *testing.T) {
 	if got.PinKDF != crypto.DefaultKDFParams() {
 		t.Fatalf("pin kdf = %+v", got.PinKDF)
 	}
-	if fi, err := os.Stat(filepath.Join(dir, "config.yaml")); err != nil || fi.Mode().Perm() != 0600 {
+	fi, err := os.Stat(filepath.Join(dir, "config.yaml"))
+	if err != nil || fi.Mode().Perm() != 0600 {
 		t.Fatalf("config perms: %v %v", fi, err)
 	}
 }
@@ -82,7 +84,7 @@ func TestOpenVaultStoreLoadPinsFresh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	if err := gs.InitSchema(); err != nil {
+	if err = gs.InitSchema(); err != nil {
 		t.Fatalf("init: %v", err)
 	}
 	s, _, err := OpenVaultStore(envDir, "git", "", false)
@@ -94,7 +96,7 @@ func TestOpenVaultStoreLoadPinsFresh(t *testing.T) {
 		t.Fatalf("cfg: %v", err)
 	}
 	cfg.PinSalt = "AAAAAAAAAAAAAAAAAAAAAA=="
-	if err := SaveVaultConfig(envDir, *cfg); err != nil {
+	if err = SaveVaultConfig(envDir, *cfg); err != nil {
 		t.Fatalf("save cfg: %v", err)
 	}
 	err = s.InitSchema()
@@ -110,14 +112,14 @@ func TestOpenVaultStoreLoadPinsUnreadableConfigFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	if err := gs.InitSchema(); err != nil {
+	if err = gs.InitSchema(); err != nil {
 		t.Fatalf("init: %v", err)
 	}
 	s1, _, err := OpenVaultStore(envDir, "git", "", false)
 	if err != nil {
 		t.Fatalf("open1: %v", err)
 	}
-	if err := s1.InitSchema(); err != nil {
+	if err = s1.InitSchema(); err != nil {
 		t.Fatalf("init1 (pins vault): %v", err)
 	}
 	metaPath := filepath.Join(repo, "psst.yaml")
@@ -131,7 +133,7 @@ func TestOpenVaultStoreLoadPinsUnreadableConfigFailsClosed(t *testing.T) {
 			lines[i] = "salt: " + strings.Repeat("A", 32)
 		}
 	}
-	if err := os.WriteFile(metaPath, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
+	if err = os.WriteFile(metaPath, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
 		t.Fatalf("tamper meta: %v", err)
 	}
 	s2, _, err := OpenVaultStore(envDir, "git", "", false)
@@ -139,7 +141,7 @@ func TestOpenVaultStoreLoadPinsUnreadableConfigFailsClosed(t *testing.T) {
 		t.Fatalf("open2: %v", err)
 	}
 	cfgPath := configPath(envDir)
-	if err := os.Chmod(cfgPath, 0o000); err != nil {
+	if err = os.Chmod(cfgPath, 0o000); err != nil {
 		t.Fatalf("chmod: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(cfgPath, 0o600) })

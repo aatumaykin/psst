@@ -12,7 +12,7 @@ type unlockRequest struct {
 }
 
 func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request, sess *session) {
-	body, ok := readBody(w, r, 64*1024)
+	body, ok := readBody(w, r, bodyLimit64KiB)
 	if !ok {
 		return
 	}
@@ -44,7 +44,7 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request, sess *sess
 		return
 	}
 	if len(metas) > 0 {
-		if _, err := v.GetSecret(r.Context(), metas[0].Name); err != nil {
+		if _, err = v.GetSecret(r.Context(), metas[0].Name); err != nil {
 			_ = v.Close()
 			writeErr(w, http.StatusUnauthorized, "wrong password or undecryptable secret "+metas[0].Name)
 			return

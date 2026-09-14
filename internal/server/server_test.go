@@ -31,7 +31,7 @@ func newTestServer(t *testing.T) (*Server, *store.GitStore) {
 	if err != nil {
 		t.Fatalf("git store: %v", err)
 	}
-	if err := gs.InitSchema(); err != nil {
+	if err = gs.InitSchema(); err != nil {
 		t.Fatalf("init: %v", err)
 	}
 	digest := sha256.Sum256([]byte(testToken))
@@ -92,7 +92,6 @@ func TestLoginConstantTime(t *testing.T) {
 	if !ck.HttpOnly || ck.SameSite != http.SameSiteStrictMode || ck.Path != "/" {
 		t.Fatalf("cookie flags wrong: %+v", ck)
 	}
-	//nolint:mnd // cookie max-age seconds
 	if ck.MaxAge != 24*60*60 {
 		t.Fatalf("max-age = %d", ck.MaxAge)
 	}
@@ -243,27 +242,34 @@ func TestTouchSemantics(t *testing.T) {
 		t.Fatalf("unlock: %d", rec.Code)
 	}
 	s.cfg.Now = func() time.Time { return now.Add(29 * time.Minute) }
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if rec := do(t, h, http.MethodGet, "/api/session", "", ck); rec.Code != 200 {
 			t.Fatalf("session poll: %d", rec.Code)
 		}
 	}
 	s.cfg.Now = func() time.Time { return now.Add(31 * time.Minute) }
 	s.Sweep()
-	if rec := do(t, h, http.MethodGet, "/api/session", "", ck); !strings.Contains(rec.Body.String(), `"unlocked":false`) {
+	rec := do(t, h, http.MethodGet, "/api/session", "", ck)
+	if !strings.Contains(rec.Body.String(), `"unlocked":false`) {
 		t.Fatal("GET /api/session polling must not refresh the unlock timer")
 	}
 	s.cfg.Now = func() time.Time { return now }
-	if rec := unlockVault(t, h, ck, "test-password"); rec.Code != 200 {
+	rec = unlockVault(t, h, ck, "test-password")
+	if rec.Code != 200 {
 		t.Fatalf("re-unlock: %d", rec.Code)
 	}
 	s.cfg.Now = func() time.Time { return now.Add(29 * time.Minute) }
-	if rec := do(t, h, http.MethodGet, "/api/secrets", "", ck); rec.Code != 200 {
+	rec = do(t, h, http.MethodGet, "/api/secrets", "", ck)
+	if rec.Code != 200 {
 		t.Fatalf("real request: %d", rec.Code)
 	}
 	s.cfg.Now = func() time.Time { return now.Add(31 * time.Minute) }
 	s.Sweep()
-	if rec := do(t, h, http.MethodGet, "/api/session", "", ck); !strings.Contains(rec.Body.String(), `"unlocked":true`) {
+	rec = do(t, h, http.MethodGet, "/api/session", "", ck)
+	if !strings.Contains(
+		rec.Body.String(),
+		`"unlocked":true`,
+	) {
 		t.Fatal("a real request must refresh the unlock timer")
 	}
 }
@@ -290,7 +296,11 @@ func TestAutoRefreshDoesNotExtendUnlock(t *testing.T) {
 	}
 	s.cfg.Now = func() time.Time { return now.Add(31 * time.Minute) }
 	s.Sweep()
-	if rec := do(t, h, http.MethodGet, "/api/session", "", ck); !strings.Contains(rec.Body.String(), `"unlocked":false`) {
+	rec = do(t, h, http.MethodGet, "/api/session", "", ck)
+	if !strings.Contains(
+		rec.Body.String(),
+		`"unlocked":false`,
+	) {
 		t.Fatal("auto-refresh must not extend the unlock timer")
 	}
 }
@@ -311,7 +321,14 @@ func TestWriteStoreErrorMapping(t *testing.T) {
 	s, _ := newTestServer(t)
 	h := s.Handler()
 	w := httptest.NewRecorder()
-	s.writeStoreError(w, fmt.Errorf("%w; change is in the local clone, run `psst sync` later: %w", store.ErrPushFailed, errors.New("boom")))
+	s.writeStoreError(
+		w,
+		fmt.Errorf(
+			"%w; change is in the local clone, run `psst sync` later: %w",
+			store.ErrPushFailed,
+			errors.New("boom"),
+		),
+	)
 	if w.Code != 409 || !strings.Contains(w.Body.String(), "psst sync") {
 		t.Fatalf("push = %d %s", w.Code, w.Body.String())
 	}
@@ -587,14 +604,14 @@ func TestRemoteMetaChangedRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	if err := gs.InitSchema(); err != nil {
+	if err = gs.InitSchema(); err != nil {
 		t.Fatalf("init: %v", err)
 	}
 	seed := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), gs)
-	if err := seed.Unlock(context.Background()); err != nil {
+	if err = seed.Unlock(context.Background()); err != nil {
 		t.Fatalf("seed unlock: %v", err)
 	}
-	if err := seed.SetSecret(context.Background(), "API_KEY", []byte("secret123"), nil); err != nil {
+	if err = seed.SetSecret(context.Background(), "API_KEY", []byte("secret123"), nil); err != nil {
 		t.Fatalf("seed set (pushes): %v", err)
 	}
 
@@ -622,14 +639,14 @@ func TestRemoteMetaChangedRecovery(t *testing.T) {
 		t.Fatalf("other: %v", err)
 	}
 	oldV := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), other)
-	if err := oldV.Unlock(context.Background()); err != nil {
+	if err = oldV.Unlock(context.Background()); err != nil {
 		t.Fatalf("old unlock: %v", err)
 	}
 	got, err := oldV.GetSecret(context.Background(), "API_KEY")
 	if err != nil {
 		t.Fatalf("old-key decrypt: %v", err)
 	}
-	if err := other.SetMeta(context.Background(), "kdf_time", "4"); err != nil {
+	if err = other.SetMeta(context.Background(), "kdf_time", "4"); err != nil {
 		t.Fatalf("strengthen: %v", err)
 	}
 	fresh, err := store.NewGitStore(repo2, store.GitOptions{Remote: remote})
@@ -637,10 +654,10 @@ func TestRemoteMetaChangedRecovery(t *testing.T) {
 		t.Fatalf("fresh: %v", err)
 	}
 	mig := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), fresh)
-	if err := mig.Unlock(context.Background()); err != nil {
+	if err = mig.Unlock(context.Background()); err != nil {
 		t.Fatalf("mig unlock: %v", err)
 	}
-	if err := mig.SetSecret(context.Background(), "API_KEY", got.Value, got.Tags); err != nil {
+	if err = mig.SetSecret(context.Background(), "API_KEY", got.Value, got.Tags); err != nil {
 		t.Fatalf("mig re-encrypt+push: %v", err)
 	}
 
@@ -673,14 +690,14 @@ func TestRemoteMetaChangedRecoveryPrecheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	if err := gs.InitSchema(); err != nil {
+	if err = gs.InitSchema(); err != nil {
 		t.Fatalf("init: %v", err)
 	}
 	seed := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), gs)
-	if err := seed.Unlock(context.Background()); err != nil {
+	if err = seed.Unlock(context.Background()); err != nil {
 		t.Fatalf("seed unlock: %v", err)
 	}
-	if err := seed.SetSecret(context.Background(), "API_KEY", []byte("secret123"), nil); err != nil {
+	if err = seed.SetSecret(context.Background(), "API_KEY", []byte("secret123"), nil); err != nil {
 		t.Fatalf("seed set (pushes): %v", err)
 	}
 
@@ -708,14 +725,14 @@ func TestRemoteMetaChangedRecoveryPrecheck(t *testing.T) {
 		t.Fatalf("other: %v", err)
 	}
 	oldV := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), other)
-	if err := oldV.Unlock(context.Background()); err != nil {
+	if err = oldV.Unlock(context.Background()); err != nil {
 		t.Fatalf("old unlock: %v", err)
 	}
 	got, err := oldV.GetSecret(context.Background(), "API_KEY")
 	if err != nil {
 		t.Fatalf("old-key decrypt: %v", err)
 	}
-	if err := other.SetMeta(context.Background(), "kdf_time", "4"); err != nil {
+	if err = other.SetMeta(context.Background(), "kdf_time", "4"); err != nil {
 		t.Fatalf("strengthen: %v", err)
 	}
 	fresh, err := store.NewGitStore(repo2, store.GitOptions{Remote: remote})
@@ -723,10 +740,10 @@ func TestRemoteMetaChangedRecoveryPrecheck(t *testing.T) {
 		t.Fatalf("fresh: %v", err)
 	}
 	mig := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), fresh)
-	if err := mig.Unlock(context.Background()); err != nil {
+	if err = mig.Unlock(context.Background()); err != nil {
 		t.Fatalf("mig unlock: %v", err)
 	}
-	if err := mig.SetSecret(context.Background(), "API_KEY", got.Value, got.Tags); err != nil {
+	if err = mig.SetSecret(context.Background(), "API_KEY", got.Value, got.Tags); err != nil {
 		t.Fatalf("mig re-encrypt+push: %v", err)
 	}
 
@@ -759,14 +776,14 @@ func TestServeSelfHealAfterRotation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	if err := gs.InitSchema(); err != nil {
+	if err = gs.InitSchema(); err != nil {
 		t.Fatalf("init: %v", err)
 	}
 	seed := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), gs)
-	if err := seed.Unlock(context.Background()); err != nil {
+	if err = seed.Unlock(context.Background()); err != nil {
 		t.Fatalf("seed unlock: %v", err)
 	}
-	if err := seed.SetSecret(context.Background(), "API_KEY", []byte("secret123"), nil); err != nil {
+	if err = seed.SetSecret(context.Background(), "API_KEY", []byte("secret123"), nil); err != nil {
 		t.Fatalf("seed set: %v", err)
 	}
 	digest := sha256.Sum256([]byte(testToken))
@@ -788,13 +805,13 @@ func TestServeSelfHealAfterRotation(t *testing.T) {
 		t.Fatalf("other: %v", err)
 	}
 	rot := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), other)
-	if err := rot.Unlock(context.Background()); err != nil {
+	if err = rot.Unlock(context.Background()); err != nil {
 		t.Fatalf("rot unlock: %v", err)
 	}
-	if _, err := rot.Rotate(context.Background(), "new-password", nil); err != nil {
+	if _, err = rot.Rotate(context.Background(), "new-password", nil); err != nil {
 		t.Fatalf("rotate: %v", err)
 	}
-	if _, err := gs.SyncAcceptRotation(context.Background()); err != nil {
+	if _, err = gs.SyncAcceptRotation(context.Background()); err != nil {
 		t.Fatalf("accept on server host: %v", err)
 	}
 
@@ -819,7 +836,7 @@ func TestDivergedWarning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("clone: %v", err)
 	}
-	if err := gs.InitSchema(); err != nil {
+	if err = gs.InitSchema(); err != nil {
 		t.Fatalf("init: %v", err)
 	}
 	seedGitSecret(t, gs)
@@ -829,14 +846,26 @@ func TestDivergedWarning(t *testing.T) {
 		t.Fatalf("other: %v", err)
 	}
 	otherV := vault.New(crypto.NewAESGCM(), keyring.NewFixedProvider("test-password"), other)
-	if err := otherV.Unlock(context.Background()); err != nil {
+	if err = otherV.Unlock(context.Background()); err != nil {
 		t.Fatalf("other unlock: %v", err)
 	}
-	if err := otherV.SetSecret(context.Background(), "OTHER_KEY", []byte("other-secret123"), nil); err != nil {
+	if err = otherV.SetSecret(context.Background(), "OTHER_KEY", []byte("other-secret123"), nil); err != nil {
 		t.Fatalf("other set (pushes): %v", err)
 	}
-	args := []string{"-C", repo, "-c", "user.name=psst-test", "-c", "user.email=psst@test.invalid", "commit", "--allow-empty", "-m", "local-only"}
-	if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+	args := []string{
+		"-C",
+		repo,
+		"-c",
+		"user.name=psst-test",
+		"-c",
+		"user.email=psst@test.invalid",
+		"commit",
+		"--allow-empty",
+		"-m",
+		"local-only",
+	}
+	out, err := exec.Command("git", args...).CombinedOutput()
+	if err != nil {
 		t.Fatalf("local commit: %v\n%s", err, out)
 	}
 
@@ -882,7 +911,8 @@ func TestReveal(t *testing.T) {
 	if rec.Code != 403 {
 		t.Fatalf("locked reveal = %d", rec.Code)
 	}
-	if rec := unlockVault(t, h, ck, "test-password"); rec.Code != 200 {
+	rec = unlockVault(t, h, ck, "test-password")
+	if rec.Code != 200 {
 		t.Fatalf("unlock: %d", rec.Code)
 	}
 	rec = do(t, h, http.MethodGet, "/api/secrets/API_KEY/value", "", ck)
@@ -943,25 +973,21 @@ func TestConcurrentSmoke(t *testing.T) {
 	}
 	var wg sync.WaitGroup
 	errs := make(chan error, 32)
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 8 {
+		wg.Go(func() {
 			rec := do(t, h, http.MethodGet, "/api/secrets", "", ck)
 			if rec.Code != 200 {
 				errs <- fmt.Errorf("list = %d", rec.Code)
 			}
-		}()
+		})
 	}
-	for i := 0; i < 4; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			rec := do(t, h, http.MethodGet, fmt.Sprintf("/api/secrets/API_KEY/value"), "", ck)
+	for range 4 {
+		wg.Go(func() {
+			rec := do(t, h, http.MethodGet, "/api/secrets/API_KEY/value", "", ck)
 			if rec.Code != 200 {
 				errs <- fmt.Errorf("reveal = %d", rec.Code)
 			}
-		}(i)
+		})
 	}
 	wg.Wait()
 	close(errs)

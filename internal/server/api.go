@@ -11,11 +11,14 @@ import (
 	"github.com/aatumaykin/psst/internal/store"
 )
 
+const noRemoteWarning = "no remote configured; change is local"
+
 func (s *Server) writeStoreError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrRemoteMetaChanged):
 		s.recoverMetaChanged()
-		writeJSON(w, http.StatusConflict, map[string]any{"error": "vault parameters changed remotely", "reunlock": true})
+		writeJSON(w, http.StatusConflict,
+			map[string]any{"error": "vault parameters changed remotely", "reunlock": true})
 	case errors.Is(err, store.ErrSaltChanged), errors.Is(err, store.ErrKDFWeakened):
 		s.invalidateUnlocks()
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -175,7 +178,7 @@ func (s *Server) handleSet(w http.ResponseWriter, r *http.Request, sess *session
 	if !validNameOr400(w, name) {
 		return
 	}
-	body, ok := readBody(w, r, 1024*1024)
+	body, ok := readBody(w, r, bodyLimit1MiB)
 	if !ok {
 		return
 	}
@@ -217,7 +220,7 @@ func (s *Server) handleSet(w http.ResponseWriter, r *http.Request, sess *session
 	}
 	resp := map[string]any{"ok": true}
 	if !s.cfg.Store.HasRemote() {
-		resp["warning"] = "no remote configured; change is local"
+		resp["warning"] = noRemoteWarning
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -256,7 +259,7 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request, sess *sess
 	}
 	resp := map[string]any{"ok": true}
 	if !s.cfg.Store.HasRemote() {
-		resp["warning"] = "no remote configured; change is local"
+		resp["warning"] = noRemoteWarning
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -291,7 +294,7 @@ func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request, sess *se
 	if !validNameOr400(w, name) {
 		return
 	}
-	body, ok := readBody(w, r, 64*1024)
+	body, ok := readBody(w, r, bodyLimit64KiB)
 	if !ok {
 		return
 	}
@@ -325,7 +328,7 @@ func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request, sess *se
 	}
 	resp := map[string]any{"ok": true}
 	if !s.cfg.Store.HasRemote() {
-		resp["warning"] = "no remote configured; change is local"
+		resp["warning"] = noRemoteWarning
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

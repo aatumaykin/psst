@@ -17,7 +17,7 @@ func TestPasswordProviderEnv(t *testing.T) {
 	if !p.IsAvailable() {
 		t.Fatal("available")
 	}
-	if err := p.SetKey("psst", "vault-key", []byte("x")); err == nil {
+	if err = p.SetKey("psst", "vault-key", []byte("x")); err == nil {
 		t.Fatal("SetKey must fail")
 	}
 }
@@ -45,10 +45,10 @@ func TestNewFixedProvider(t *testing.T) {
 	if !p.IsAvailable() {
 		t.Fatal("available")
 	}
-	if err := p.SetKey("psst", "vault-key", []byte("x")); err == nil {
+	if err = p.SetKey("psst", "vault-key", []byte("x")); err == nil {
 		t.Fatal("SetKey must fail")
 	}
-	if _, err := p.GenerateKey(); err == nil {
+	if _, err = p.GenerateKey(); err == nil {
 		t.Fatal("GenerateKey must fail")
 	}
 }

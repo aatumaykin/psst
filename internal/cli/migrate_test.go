@@ -14,7 +14,7 @@ func TestEnsureRemoteEmptyRefusesVault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := seed.InitSchema(); err != nil {
+	if err = seed.InitSchema(); err != nil {
 		t.Fatal(err)
 	}
 	_ = seed.Close()
@@ -49,7 +49,7 @@ func TestEnsureRemoteEmptyAllowsFreshRemote(t *testing.T) {
 	}
 	_ = gs.Close()
 
-	if err := ensureRemoteEmpty(repoPath); err != nil {
+	if err = ensureRemoteEmpty(repoPath); err != nil {
 		t.Fatalf("fresh remote must pass: %v", err)
 	}
 }

@@ -46,9 +46,9 @@ func (v *Vault) Rotate(ctx context.Context, newPassword string, params *kdf.Para
 		return 0, errors.New("rotate requires git storage")
 	}
 	current := crypto.KDFParams{
-		Time:    uint32(metaAtoi(ctx, v.store, "kdf_time")),
-		Memory:  uint32(metaAtoi(ctx, v.store, "kdf_memory")),
-		Threads: uint8(metaAtoi(ctx, v.store, "kdf_threads")),
+		Time:    uint32(metaAtoi(ctx, v.store, "kdf_time")),   //nolint:gosec // bounded by psst.yaml validation
+		Memory:  uint32(metaAtoi(ctx, v.store, "kdf_memory")), //nolint:gosec // bounded by psst.yaml validation
+		Threads: uint8(metaAtoi(ctx, v.store, "kdf_threads")), //nolint:gosec // bounded by psst.yaml validation
 	}
 	target := current
 	if params != nil {
@@ -75,9 +75,9 @@ func (v *Vault) Rotate(ctx context.Context, newPassword string, params *kdf.Para
 		}
 	}()
 	err = gs.ExecTxMsg(ctx, "psst: rotate", func() error {
-		all, err := v.store.GetAllSecrets(ctx)
-		if err != nil {
-			return fmt.Errorf("get secrets: %w", err)
+		all, listErr := v.store.GetAllSecrets(ctx)
+		if listErr != nil {
+			return fmt.Errorf("get secrets: %w", listErr)
 		}
 		for _, s := range all {
 			plaintext, derr := v.decryptSecret(s.EncryptedValue, s.IV, key, s.Name)
@@ -90,20 +90,20 @@ func (v *Vault) Rotate(ctx context.Context, newPassword string, params *kdf.Para
 			if derr != nil {
 				return fmt.Errorf("encrypt %s: %w", s.Name, derr)
 			}
-			if err := v.store.SetSecret(ctx, s.Name, ct, iv, s.Tags); err != nil {
-				return fmt.Errorf("update %s: %w", s.Name, err)
+			if updErr := v.store.SetSecret(ctx, s.Name, ct, iv, s.Tags); updErr != nil {
+				return fmt.Errorf("update %s: %w", s.Name, updErr)
 			}
 			rotated++
 		}
 		if params != nil {
-			if err := v.store.SetMeta(ctx, "kdf_time", strconv.Itoa(int(target.Time))); err != nil {
-				return fmt.Errorf("set kdf_time: %w", err)
+			if mErr := v.store.SetMeta(ctx, "kdf_time", strconv.Itoa(int(target.Time))); mErr != nil {
+				return fmt.Errorf("set kdf_time: %w", mErr)
 			}
-			if err := v.store.SetMeta(ctx, "kdf_memory", strconv.Itoa(int(target.Memory))); err != nil {
-				return fmt.Errorf("set kdf_memory: %w", err)
+			if mErr := v.store.SetMeta(ctx, "kdf_memory", strconv.Itoa(int(target.Memory))); mErr != nil {
+				return fmt.Errorf("set kdf_memory: %w", mErr)
 			}
-			if err := v.store.SetMeta(ctx, "kdf_threads", strconv.Itoa(int(target.Threads))); err != nil {
-				return fmt.Errorf("set kdf_threads: %w", err)
+			if mErr := v.store.SetMeta(ctx, "kdf_threads", strconv.Itoa(int(target.Threads))); mErr != nil {
+				return fmt.Errorf("set kdf_threads: %w", mErr)
 			}
 		}
 		return gs.RotateSalt(ctx, newSaltB64)

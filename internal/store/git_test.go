@@ -20,7 +20,7 @@ func newGitStore(t *testing.T) (*GitStore, string) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	if err := g.InitSchema(); err != nil {
+	if err = g.InitSchema(); err != nil {
 		t.Fatalf("init: %v", err)
 	}
 	return g, repo
@@ -61,7 +61,7 @@ func TestGitStoreCRUD(t *testing.T) {
 	if err != nil || len(metas) != 2 {
 		t.Fatalf("list = %v %v", metas, err)
 	}
-	if err := g.DeleteSecret(ctx, "API_KEY"); err != nil {
+	if err = g.DeleteSecret(ctx, "API_KEY"); err != nil {
 		t.Fatalf("rm: %v", err)
 	}
 	if sec, _ = g.GetSecret(ctx, "API_KEY"); sec != nil {
@@ -160,7 +160,7 @@ func TestGitStoreMeta(t *testing.T) {
 	if tv, _ := g.GetMeta(ctx, "kdf_time"); tv != "3" {
 		t.Fatalf("kdf_time = %q", tv)
 	}
-	if _, err := g.GetMeta(ctx, "nope"); err != nil {
+	if _, err = g.GetMeta(ctx, "nope"); err != nil {
 		t.Fatalf("unknown key must return empty: %v", err)
 	}
 	if fp := g.FingerprintOfCurrent(); fp == "" {
@@ -169,7 +169,6 @@ func TestGitStoreMeta(t *testing.T) {
 }
 
 func TestGitStoreInitSchemaNonDestructive(t *testing.T) {
-
 	g, repo := newGitStore(t)
 	if err := g.InitSchema(); err != nil {
 		t.Fatalf("idempotent: %v", err)
@@ -181,7 +180,7 @@ func TestGitStoreInitSchemaNonDestructive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	if err := g2.InitSchema(); err == nil {
+	if err = g2.InitSchema(); err == nil {
 		t.Fatal("corrupted psst.yaml must be a hard error")
 	}
 }
@@ -260,7 +259,7 @@ func newSeededStore(t *testing.T, remote string) *GitStore {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	if err := g.InitSchema(); err != nil {
+	if err = g.InitSchema(); err != nil {
 		t.Fatalf("init: %v", err)
 	}
 	return g
@@ -273,7 +272,7 @@ func cloneVault(t *testing.T, remote string) *GitStore {
 	if err != nil {
 		t.Fatalf("clone: %v", err)
 	}
-	if err := g.InitSchema(); err != nil {
+	if err = g.InitSchema(); err != nil {
 		t.Fatalf("init clone: %v", err)
 	}
 	return g
@@ -359,10 +358,10 @@ func TestGitStoreDiscardLocalRecovers(t *testing.T) {
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("expected conflict deadlock, got %v", err)
 	}
-	if err := g1.DiscardLocal(); err != nil {
+	if err = g1.DiscardLocal(); err != nil {
 		t.Fatalf("discard: %v", err)
 	}
-	if err := g1.SetSecret(ctx, "OTHER", []byte("z"), iv, nil); err != nil {
+	if err = g1.SetSecret(ctx, "OTHER", []byte("z"), iv, nil); err != nil {
 		t.Fatalf("recovered: %v", err)
 	}
 }
@@ -404,7 +403,6 @@ func TestGitStoreSyncConflictErrors(t *testing.T) {
 }
 
 func TestGitStoreSyncNoRemote(t *testing.T) {
-
 	g, _ := newGitStore(t)
 	if err := g.Sync(); !errors.Is(err, ErrNoRemote) {
 		t.Fatalf("local-only sync = %v, want ErrNoRemote", err)
@@ -476,14 +474,13 @@ func TestGitStoreDates(t *testing.T) {
 }
 
 func TestCloneEmptyRemoteOnboarding(t *testing.T) {
-
 	remote := newBareRemote(t)
 	repo := filepath.Join(t.TempDir(), "repo")
 	g, err := CloneGitVault(remote, repo, GitOptions{Remote: remote})
 	if err != nil {
 		t.Fatalf("clone empty: %v", err)
 	}
-	if err := g.InitSchema(); err != nil {
+	if err = g.InitSchema(); err != nil {
 		t.Fatalf("onboarding init must create vault: %v", err)
 	}
 	if g2 := cloneVault(t, remote); g2 == nil {
@@ -506,10 +503,10 @@ func TestCloneGitVaultRelativePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("clone: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(work, "nested", "repo", ".git")); err != nil {
+	if _, err = os.Stat(filepath.Join(work, "nested", "repo", ".git")); err != nil {
 		t.Fatalf("repo not at expected path: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(work, "nested", "repo", "nested")); err == nil {
+	if _, err = os.Stat(filepath.Join(work, "nested", "repo", "nested")); err == nil {
 		t.Fatal("nested duplication bug still present")
 	}
 	got, err := rel.GetSecret(ctx, "KEY")
@@ -531,7 +528,7 @@ func TestCloneGitVaultMasterHeadedRemote(t *testing.T) {
 	if err != nil {
 		t.Fatalf("clone: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(clone.repoDir, "psst.yaml")); err != nil {
+	if _, err = os.Stat(filepath.Join(clone.repoDir, "psst.yaml")); err != nil {
 		t.Fatalf("psst.yaml missing in clone (empty checkout): %v", err)
 	}
 	got, err := clone.GetSecret(ctx, "KEY")
@@ -567,17 +564,16 @@ func newClonedStore(t *testing.T, remote string) *GitStore {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	if err := g.InitSchema(); err != nil {
+	if err = g.InitSchema(); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	if err := g.pushAll(); err != nil {
+	if err = g.pushAll(); err != nil {
 		t.Fatalf("push: %v", err)
 	}
 	return g
 }
 
 func TestGitStoreHasRemote(t *testing.T) {
-
 	g := newClonedStore(t, newBareRemote(t))
 	if !g.HasRemote() {
 		t.Fatal("cloned store must report remote")
@@ -645,12 +641,12 @@ func TestGitStoreRotateSalt(t *testing.T) {
 	if err != nil || salt != newSalt {
 		t.Fatalf("salt = %q %v", salt, err)
 	}
-	if err := g.ExecTxMsg(ctx, "t", func() error {
+	if err = g.ExecTxMsg(ctx, "t", func() error {
 		return g.RotateSalt(ctx, "c2hvcnQ=")
 	}); err == nil {
 		t.Fatal("short salt must fail inside tx")
 	}
-	if err := g.ExecTxMsg(ctx, "t", func() error {
+	if err = g.ExecTxMsg(ctx, "t", func() error {
 		return g.RotateSalt(ctx, "!!!notbase64!!!")
 	}); err == nil {
 		t.Fatal("invalid base64 salt must fail")

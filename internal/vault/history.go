@@ -47,17 +47,17 @@ func (v *Vault) Rollback(ctx context.Context, name string, version int) error {
 
 	return v.withRLock(func() error {
 		return v.store.ExecTx(func() error {
-			current, err := v.store.GetSecret(ctx, name)
-			if err != nil {
-				return err
+			current, getErr := v.store.GetSecret(ctx, name)
+			if getErr != nil {
+				return getErr
 			}
 			if current == nil {
 				return fmt.Errorf("secret %q not found", name)
 			}
 
-			history, err := v.store.GetHistory(ctx, name)
-			if err != nil {
-				return err
+			history, histErr := v.store.GetHistory(ctx, name)
+			if histErr != nil {
+				return histErr
 			}
 
 			var target *store.HistoryEntry

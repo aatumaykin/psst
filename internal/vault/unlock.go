@@ -110,9 +110,9 @@ func (v *Vault) unlockGitVault(ctx context.Context, rawKey []byte, timeStr strin
 		return fmt.Errorf("decode kdf_salt: %w", decodeErr)
 	}
 	params := crypto.KDFParams{
-		Time:    uint32(metaAtoi(ctx, v.store, "kdf_time")),
-		Memory:  uint32(metaAtoi(ctx, v.store, "kdf_memory")),
-		Threads: uint8(metaAtoi(ctx, v.store, "kdf_threads")),
+		Time:    uint32(metaAtoi(ctx, v.store, "kdf_time")),   //nolint:gosec // bounded by psst.yaml validation
+		Memory:  uint32(metaAtoi(ctx, v.store, "kdf_memory")), //nolint:gosec // bounded by psst.yaml validation
+		Threads: uint8(metaAtoi(ctx, v.store, "kdf_threads")), //nolint:gosec // bounded by psst.yaml validation
 	}
 	key, err := v.enc.DeriveKeyFromPassword(string(rawKey), salt, params)
 	if err != nil {

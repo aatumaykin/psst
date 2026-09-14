@@ -247,8 +247,7 @@ func TestExecWithSecrets_Masking(t *testing.T) {
 }
 
 func isExitError(err error, target **exitError) bool {
-	var ee *exitError
-	if errors.As(err, &ee) {
+	if ee, ok := errors.AsType[*exitError](err); ok {
 		*target = ee
 		return true
 	}

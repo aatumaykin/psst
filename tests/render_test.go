@@ -94,7 +94,7 @@ func TestRenderUnresolvedBrace(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(e.dir, "exists.env"), []byte("sentinel-bytes"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, code := e.run("render", "--in", "tpl3", "--out", "exists.env"); code != 1 {
+	if _, _, code = e.run("render", "--in", "tpl3", "--out", "exists.env"); code != 1 {
 		t.Fatalf("pre-existing code = %d, want 1", code)
 	}
 	data, err := os.ReadFile(filepath.Join(e.dir, "exists.env"))
@@ -136,7 +136,7 @@ func TestRenderTagFilter(t *testing.T) {
 	if !strings.Contains(stderr, "DB_PASS") {
 		t.Fatalf("error must name DB_PASS: %s", stderr)
 	}
-	if _, _, code := e.run("render", "--in", "tpl2", "--out", "tag2.env", "--tag", "prod"); code != 0 {
+	if _, _, code = e.run("render", "--in", "tpl2", "--out", "tag2.env", "--tag", "prod"); code != 0 {
 		t.Fatalf("tag render code = %d", code)
 	}
 	data, _ := os.ReadFile(filepath.Join(e.dir, "tag2.env"))
@@ -144,7 +144,7 @@ func TestRenderTagFilter(t *testing.T) {
 		t.Fatalf("content = %q", data)
 	}
 	e.writeFile("tpl3", "$DB_PASS")
-	if _, _, code := e.run("render", "--in", "tpl3", "--out", "tag3.env", "--tag", "prod"); code != 0 {
+	if _, _, code = e.run("render", "--in", "tpl3", "--out", "tag3.env", "--tag", "prod"); code != 0 {
 		t.Fatalf("tag literal code = %d", code)
 	}
 	data, _ = os.ReadFile(filepath.Join(e.dir, "tag3.env"))

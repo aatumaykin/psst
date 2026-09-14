@@ -34,6 +34,8 @@ func isName(s string) bool {
 	return true
 }
 
+const braceDelimLen = 2
+
 func Render(tmpl []byte, values map[string][]byte) ([]byte, []Unresolved, int) {
 	var out bytes.Buffer
 	seen := make(map[string]bool)
@@ -61,7 +63,7 @@ func Render(tmpl []byte, values map[string][]byte) ([]byte, []Unresolved, int) {
 					add(inner, SyntaxBrace)
 					out.Write(tmpl[i : i+2+end+2])
 				}
-				i += 2 + end + 2
+				i += braceDelimLen + end + braceDelimLen
 				continue
 			}
 			out.WriteByte(c)

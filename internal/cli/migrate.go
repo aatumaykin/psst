@@ -51,7 +51,7 @@ var migrateStorageCmd = &cobra.Command{
 		remote, _ := cmd.Flags().GetString("remote")
 		allowInsecure, _ := cmd.Flags().GetBool("allow-insecure-remote")
 
-		if to != "git" {
+		if to != storageGit {
 			return exitWithError("only --to git is supported")
 		}
 
@@ -81,7 +81,7 @@ var migrateStorageCmd = &cobra.Command{
 		if remote == "" {
 			return exitWithError("--remote is required for storage migration")
 		}
-		if err := ValidateRemoteScheme(remote, allowInsecure); err != nil {
+		if err = ValidateRemoteScheme(remote, allowInsecure); err != nil {
 			return exitWithError(err.Error())
 		}
 
@@ -123,7 +123,7 @@ var migrateStorageCmd = &cobra.Command{
 			_ = v.Close()
 			return exitWithError(err.Error())
 		}
-		if err := v.Close(); err != nil {
+		if err = v.Close(); err != nil {
 			return exitWithError(err.Error())
 		}
 
@@ -145,7 +145,7 @@ var migrateStorageCmd = &cobra.Command{
 			_ = os.RemoveAll(repoPath)
 			return exitWithError(emptyErr.Error())
 		}
-		if err := gs.InitSchema(); err != nil {
+		if err = gs.InitSchema(); err != nil {
 			return exitWithError(err.Error())
 		}
 
@@ -155,20 +155,20 @@ var migrateStorageCmd = &cobra.Command{
 			v2kp = keyring.NewFixedProvider(envPassword)
 		}
 		v2 := vault.New(enc, v2kp, gs)
-		if err := v2.Unlock(ctx); err != nil {
+		if err = v2.Unlock(ctx); err != nil {
 			return exitWithError(fmt.Sprintf("unlock git vault: %v", err))
 		}
-		if err := v2.Batch(func() error {
+		if err = v2.Batch(func() error {
 			for name, value := range values {
-				if err := v2.SetSecret(ctx, name, value, tagByName[name]); err != nil {
-					return fmt.Errorf("set %s: %w", name, err)
+				if setErr := v2.SetSecret(ctx, name, value, tagByName[name]); setErr != nil {
+					return fmt.Errorf("set %s: %w", name, setErr)
 				}
 			}
 			return nil
 		}); err != nil {
 			return exitWithError(fmt.Sprintf("Migration failed: %v", err))
 		}
-		if err := gs.Sync(); err != nil {
+		if err = gs.Sync(); err != nil {
 			return exitWithError(err.Error())
 		}
 
@@ -176,9 +176,9 @@ var migrateStorageCmd = &cobra.Command{
 		if err != nil {
 			return exitWithError(err.Error())
 		}
-		vcfg.Storage = "git"
+		vcfg.Storage = storageGit
 		vcfg.Remote = remote
-		if err := SaveVaultConfig(envDir, *vcfg); err != nil {
+		if err = SaveVaultConfig(envDir, *vcfg); err != nil {
 			return exitWithError(err.Error())
 		}
 

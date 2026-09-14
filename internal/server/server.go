@@ -102,7 +102,7 @@ type loginRequest struct {
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	body, ok := readBody(w, r, 64*1024)
+	body, ok := readBody(w, r, bodyLimit64KiB)
 	if !ok {
 		return
 	}

@@ -1,6 +1,8 @@
 package store
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -8,6 +10,14 @@ import (
 	"sync"
 	"syscall"
 	"time"
+)
+
+const (
+	gitCfgFilePerm    = 0o600
+	gitEnvExtraVars   = 3
+	stderrTailLimit   = 512
+	lockWait          = 10 * time.Second
+	lockRetryInterval = 50 * time.Millisecond
 )
 
 type GitRunner struct{ dir string }
@@ -19,26 +29,26 @@ func NewGitRunner(dir string) *GitRunner {
 var (
 	globalCfgOnce sync.Once
 	globalCfgPath string
-	globalCfgErr  error
+	errGlobalCfg  error
 )
 
 func emptyGlobalConfig() (string, error) {
 	globalCfgOnce.Do(func() {
 		f, err := os.CreateTemp("", "psst-git-global-*")
 		if err != nil {
-			globalCfgErr = fmt.Errorf("create global config: %w", err)
+			errGlobalCfg = fmt.Errorf("create global config: %w", err)
 			return
 		}
-		if err := f.Chmod(0o600); err != nil {
-			f.Close()
-			os.Remove(f.Name())
-			globalCfgErr = fmt.Errorf("chmod global config: %w", err)
+		if err = f.Chmod(gitCfgFilePerm); err != nil {
+			_ = f.Close()
+			_ = os.Remove(f.Name())
+			errGlobalCfg = fmt.Errorf("chmod global config: %w", err)
 			return
 		}
-		f.Close()
+		_ = f.Close()
 		globalCfgPath = f.Name()
 	})
-	return globalCfgPath, globalCfgErr
+	return globalCfgPath, errGlobalCfg
 }
 
 var allowedSubcommands = map[string]bool{
@@ -53,7 +63,7 @@ func gitEnv() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	env := make([]string, 0, len(os.Environ())+3)
+	env := make([]string, 0, len(os.Environ())+gitEnvExtraVars)
 	for _, e := range os.Environ() {
 		if strings.HasPrefix(e, "GIT_") {
 			continue
@@ -70,14 +80,12 @@ func gitEnv() ([]string, error) {
 
 func (g *GitRunner) runGit(args ...string) (string, error) {
 	if len(args) == 0 {
-		return "", fmt.Errorf("git subcommand not allowed: ")
+		return "", errors.New("git subcommand not allowed: ")
 	}
 	sub := args[0]
-	if !allowedSubcommands[sub] {
-		if sub == "rebase" && len(args) > 1 && args[1] == "--abort" {
-		} else {
-			return "", fmt.Errorf("git subcommand not allowed: %s", sub)
-		}
+	rebaseAbort := sub == "rebase" && len(args) > 1 && args[1] == "--abort"
+	if !allowedSubcommands[sub] && !rebaseAbort {
+		return "", fmt.Errorf("git subcommand not allowed: %s", sub)
 	}
 	if _, err := os.Stat(g.dir); err != nil {
 		return "", fmt.Errorf("git dir not accessible: %w", err)
@@ -87,7 +95,7 @@ func (g *GitRunner) runGit(args ...string) (string, error) {
 		return "", err
 	}
 	full := append([]string{"-c", "core.hooksPath=/dev/null"}, args...)
-	cmd := exec.Command("git", full...)
+	cmd := exec.CommandContext(context.Background(), "git", full...)
 	cmd.Dir = g.dir
 	cmd.Env = env
 	var stderr strings.Builder
@@ -95,15 +103,15 @@ func (g *GitRunner) runGit(args ...string) (string, error) {
 	stdout, err := cmd.Output()
 	if err != nil {
 		msg := stderr.String()
-		if len(msg) > 512 {
-			msg = msg[len(msg)-512:]
+		if len(msg) > stderrTailLimit {
+			msg = msg[len(msg)-stderrTailLimit:]
 		}
 		return string(stdout), fmt.Errorf("git %s: %s", sub, msg)
 	}
 	return string(stdout), nil
 }
 
-func (g *GitRunner) Run(args ...string) (stdout string, err error) {
+func (g *GitRunner) Run(args ...string) (string, error) {
 	return g.runGit(args...)
 }
 
@@ -120,15 +128,23 @@ func (g *GitRunner) RunResetHardUpstream() error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command("git", "-c", "core.hooksPath=/dev/null", "reset", "--hard", "@{upstream}")
+	cmd := exec.CommandContext(
+		context.Background(),
+		"git",
+		"-c",
+		"core.hooksPath=/dev/null",
+		"reset",
+		"--hard",
+		"@{upstream}",
+	)
 	cmd.Dir = g.dir
 	cmd.Env = env
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	if err = cmd.Run(); err != nil {
 		msg := stderr.String()
-		if len(msg) > 512 {
-			msg = msg[len(msg)-512:]
+		if len(msg) > stderrTailLimit {
+			msg = msg[len(msg)-stderrTailLimit:]
 		}
 		return fmt.Errorf("git reset: %s", msg)
 	}
@@ -141,7 +157,7 @@ type RepoLock struct {
 }
 
 func LockRepo(repoDir string) (*RepoLock, error) {
-	return LockRepoWait(repoDir, 10*time.Second)
+	return LockRepoWait(repoDir, lockWait)
 }
 
 func LockRepoWait(repoDir string, wait time.Duration) (*RepoLock, error) {
@@ -156,21 +172,21 @@ func LockRepoWait(repoDir string, wait time.Duration) (*RepoLock, error) {
 		if err == nil {
 			return &RepoLock{path: path, f: f}, nil
 		}
-		if err != syscall.EWOULDBLOCK {
-			f.Close()
+		if !errors.Is(err, syscall.EWOULDBLOCK) {
+			_ = f.Close()
 			return nil, fmt.Errorf("flock repo: %w", err)
 		}
 		if time.Now().After(deadline) {
-			f.Close()
-			return nil, fmt.Errorf("repo is locked by another psst process")
+			_ = f.Close()
+			return nil, errors.New("repo is locked by another psst process")
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(lockRetryInterval)
 	}
 }
 
 func (l *RepoLock) Unlock() error {
 	if err := syscall.Flock(int(l.f.Fd()), syscall.LOCK_UN); err != nil {
-		l.f.Close()
+		_ = l.f.Close()
 		return fmt.Errorf("unlock repo: %w", err)
 	}
 	if err := l.f.Close(); err != nil {

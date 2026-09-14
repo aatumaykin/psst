@@ -69,8 +69,8 @@ var importCmd = &cobra.Command{
 			if isGit {
 				batchErr := v.Batch(func() error {
 					for name, value := range entries {
-						if err := setOne(name, value); err != nil {
-							return err
+						if setOneErr := setOne(name, value); setOneErr != nil {
+							return setOneErr
 						}
 					}
 					return nil
@@ -80,8 +80,8 @@ var importCmd = &cobra.Command{
 				}
 			} else {
 				for name, value := range entries {
-					if err := setOne(name, value); err != nil {
-						return err
+					if setOneErr := setOne(name, value); setOneErr != nil {
+						return setOneErr
 					}
 				}
 			}

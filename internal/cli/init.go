@@ -23,7 +23,7 @@ var initCmd = &cobra.Command{
 		remote, _ := cmd.Flags().GetString("remote")
 		allowInsecure, _ := cmd.Flags().GetBool("allow-insecure-remote")
 
-		if cfg.Storage == "git" {
+		if cfg.Storage == storageGit {
 			return initGitVault(f, cfg, remote, allowInsecure)
 		}
 
@@ -111,7 +111,7 @@ func initGitVault(f *output.Formatter, cfg globalConfig, remote string, allowIns
 	opts.AllowInsecureRemote = allowInsecure
 
 	if remote != "" {
-		if err := ValidateRemoteScheme(remote, allowInsecure); err != nil {
+		if err = ValidateRemoteScheme(remote, allowInsecure); err != nil {
 			return exitWithError(err.Error())
 		}
 		gs, cloneErr := store.CloneGitVault(remote, repoPath, opts)
@@ -135,9 +135,9 @@ func initGitVault(f *output.Formatter, cfg globalConfig, remote string, allowIns
 	if err != nil {
 		return exitWithError(err.Error())
 	}
-	vcfg.Storage = "git"
+	vcfg.Storage = storageGit
 	vcfg.Remote = remote
-	if err := SaveVaultConfig(envDir, *vcfg); err != nil {
+	if err = SaveVaultConfig(envDir, *vcfg); err != nil {
 		return exitWithError(err.Error())
 	}
 

@@ -13,8 +13,7 @@ import (
 )
 
 func exitCode(err error) int {
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 		return exitErr.ExitCode()
 	}
 	if err != nil {
@@ -23,24 +22,23 @@ func exitCode(err error) int {
 	return 0
 }
 
-func (e *testEnv) runWithPassword(t *testing.T, password string, args ...string) (string, string, int) {
+func (e *testEnv) runWithPassword(t *testing.T, password string, args ...string) (string, int) {
 	t.Helper()
 	cmd := exec.Command(e.binary, args...)
 	cmd.Dir = e.dir
 	cmd.Env = append(os.Environ(), "PSST_PASSWORD="+password, "HOME="+e.dir)
-	var outBuf, errBuf strings.Builder
-	cmd.Stdout = &outBuf
+	var errBuf strings.Builder
 	cmd.Stderr = &errBuf
 	err := cmd.Run()
-	return outBuf.String(), errBuf.String(), exitCode(err)
+	return errBuf.String(), exitCode(err)
 }
 
-func runRotateStdin(t *testing.T, e *testEnv, oldPassword, newPassword string, extraArgs ...string) (string, int) {
+func runRotateStdin(t *testing.T, e *testEnv, newPassword string, extraArgs ...string) (string, int) {
 	t.Helper()
 	args := append([]string{"rotate", "--stdin"}, extraArgs...)
 	cmd := exec.Command(e.binary, args...)
 	cmd.Dir = e.dir
-	cmd.Env = append(os.Environ(), "PSST_PASSWORD="+oldPassword, "HOME="+e.dir)
+	cmd.Env = append(os.Environ(), "PSST_PASSWORD=test-password", "HOME="+e.dir)
 	stdin, _ := cmd.StdinPipe()
 	go func() {
 		stdin.Write([]byte(newPassword + "\n"))
@@ -72,7 +70,7 @@ func (e *testEnv) verifyWithPassword(t *testing.T, password, name, value string,
 	t.Helper()
 	outFile := filepath.Join(e.dir, ".verify.env")
 	args := append([]string{"export", "--env-file", outFile}, extraArgs...)
-	if _, _, code := e.runWithPassword(t, password, args...); code != 0 {
+	if _, code := e.runWithPassword(t, password, args...); code != 0 {
 		t.Fatalf("export %s failed with password: exit %d", name, code)
 	}
 	data, err := os.ReadFile(outFile)
@@ -91,14 +89,15 @@ func TestRotateEndToEnd(t *testing.T) {
 	}
 	e.setSecret(t, "API_KEY", "secret123")
 
-	out, code := runRotateStdin(t, e, "test-password", "new-password")
+	out, code := runRotateStdin(t, e, "new-password")
 	if code != 0 {
 		t.Fatalf("rotate failed: %s", out)
 	}
 	if !strings.Contains(out, "Rotated: 1 secrets re-encrypted") {
 		t.Fatalf("summary: %s", out)
 	}
-	if _, _, code := e.runWithPassword(t, "test-password", "export", "--env-file", filepath.Join(e.dir, ".old.env"), "--storage", "git"); code == 0 {
+	if _, code = e.runWithPassword(t, "test-password", "export", "--env-file",
+		filepath.Join(e.dir, ".old.env"), "--storage", "git"); code == 0 {
 		t.Fatal("old password must fail after rotation")
 	}
 	e.verifyWithPassword(t, "new-password", "API_KEY", "secret123", "--storage", "git")
@@ -125,7 +124,7 @@ func TestRotateKDFEndToEnd(t *testing.T) {
 	e.setSecret(t, "API_KEY", "secret123")
 	before := readEnvVaultMeta(t, e)
 
-	out, code := runRotateStdin(t, e, "test-password", "new-password", "--kdf")
+	out, code := runRotateStdin(t, e, "new-password", "--kdf")
 	if code != 0 {
 		t.Fatalf("rotate --kdf failed: %s", out)
 	}
@@ -133,7 +132,8 @@ func TestRotateKDFEndToEnd(t *testing.T) {
 		t.Fatalf("summary: %s", out)
 	}
 
-	if _, _, code := e.runWithPassword(t, "test-password", "export", "--env-file", filepath.Join(e.dir, ".old.env"), "--storage", "git"); code == 0 {
+	if _, code = e.runWithPassword(t, "test-password", "export", "--env-file",
+		filepath.Join(e.dir, ".old.env"), "--storage", "git"); code == 0 {
 		t.Fatal("old password must fail after rotation")
 	}
 	e.verifyWithPassword(t, "new-password", "API_KEY", "secret123", "--storage", "git")
@@ -150,7 +150,7 @@ func TestRotateKDFEndToEnd(t *testing.T) {
 func TestRotateEmptyStdinAborts(t *testing.T) {
 	e := newTestEnv(t)
 	e.run("init", "--storage", "git")
-	out, code := runRotateStdin(t, e, "test-password", "")
+	out, code := runRotateStdin(t, e, "")
 	if code != 1 || !strings.Contains(out, "empty") {
 		t.Fatalf("empty stdin = %d %s", code, out)
 	}
@@ -159,7 +159,7 @@ func TestRotateEmptyStdinAborts(t *testing.T) {
 func TestRotateEmptyVault(t *testing.T) {
 	e := newTestEnv(t)
 	e.run("init", "--storage", "git")
-	out, code := runRotateStdin(t, e, "test-password", "new-password")
+	out, code := runRotateStdin(t, e, "new-password")
 	if code != 0 {
 		t.Fatalf("empty vault rotate = %d %s", code, out)
 	}
@@ -247,7 +247,7 @@ func chmodRemoteReadOnly(t *testing.T, remote string) os.FileMode {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(remote, 0o555); err != nil {
+	if err = os.Chmod(remote, 0o555); err != nil {
 		t.Fatal(err)
 	}
 	return st.Mode().Perm()
@@ -265,10 +265,10 @@ func TestAcceptRotationFlow(t *testing.T) {
 	tc.seedOn(tc.a, "API_KEY", "secret123")
 	tc.b.run("sync")
 
-	if out, code := runRotateStdin(t, tc.a, "test-password", "new-password"); code != 0 {
+	if out, code := runRotateStdin(t, tc.a, "new-password"); code != 0 {
 		t.Fatalf("rotate: %s", out)
 	}
-	_, stderr, code := tc.b.runWithPassword(t, "test-password", "list", "--storage", "git")
+	stderr, code := tc.b.runWithPassword(t, "test-password", "list", "--storage", "git")
 	if code != 1 || !strings.Contains(stderr, "accept-rotation") {
 		t.Fatalf("unaccepted clone = %d %s", code, stderr)
 	}
@@ -276,7 +276,7 @@ func TestAcceptRotationFlow(t *testing.T) {
 	if code != 1 || !strings.Contains(out, "wrong password") {
 		t.Fatalf("wrong accept = %d %s", code, out)
 	}
-	_, stderr, code = tc.b.runWithPassword(t, "test-password", "list", "--storage", "git")
+	_, code = tc.b.runWithPassword(t, "test-password", "list", "--storage", "git")
 	if code != 1 {
 		t.Fatal("pin must be unchanged after failed accept")
 	}
@@ -285,7 +285,7 @@ func TestAcceptRotationFlow(t *testing.T) {
 		t.Fatalf("accept = %d %s", code, out)
 	}
 	tc.b.verifyWithPassword(t, "new-password", "API_KEY", "secret123", "--storage", "git")
-	_, stderr, code = tc.b.runWithPassword(t, "new-password", "rollback", "API_KEY", "--to", "1", "--storage", "git")
+	stderr, code = tc.b.runWithPassword(t, "new-password", "rollback", "API_KEY", "--to", "1", "--storage", "git")
 	if code != 1 || !strings.Contains(stderr, "predates a KDF migration") {
 		t.Fatalf("pre-rotation rollback must fail closed: %d %s", code, stderr)
 	}
@@ -298,7 +298,7 @@ func TestAcceptRotationOfflineRefusal(t *testing.T) {
 	remoteRO := chmodRemoteReadOnly(t, tc.remote)
 	tc.seedOn(tc.b, "OFFLINE", "offline-secret789")
 	restoreRemotePerms(t, tc.remote, remoteRO)
-	if out, code := runRotateStdin(t, tc.a, "test-password", "new-password"); code != 0 {
+	if out, code := runRotateStdin(t, tc.a, "new-password"); code != 0 {
 		t.Fatalf("rotate: %s", out)
 	}
 	out, code := runAccept(t, tc.b, "new-password")
@@ -314,7 +314,7 @@ func TestAcceptRotationOfflineRefusal(t *testing.T) {
 
 func TestAcceptRotationEmptyVaultNote(t *testing.T) {
 	tc := newTwoClones(t)
-	if out, code := runRotateStdin(t, tc.a, "test-password", "new-password"); code != 0 {
+	if out, code := runRotateStdin(t, tc.a, "new-password"); code != 0 {
 		t.Fatalf("rotate: %s", out)
 	}
 	out, code := runAccept(t, tc.b, "new-password")
@@ -349,7 +349,7 @@ func TestRotatePushFailureRecoveryHint(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(remote, st.Mode().Perm()) })
-	out, code := runRotateStdin(t, e, "test-password", "new-password")
+	out, code := runRotateStdin(t, e, "new-password")
 	if code != 1 || !strings.Contains(out, "psst sync") || !strings.Contains(out, "--discard-local") {
 		t.Fatalf("push failure = %d %s", code, out)
 	}

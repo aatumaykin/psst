@@ -75,10 +75,10 @@ func TestRepoLockExclusive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first lock: %v", err)
 	}
-	if _, err := LockRepoWait(dir, 100*time.Millisecond); err == nil {
+	if _, err = LockRepoWait(dir, 100*time.Millisecond); err == nil {
 		t.Fatal("second lock must time out")
 	}
-	if err := l1.Unlock(); err != nil {
+	if err = l1.Unlock(); err != nil {
 		t.Fatalf("unlock: %v", err)
 	}
 	l2, err := LockRepoWait(dir, 100*time.Millisecond)

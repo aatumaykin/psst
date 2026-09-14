@@ -18,6 +18,13 @@ import (
 	"github.com/aatumaykin/psst/internal/kdf"
 )
 
+const (
+	saltSize         = 16
+	entryFieldParts  = 2
+	commitFieldParts = 3
+	readLockWait     = 3 * time.Second
+)
+
 var (
 	ErrNoRemote          = errors.New("no remote configured")
 	ErrRemoteMetaChanged = errors.New("vault parameters changed remotely; re-run the command")
@@ -51,15 +58,15 @@ func CloneGitVault(remote, repoDir string, opts GitOptions) (*GitStore, error) {
 		return nil, fmt.Errorf("resolve vault path: %w", err)
 	}
 	repoDir = abs
-	if err := os.MkdirAll(filepath.Dir(repoDir), 0o700); err != nil {
+	if err = os.MkdirAll(filepath.Dir(repoDir), 0o700); err != nil {
 		return nil, fmt.Errorf("create vault directory: %w", err)
 	}
-	if _, err := NewGitRunner(filepath.Dir(repoDir)).Run("clone", remote, repoDir); err != nil {
+	if _, err = NewGitRunner(filepath.Dir(repoDir)).Run("clone", remote, repoDir); err != nil {
 		return nil, fmt.Errorf("git clone: %w", err)
 	}
 	git := NewGitRunner(repoDir)
 	if !git.RunOK("log", "-1", "--format=%H") && git.RunOK("log", "-1", "--format=%H", "origin/main") {
-		if _, err := git.Run("checkout", "main"); err != nil {
+		if _, err = git.Run("checkout", "main"); err != nil {
 			return nil, fmt.Errorf("checkout main: %w", err)
 		}
 	}
@@ -67,7 +74,7 @@ func CloneGitVault(remote, repoDir string, opts GitOptions) (*GitStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := g.ensureIdentity(); err != nil {
+	if err = g.ensureIdentity(); err != nil {
 		return nil, err
 	}
 	return g, nil
@@ -85,7 +92,7 @@ func NewGitStore(repoDir string, opts GitOptions) (*GitStore, error) {
 	m, perr := ParseVaultMeta(data)
 	if perr != nil {
 		g.metaErr = perr
-		return g, nil
+		return g, nil //nolint:nilerr // parse error is stashed in metaErr and surfaced by InitSchema
 	}
 	g.meta = m
 	return g, nil
@@ -122,47 +129,60 @@ func (g *GitStore) ensureIdentity() error {
 	if err != nil {
 		return err
 	}
-	defer lock.Unlock()
+	defer func() { _ = lock.Unlock() }()
 	return g.ensureIdentityLocked()
 }
 
 func (g *GitStore) InitSchema() error {
 	if g.metaErr != nil {
-		return fmt.Errorf("vault metadata missing or invalid; refusing to regenerate (salt would invalidate all secrets): %w", g.metaErr)
+		return fmt.Errorf(
+			"vault metadata missing or invalid; refusing to regenerate (salt would invalidate all secrets): %w",
+			g.metaErr,
+		)
 	}
 	_, gitErr := os.Stat(filepath.Join(g.repoDir, ".git"))
 	if g.meta != nil {
 		if gitErr != nil {
-			return fmt.Errorf("vault repo is corrupted: psst.yaml without .git")
+			return errors.New("vault repo is corrupted: psst.yaml without .git")
 		}
-		if g.opts.LoadPins != nil {
-			pin := g.opts.LoadPins()
-			if pin == nil {
-				if g.opts.SavePins != nil {
-					if err := g.opts.SavePins(Pin{SaltB64: g.meta.SaltB64, Params: g.meta.Params}); err != nil {
-						return fmt.Errorf("save pins: %w", err)
-					}
-				}
-			} else {
-				if err := CheckPinned(g.meta, pin); err != nil {
-					return fmt.Errorf("vault metadata changed since last open: %w", err)
-				}
-				if g.opts.SavePins != nil && pin.Params != g.meta.Params {
-					if err := g.opts.SavePins(Pin{SaltB64: g.meta.SaltB64, Params: g.meta.Params}); err != nil {
-						return fmt.Errorf("save pins: %w", err)
-					}
-					fmt.Fprintln(os.Stderr, "psst: notice: vault KDF parameters strengthened; pin updated")
-				}
-			}
-		}
-		if err := g.ensureIdentity(); err != nil {
-			return err
-		}
-		return nil
+		return g.checkPinsAndReuse()
 	}
 	if gitErr == nil && g.hasCommits() {
-		return fmt.Errorf("vault metadata missing or invalid; refusing to regenerate (salt would invalidate all secrets)")
+		return errors.New(
+			"vault metadata missing or invalid; refusing to regenerate (salt would invalidate all secrets)",
+		)
 	}
+	return g.initFreshRepo(gitErr != nil)
+}
+
+func (g *GitStore) checkPinsAndReuse() error {
+	if g.opts.LoadPins != nil {
+		pin := g.opts.LoadPins()
+		if pin == nil {
+			if g.opts.SavePins != nil {
+				if err := g.opts.SavePins(Pin{SaltB64: g.meta.SaltB64, Params: g.meta.Params}); err != nil {
+					return fmt.Errorf("save pins: %w", err)
+				}
+			}
+		} else {
+			if err := CheckPinned(g.meta, pin); err != nil {
+				return fmt.Errorf("vault metadata changed since last open: %w", err)
+			}
+			if g.opts.SavePins != nil && pin.Params != g.meta.Params {
+				if err := g.opts.SavePins(Pin{SaltB64: g.meta.SaltB64, Params: g.meta.Params}); err != nil {
+					return fmt.Errorf("save pins: %w", err)
+				}
+				fmt.Fprintln(os.Stderr, "psst: notice: vault KDF parameters strengthened; pin updated")
+			}
+		}
+	}
+	if err := g.ensureIdentity(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (g *GitStore) initFreshRepo(needInit bool) error {
 	if err := os.MkdirAll(g.repoDir, 0o700); err != nil {
 		return fmt.Errorf("create vault directory: %w", err)
 	}
@@ -170,48 +190,48 @@ func (g *GitStore) InitSchema() error {
 	if err != nil {
 		return err
 	}
-	defer lock.Unlock()
-	if gitErr != nil {
-		if _, err := g.git.Run("init", "-b", "main"); err != nil {
+	defer func() { _ = lock.Unlock() }()
+	if needInit {
+		if _, err = g.git.Run("init", "-b", "main"); err != nil {
 			return fmt.Errorf("git init: %w", err)
 		}
 		if g.opts.Remote != "" {
-			if _, err := g.git.Run("config", "remote.origin.url", g.opts.Remote); err != nil {
+			if _, err = g.git.Run("config", "remote.origin.url", g.opts.Remote); err != nil {
 				return fmt.Errorf("git config remote.origin.url: %w", err)
 			}
-			if _, err := g.git.Run("config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"); err != nil {
+			if _, err = g.git.Run("config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"); err != nil {
 				return fmt.Errorf("git config remote.origin.fetch: %w", err)
 			}
 		}
 	}
-	if err := g.ensureIdentityLocked(); err != nil {
+	if err = g.ensureIdentityLocked(); err != nil {
 		return err
 	}
-	salt := make([]byte, 16)
-	if _, err := rand.Read(salt); err != nil {
+	salt := make([]byte, saltSize)
+	if _, err = rand.Read(salt); err != nil {
 		return fmt.Errorf("generate salt: %w", err)
 	}
 	g.mu.Lock()
 	g.meta = NewVaultMeta(base64.StdEncoding.EncodeToString(salt), kdf.Default())
 	g.mu.Unlock()
 	metaPath := filepath.Join(g.repoDir, "psst.yaml")
-	if err := os.WriteFile(metaPath, g.meta.Encode(), 0o600); err != nil {
+	if err = os.WriteFile(metaPath, g.meta.Encode(), 0o600); err != nil {
 		return fmt.Errorf("write vault metadata: %w", err)
 	}
-	if _, err := g.git.Run("add", "psst.yaml"); err != nil {
+	if _, err = g.git.Run("add", "psst.yaml"); err != nil {
 		return fmt.Errorf("git add psst.yaml: %w", err)
 	}
 	g.mu.Lock()
 	g.dirty = true
 	g.mu.Unlock()
-	if err := g.commit("psst: init"); err != nil {
+	if err = g.commit("psst: init"); err != nil {
 		return err
 	}
-	if err := g.pushAll(); err != nil && !errors.Is(err, ErrNoRemote) {
+	if err = g.pushAll(); err != nil && !errors.Is(err, ErrNoRemote) {
 		return err
 	}
 	if g.opts.SavePins != nil {
-		if err := g.opts.SavePins(Pin{SaltB64: g.meta.SaltB64, Params: g.meta.Params}); err != nil {
+		if err = g.opts.SavePins(Pin{SaltB64: g.meta.SaltB64, Params: g.meta.Params}); err != nil {
 			return fmt.Errorf("save pins: %w", err)
 		}
 	}
@@ -223,10 +243,7 @@ func (g *GitStore) hasUpstream() bool {
 	if err != nil {
 		return false
 	}
-	first := out
-	if i := strings.IndexByte(out, '\n'); i >= 0 {
-		first = out[:i]
-	}
+	first, _, _ := strings.Cut(out, "\n")
 	return strings.Contains(first, "...")
 }
 
@@ -301,14 +318,15 @@ func (g *GitStore) walkSecrets() ([]gitEntry, error) {
 				return nil
 			}
 			relDir, rerr := filepath.Rel(root, path)
-			if rerr != nil || strings.Contains(filepath.ToSlash(relDir), "/") || !ValidTag.MatchString(filepath.Base(relDir)) {
+			if rerr != nil || strings.Contains(filepath.ToSlash(relDir), "/") ||
+				!ValidTag.MatchString(filepath.Base(relDir)) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 		rel, rerr := filepath.Rel(root, path)
 		if rerr != nil {
-			return nil
+			return nil //nolint:nilerr // unresolvable entries are skipped
 		}
 		dir, base := filepath.Split(rel)
 		if dir != "" {
@@ -377,7 +395,7 @@ func (g *GitStore) checkIncomingChanges(oldHead string) error {
 	}
 	g.mu.Unlock()
 	if out, err := g.git.Run("show", "--name-only", "--format=", oldHead); err == nil {
-		for _, line := range strings.Split(out, "\n") {
+		for line := range strings.SplitSeq(out, "\n") {
 			if p := strings.TrimSpace(line); strings.HasPrefix(p, "secrets/") {
 				written[p] = true
 			}
@@ -390,7 +408,7 @@ func (g *GitStore) checkIncomingChanges(oldHead string) error {
 	if err != nil {
 		return nil
 	}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		p := strings.TrimSpace(line)
 		if p != "" && written[p] {
 			return ErrConflict
@@ -405,9 +423,10 @@ func (g *GitStore) pullForWrite() error {
 	}
 	oldHead := g.currentHead()
 	if _, err := g.git.Run("pull", "--rebase", "--autostash"); err != nil {
-		g.git.Run("rebase", "--abort")
+		_, _ = g.git.Run("rebase", "--abort")
 		msg := err.Error()
-		if strings.Contains(msg, "CONFLICT") || strings.Contains(msg, "could not apply") || strings.Contains(msg, "Rebase") {
+		if strings.Contains(msg, "CONFLICT") || strings.Contains(msg, "could not apply") ||
+			strings.Contains(msg, "Rebase") {
 			return ErrConflict
 		}
 		return fmt.Errorf("pull failed: %w", err)
@@ -422,7 +441,7 @@ func (g *GitStore) reloadMetaAndCheck() error {
 	data, err := os.ReadFile(filepath.Join(g.repoDir, "psst.yaml"))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("vault metadata missing after pull")
+			return errors.New("vault metadata missing after pull")
 		}
 		return fmt.Errorf("vault metadata missing after pull: %w", err)
 	}
@@ -434,11 +453,14 @@ func (g *GitStore) reloadMetaAndCheck() error {
 	unlocked := g.unlockedFP
 	g.mu.Unlock()
 	if g.opts.LoadPins != nil {
-		if err := CheckPinned(newMeta, g.opts.LoadPins()); err != nil {
-			if errors.Is(err, ErrSaltChanged) {
-				return fmt.Errorf("vault metadata changed since last open: %w; run 'psst sync --accept-rotation' (or re-clone)", err)
+		if pinErr := CheckPinned(newMeta, g.opts.LoadPins()); pinErr != nil {
+			if errors.Is(pinErr, ErrSaltChanged) {
+				return fmt.Errorf(
+					"vault metadata changed since last open: %w; run 'psst sync --accept-rotation' (or re-clone)",
+					pinErr,
+				)
 			}
-			return fmt.Errorf("vault metadata changed since last open: %w", err)
+			return fmt.Errorf("vault metadata changed since last open: %w", pinErr)
 		}
 	}
 	if unlocked != "" && newMeta.Fingerprint() != unlocked {
@@ -477,11 +499,11 @@ func (g *GitStore) SyncPullRead() (bool, error) {
 	if inTx || !g.hasUpstream() {
 		return false, nil
 	}
-	lock, err := LockRepoWait(g.repoDir, 3*time.Second)
+	lock, err := LockRepoWait(g.repoDir, readLockWait)
 	if err != nil {
 		return false, nil
 	}
-	defer lock.Unlock()
+	defer func() { _ = lock.Unlock() }()
 	_, err = g.git.Run("pull", "--ff-only")
 	if err == nil {
 		if rerr := g.reloadMetaAndCheck(); rerr != nil {
@@ -501,26 +523,27 @@ func (g *GitStore) Sync() error {
 	if err != nil {
 		return err
 	}
-	defer lock.Unlock()
+	defer func() { _ = lock.Unlock() }()
 	if !g.hasUpstream() {
 		return ErrNoRemote
 	}
 	oldHead := g.currentHead()
-	if _, err := g.git.Run("pull", "--rebase", "--autostash"); err != nil {
-		g.git.Run("rebase", "--abort")
+	if _, err = g.git.Run("pull", "--rebase", "--autostash"); err != nil {
+		_, _ = g.git.Run("rebase", "--abort")
 		msg := err.Error()
-		if strings.Contains(msg, "CONFLICT") || strings.Contains(msg, "could not apply") || strings.Contains(msg, "Rebase") {
+		if strings.Contains(msg, "CONFLICT") || strings.Contains(msg, "could not apply") ||
+			strings.Contains(msg, "Rebase") {
 			return ErrConflict
 		}
 		return fmt.Errorf("pull failed: %w", err)
 	}
-	if err := g.checkIncomingChanges(oldHead); err != nil {
+	if err = g.checkIncomingChanges(oldHead); err != nil {
 		return err
 	}
-	if err := g.reloadMetaAndCheck(); err != nil {
+	if err = g.reloadMetaAndCheck(); err != nil {
 		return err
 	}
-	if err := g.push(); err != nil {
+	if err = g.push(); err != nil {
 		return err
 	}
 	g.forgetWritten()
@@ -532,11 +555,11 @@ func (g *GitStore) DiscardLocal() error {
 	if err != nil {
 		return err
 	}
-	defer lock.Unlock()
+	defer func() { _ = lock.Unlock() }()
 	if !g.hasUpstream() {
 		return ErrNoRemote
 	}
-	if err := g.git.RunResetHardUpstream(); err != nil {
+	if err = g.git.RunResetHardUpstream(); err != nil {
 		return fmt.Errorf("discard local changes: %w", err)
 	}
 	g.forgetWritten()
@@ -548,8 +571,8 @@ func (g *GitStore) entryTimes(rel string) (time.Time, time.Time, string, error) 
 	if err != nil {
 		return time.Time{}, time.Time{}, "", err
 	}
-	fields := strings.SplitN(strings.TrimSpace(out), "\x1f", 2)
-	if len(fields) != 2 {
+	fields := strings.SplitN(strings.TrimSpace(out), "\x1f", entryFieldParts)
+	if len(fields) != entryFieldParts {
 		return time.Time{}, time.Time{}, "", fmt.Errorf("parse git log output for %s", rel)
 	}
 	updated, err := time.Parse(time.RFC3339, fields[0])
@@ -561,7 +584,7 @@ func (g *GitStore) entryTimes(rel string) (time.Time, time.Time, string, error) 
 	out, err = g.git.Run("log", "--diff-filter=A", "--format=%cI", "--", rel)
 	if err == nil {
 		first := ""
-		for _, line := range strings.Split(out, "\n") {
+		for line := range strings.SplitSeq(out, "\n") {
 			if line = strings.TrimSpace(line); line != "" {
 				first = line
 			}
@@ -576,38 +599,7 @@ func (g *GitStore) entryTimes(rel string) (time.Time, time.Time, string, error) 
 }
 
 func (g *GitStore) mutate(msg string, op func() error) error {
-	g.mu.Lock()
-	nested := g.txDepth > 0
-	g.mu.Unlock()
-	if nested {
-		return op()
-	}
-	lock, err := LockRepo(g.repoDir)
-	if err != nil {
-		return err
-	}
-	defer lock.Unlock()
-	if err := g.pullForWrite(); err != nil {
-		return err
-	}
-	g.mu.Lock()
-	g.txDepth++
-	g.mu.Unlock()
-	defer func() {
-		g.mu.Lock()
-		g.txDepth--
-		g.mu.Unlock()
-	}()
-	if err := op(); err != nil {
-		return err
-	}
-	if err := g.commit(msg); err != nil {
-		return err
-	}
-	if err := g.push(); err != nil && !errors.Is(err, ErrNoRemote) {
-		return err
-	}
-	return nil
+	return g.ExecTxMsg(context.Background(), msg, op)
 }
 
 func (g *GitStore) commit(msg string) error {
@@ -643,7 +635,7 @@ func (g *GitStore) ExecTx(fn func() error) error {
 	return g.ExecTxMsg(context.Background(), "psst: batch", fn)
 }
 
-func (g *GitStore) ExecTxMsg(ctx context.Context, msg string, fn func() error) error {
+func (g *GitStore) ExecTxMsg(_ context.Context, msg string, fn func() error) error {
 	g.mu.Lock()
 	nested := g.txDepth > 0
 	g.mu.Unlock()
@@ -654,8 +646,8 @@ func (g *GitStore) ExecTxMsg(ctx context.Context, msg string, fn func() error) e
 	if err != nil {
 		return err
 	}
-	defer lock.Unlock()
-	if err := g.pullForWrite(); err != nil {
+	defer func() { _ = lock.Unlock() }()
+	if err = g.pullForWrite(); err != nil {
 		return err
 	}
 	g.mu.Lock()
@@ -666,19 +658,19 @@ func (g *GitStore) ExecTxMsg(ctx context.Context, msg string, fn func() error) e
 		g.txDepth--
 		g.mu.Unlock()
 	}()
-	if err := fn(); err != nil {
+	if err = fn(); err != nil {
 		return err
 	}
-	if err := g.commit(msg); err != nil {
+	if err = g.commit(msg); err != nil {
 		return err
 	}
-	if err := g.push(); err != nil && !errors.Is(err, ErrNoRemote) {
+	if err = g.push(); err != nil && !errors.Is(err, ErrNoRemote) {
 		return err
 	}
 	return nil
 }
 
-func (g *GitStore) RotateSalt(ctx context.Context, saltB64 string) error {
+func (g *GitStore) RotateSalt(_ context.Context, saltB64 string) error {
 	g.mu.Lock()
 	inTx := g.txDepth > 0
 	g.mu.Unlock()
@@ -689,44 +681,45 @@ func (g *GitStore) RotateSalt(ctx context.Context, saltB64 string) error {
 	if err != nil {
 		return fmt.Errorf("decode salt: %w", err)
 	}
-	if len(salt) < 16 {
-		return fmt.Errorf("salt must be at least 16 bytes")
+	if len(salt) < saltSize {
+		return errors.New("salt must be at least 16 bytes")
 	}
 	g.mu.Lock()
 	if g.meta == nil {
-		err := g.metaErr
+		mErr := g.metaErr
 		g.mu.Unlock()
-		if err != nil {
-			return fmt.Errorf("vault metadata missing or invalid: %w", err)
+		if mErr != nil {
+			return fmt.Errorf("vault metadata missing or invalid: %w", mErr)
 		}
 		return errors.New("vault metadata missing or invalid")
 	}
 	g.meta.SaltB64 = saltB64
 	encoded := g.meta.Encode()
 	g.mu.Unlock()
-	if err := os.WriteFile(filepath.Join(g.repoDir, "psst.yaml"), encoded, 0o600); err != nil {
+	if err = os.WriteFile(filepath.Join(g.repoDir, "psst.yaml"), encoded, 0o600); err != nil {
 		return fmt.Errorf("write vault metadata: %w", err)
 	}
-	if _, err := g.git.Run("add", "psst.yaml"); err != nil {
+	if _, err = g.git.Run("add", "psst.yaml"); err != nil {
 		return fmt.Errorf("git add psst.yaml: %w", err)
 	}
 	g.markDirty()
 	return nil
 }
 
-func (g *GitStore) SyncAcceptRotation(ctx context.Context) (*VaultMeta, error) {
+func (g *GitStore) SyncAcceptRotation(_ context.Context) (*VaultMeta, error) {
 	lock, err := LockRepo(g.repoDir)
 	if err != nil {
 		return nil, err
 	}
-	defer lock.Unlock()
-	if _, err := g.git.Run("pull", "--rebase", "--autostash"); err != nil {
-		g.git.Run("rebase", "--abort")
-		msg := err.Error()
-		if strings.Contains(msg, "CONFLICT") || strings.Contains(msg, "could not apply") || strings.Contains(msg, "Rebase") {
+	defer func() { _ = lock.Unlock() }()
+	if _, pullErr := g.git.Run("pull", "--rebase", "--autostash"); pullErr != nil {
+		_, _ = g.git.Run("rebase", "--abort")
+		msg := pullErr.Error()
+		if strings.Contains(msg, "CONFLICT") || strings.Contains(msg, "could not apply") ||
+			strings.Contains(msg, "Rebase") {
 			return nil, ErrConflict
 		}
-		return nil, fmt.Errorf("pull failed: %w", err)
+		return nil, fmt.Errorf("pull failed: %w", pullErr)
 	}
 	data, err := os.ReadFile(filepath.Join(g.repoDir, "psst.yaml"))
 	if err != nil {
@@ -739,8 +732,8 @@ func (g *GitStore) SyncAcceptRotation(ctx context.Context) (*VaultMeta, error) {
 	if g.opts.LoadPins != nil {
 		if pin := g.opts.LoadPins(); pin != nil {
 			if newMeta.SaltB64 == pin.SaltB64 {
-				if err := CheckPinned(newMeta, pin); err != nil {
-					return nil, fmt.Errorf("vault KDF parameters: %w", err)
+				if pinErr := CheckPinned(newMeta, pin); pinErr != nil {
+					return nil, fmt.Errorf("vault KDF parameters: %w", pinErr)
 				}
 			} else {
 				p, m := pin.Params, newMeta.Params
@@ -756,19 +749,16 @@ func (g *GitStore) SyncAcceptRotation(ctx context.Context) (*VaultMeta, error) {
 	return newMeta, nil
 }
 
-func (g *GitStore) AheadOfUpstream(ctx context.Context) bool {
+func (g *GitStore) AheadOfUpstream(_ context.Context) bool {
 	out, err := g.git.Run("status", "-sb")
 	if err != nil {
 		return false
 	}
-	first := out
-	if i := strings.IndexByte(out, '\n'); i >= 0 {
-		first = out[:i]
-	}
+	first, _, _ := strings.Cut(out, "\n")
 	return strings.Contains(first, "[ahead")
 }
 
-func (g *GitStore) SetSecret(ctx context.Context, name string, encValue, iv []byte, tags []string) error {
+func (g *GitStore) SetSecret(_ context.Context, name string, encValue, iv []byte, tags []string) error {
 	tag := ""
 	switch len(tags) {
 	case 0:
@@ -778,12 +768,12 @@ func (g *GitStore) SetSecret(ctx context.Context, name string, encValue, iv []by
 			return fmt.Errorf("invalid tag %q", tag)
 		}
 	default:
-		return fmt.Errorf("git vault supports a single tag")
+		return errors.New("git vault supports a single tag")
 	}
 	oldPath, oldTag, had := g.locate(name)
-	path, err := SecretPath(g.secretsRoot(), name, tag)
-	if err != nil {
-		return err
+	path, pathErr := SecretPath(g.secretsRoot(), name, tag)
+	if pathErr != nil {
+		return pathErr
 	}
 	msg := "psst: set " + name
 	if had && oldTag != tag {
@@ -800,20 +790,20 @@ func (g *GitStore) SetSecret(ctx context.Context, name string, encValue, iv []by
 		if err != nil {
 			return fmt.Errorf("secret path: %w", err)
 		}
-		if _, err := g.git.Run("add", rel); err != nil {
+		if _, err = g.git.Run("add", rel); err != nil {
 			return fmt.Errorf("git add %s: %w", rel, err)
 		}
 		g.recordWritten(rel)
 		if had && oldPath != path {
-			if err := os.Remove(oldPath); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("remove old secret: %w", err)
+			if rmErr := os.Remove(oldPath); rmErr != nil && !os.IsNotExist(rmErr) {
+				return fmt.Errorf("remove old secret: %w", rmErr)
 			}
-			oldRel, err := filepath.Rel(g.repoDir, oldPath)
-			if err != nil {
-				return fmt.Errorf("old secret path: %w", err)
+			oldRel, relErr := filepath.Rel(g.repoDir, oldPath)
+			if relErr != nil {
+				return fmt.Errorf("old secret path: %w", relErr)
 			}
-			if _, err := g.git.Run("add", oldRel); err != nil {
-				return fmt.Errorf("git add %s: %w", oldRel, err)
+			if _, addErr := g.git.Run("add", oldRel); addErr != nil {
+				return fmt.Errorf("git add %s: %w", oldRel, addErr)
 			}
 			g.recordWritten(oldRel)
 		}
@@ -822,14 +812,14 @@ func (g *GitStore) SetSecret(ctx context.Context, name string, encValue, iv []by
 	})
 }
 
-func (g *GitStore) GetSecret(ctx context.Context, name string) (*StoredSecret, error) {
+func (g *GitStore) GetSecret(_ context.Context, name string) (*StoredSecret, error) {
 	diverged, err := g.SyncPullRead()
 	if err != nil {
 		return nil, err
 	}
 	path, tag, ok := g.locate(name)
 	if !ok {
-		return nil, nil
+		return nil, nil //nolint:nilnil // not-found is not an error
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -844,16 +834,23 @@ func (g *GitStore) GetSecret(ctx context.Context, name string) (*StoredSecret, e
 		secretTags = []string{tag}
 	}
 	created, updated := time.Time{}, time.Time{}
-	if rel, err := filepath.Rel(g.repoDir, path); err == nil {
+	if rel, relErr := filepath.Rel(g.repoDir, path); relErr == nil {
 		created, updated, _, _ = g.entryTimes(rel)
 	}
 	if diverged {
 		fmt.Fprintln(os.Stderr, "psst: warning: local clone has unpushed changes; run psst sync")
 	}
-	return &StoredSecret{Name: name, EncryptedValue: ct, IV: iv, Tags: secretTags, CreatedAt: created, UpdatedAt: updated}, nil
+	return &StoredSecret{
+		Name:           name,
+		EncryptedValue: ct,
+		IV:             iv,
+		Tags:           secretTags,
+		CreatedAt:      created,
+		UpdatedAt:      updated,
+	}, nil
 }
 
-func (g *GitStore) GetAllSecrets(ctx context.Context) ([]StoredSecret, error) {
+func (g *GitStore) GetAllSecrets(_ context.Context) ([]StoredSecret, error) {
 	if _, err := g.SyncPullRead(); err != nil {
 		return nil, err
 	}
@@ -863,13 +860,13 @@ func (g *GitStore) GetAllSecrets(ctx context.Context) ([]StoredSecret, error) {
 	}
 	result := make([]StoredSecret, 0, len(entries))
 	for _, e := range entries {
-		data, err := os.ReadFile(e.path)
-		if err != nil {
-			return nil, fmt.Errorf("read secret %q: %w", e.name, err)
+		data, readErr := os.ReadFile(e.path)
+		if readErr != nil {
+			return nil, fmt.Errorf("read secret %q: %w", e.name, readErr)
 		}
-		ct, iv, err := DecodeSecretFile(data)
-		if err != nil {
-			return nil, fmt.Errorf("decode secret file %s: %w", e.path, err)
+		ct, iv, decErr := DecodeSecretFile(data)
+		if decErr != nil {
+			return nil, fmt.Errorf("decode secret file %s: %w", e.path, decErr)
 		}
 		var secretTags []string
 		if e.tag != "" {
@@ -880,7 +877,7 @@ func (g *GitStore) GetAllSecrets(ctx context.Context) ([]StoredSecret, error) {
 	return result, nil
 }
 
-func (g *GitStore) ListSecrets(ctx context.Context) ([]SecretMeta, error) {
+func (g *GitStore) ListSecrets(_ context.Context) ([]SecretMeta, error) {
 	if _, err := g.SyncPullRead(); err != nil {
 		return nil, err
 	}
@@ -895,16 +892,19 @@ func (g *GitStore) ListSecrets(ctx context.Context) ([]SecretMeta, error) {
 			secretTags = []string{e.tag}
 		}
 		created, updated, author := time.Time{}, time.Time{}, ""
-		if rel, err := filepath.Rel(g.repoDir, e.path); err == nil {
+		if rel, relErr := filepath.Rel(g.repoDir, e.path); relErr == nil {
 			created, updated, author, _ = g.entryTimes(rel)
 		}
-		result = append(result, SecretMeta{Name: e.name, Tags: secretTags, CreatedAt: created, UpdatedAt: updated, UpdatedBy: author})
+		result = append(
+			result,
+			SecretMeta{Name: e.name, Tags: secretTags, CreatedAt: created, UpdatedAt: updated, UpdatedBy: author},
+		)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result, nil
 }
 
-func (g *GitStore) DeleteSecret(ctx context.Context, name string) error {
+func (g *GitStore) DeleteSecret(_ context.Context, name string) error {
 	path, _, ok := g.locate(name)
 	if !ok {
 		return fmt.Errorf("secret %q not found", name)
@@ -917,7 +917,7 @@ func (g *GitStore) DeleteSecret(ctx context.Context, name string) error {
 		if err != nil {
 			return fmt.Errorf("secret path: %w", err)
 		}
-		if _, err := g.git.Run("add", rel); err != nil {
+		if _, err = g.git.Run("add", rel); err != nil {
 			return fmt.Errorf("git add %s: %w", rel, err)
 		}
 		g.recordWritten(rel)
@@ -926,7 +926,7 @@ func (g *GitStore) DeleteSecret(ctx context.Context, name string) error {
 	})
 }
 
-func (g *GitStore) GetHistory(ctx context.Context, name string) ([]HistoryEntry, error) {
+func (g *GitStore) GetHistory(_ context.Context, name string) ([]HistoryEntry, error) {
 	if !ValidSecretName.MatchString(name) {
 		return nil, nil
 	}
@@ -951,13 +951,13 @@ func (g *GitStore) GetHistory(ctx context.Context, name string) ([]HistoryEntry,
 	}
 	var commits []histCommit
 	cur := -1
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if line == "" {
 			continue
 		}
 		if strings.ContainsRune(line, '\x1f') {
 			parts := strings.Split(line, "\x1f")
-			if len(parts) != 3 {
+			if len(parts) != commitFieldParts {
 				continue
 			}
 			commits = append(commits, histCommit{hash: parts[0], date: parts[1], author: parts[2]})
@@ -978,13 +978,13 @@ func (g *GitStore) GetHistory(ctx context.Context, name string) ([]HistoryEntry,
 		if c.path == "" {
 			c.path = rel
 		}
-		blob, err := g.git.Run("show", c.hash+":"+c.path)
-		if err != nil {
-			return nil, fmt.Errorf("git show %s: %w", c.path, err)
+		blob, showErr := g.git.Run("show", c.hash+":"+c.path)
+		if showErr != nil {
+			return nil, fmt.Errorf("git show %s: %w", c.path, showErr)
 		}
-		ct, iv, err := DecodeSecretFile([]byte(blob))
-		if err != nil {
-			return nil, fmt.Errorf("decode secret %q: %w", name, err)
+		ct, iv, decErr := DecodeSecretFile([]byte(blob))
+		if decErr != nil {
+			return nil, fmt.Errorf("decode secret %q: %w", name, decErr)
 		}
 		ts, terr := time.Parse(time.RFC3339, c.date)
 		if terr != nil {
@@ -1004,15 +1004,15 @@ func (g *GitStore) GetHistory(ctx context.Context, name string) ([]HistoryEntry,
 	return result, nil
 }
 
-func (g *GitStore) AddHistory(ctx context.Context, name string, version int, encValue, iv []byte, tags []string) error {
+func (g *GitStore) AddHistory(_ context.Context, _ string, _ int, _, _ []byte, _ []string) error {
 	return nil
 }
 
-func (g *GitStore) PruneHistory(ctx context.Context, name string, keepVersions int) error {
+func (g *GitStore) PruneHistory(_ context.Context, _ string, _ int) error {
 	return nil
 }
 
-func (g *GitStore) DeleteHistory(ctx context.Context, name string) error {
+func (g *GitStore) DeleteHistory(_ context.Context, _ string) error {
 	return nil
 }
 
@@ -1020,7 +1020,7 @@ func (g *GitStore) Close() error {
 	return nil
 }
 
-func (g *GitStore) GetMeta(ctx context.Context, key string) (string, error) {
+func (g *GitStore) GetMeta(_ context.Context, key string) (string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	switch key {
@@ -1031,17 +1031,17 @@ func (g *GitStore) GetMeta(ctx context.Context, key string) (string, error) {
 			return "", g.metaErr
 		}
 		return g.meta.SaltB64, nil
-	case "kdf_time":
+	case metaKeyKDFTime:
 		if g.meta == nil {
 			return "", g.metaErr
 		}
 		return strconv.FormatUint(uint64(g.meta.Params.Time), 10), nil
-	case "kdf_memory":
+	case metaKeyKDFMemory:
 		if g.meta == nil {
 			return "", g.metaErr
 		}
 		return strconv.FormatUint(uint64(g.meta.Params.Memory), 10), nil
-	case "kdf_threads":
+	case metaKeyKDFThreads:
 		if g.meta == nil {
 			return "", g.metaErr
 		}
@@ -1057,9 +1057,9 @@ func (g *GitStore) GetMeta(ctx context.Context, key string) (string, error) {
 	return "", nil
 }
 
-func (g *GitStore) SetMeta(ctx context.Context, key, value string) error {
+func (g *GitStore) SetMeta(_ context.Context, key, value string) error {
 	switch key {
-	case "kdf_time", "kdf_memory", "kdf_threads":
+	case metaKeyKDFTime, metaKeyKDFMemory, metaKeyKDFThreads:
 	default:
 		return nil
 	}
@@ -1070,10 +1070,10 @@ func (g *GitStore) SetMeta(ctx context.Context, key, value string) error {
 		if err != nil {
 			return fmt.Errorf("vault metadata missing or invalid: %w", err)
 		}
-		return fmt.Errorf("vault metadata missing or invalid")
+		return errors.New("vault metadata missing or invalid")
 	}
 	bits := 32
-	if key == "kdf_threads" {
+	if key == metaKeyKDFThreads {
 		bits = 8
 	}
 	n, err := strconv.ParseUint(value, 10, bits)
@@ -1082,22 +1082,22 @@ func (g *GitStore) SetMeta(ctx context.Context, key, value string) error {
 		return fmt.Errorf("invalid %s value %q: %w", key, value, err)
 	}
 	switch key {
-	case "kdf_time":
-		g.meta.Params.Time = uint32(n)
-	case "kdf_memory":
-		g.meta.Params.Memory = uint32(n)
-	case "kdf_threads":
-		g.meta.Params.Threads = uint8(n)
+	case metaKeyKDFTime:
+		g.meta.Params.Time = uint32(n) //nolint:gosec // n is parsed with bits=32 above
+	case metaKeyKDFMemory:
+		g.meta.Params.Memory = uint32(n) //nolint:gosec // n is parsed with bits=32 above
+	case metaKeyKDFThreads:
+		g.meta.Params.Threads = uint8(n) //nolint:gosec // n is parsed with bits=8 above
 	}
 	encoded := g.meta.Encode()
 	g.mu.Unlock()
 	return g.mutate("psst: migrate", func() error {
 		metaPath := filepath.Join(g.repoDir, "psst.yaml")
-		if err := os.WriteFile(metaPath, encoded, 0o600); err != nil {
-			return fmt.Errorf("write vault metadata: %w", err)
+		if writeErr := os.WriteFile(metaPath, encoded, 0o600); writeErr != nil {
+			return fmt.Errorf("write vault metadata: %w", writeErr)
 		}
-		if _, err := g.git.Run("add", "psst.yaml"); err != nil {
-			return fmt.Errorf("git add psst.yaml: %w", err)
+		if _, addErr := g.git.Run("add", "psst.yaml"); addErr != nil {
+			return fmt.Errorf("git add psst.yaml: %w", addErr)
 		}
 		g.markDirty()
 		return nil
@@ -1117,7 +1117,7 @@ func (g *GitStore) IncrementMetaInt(ctx context.Context, key string, increment i
 		}
 	}
 	n += increment
-	if err := g.SetMeta(ctx, key, strconv.Itoa(n)); err != nil {
+	if err = g.SetMeta(ctx, key, strconv.Itoa(n)); err != nil {
 		return 0, err
 	}
 	return n, nil

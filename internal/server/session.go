@@ -9,7 +9,10 @@ import (
 	"github.com/aatumaykin/psst/internal/vault"
 )
 
-const sessionCookie = "psst_session"
+const (
+	sessionCookie = "psst_session"
+	sessionIDSize = 32
+)
 
 type session struct {
 	id              string
@@ -21,7 +24,7 @@ type session struct {
 }
 
 func newSessionID() string {
-	b := make([]byte, 32)
+	b := make([]byte, sessionIDSize)
 	if _, err := rand.Read(b); err != nil {
 		panic(err)
 	}
@@ -29,20 +32,26 @@ func newSessionID() string {
 }
 
 func sessionCookieHeader(id string, maxAge int) *http.Cookie {
-	return &http.Cookie{
-		Name: sessionCookie, Value: id, Path: "/",
-		HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: maxAge,
+	return &http.Cookie{ //nolint:gosec // Secure omitted: UI is served over plain HTTP on localhost; remote access is SSH-tunnel only
+		Name:     sessionCookie,
+		Value:    id,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   maxAge,
 	}
 }
 
-func (s *Server) apiHandler(unlockRequired bool, h func(w http.ResponseWriter, r *http.Request, sess *session)) http.HandlerFunc {
+func (s *Server) apiHandler(
+	unlockRequired bool, h func(w http.ResponseWriter, r *http.Request, sess *session),
+) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess := s.sessionFromRequest(r)
 		if sess == nil {
 			writeErr(w, http.StatusUnauthorized, "not authenticated")
 			return
 		}
-		if !(r.Method == http.MethodGet && r.URL.Path == "/api/session") && r.Header.Get("X-Psst-Auto") != "1" {
+		if (r.Method != http.MethodGet || r.URL.Path != "/api/session") && r.Header.Get("X-Psst-Auto") != "1" {
 			s.touch(sess)
 		}
 		if unlockRequired {
