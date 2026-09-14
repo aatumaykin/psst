@@ -64,7 +64,7 @@ var migrateStorageCmd = &cobra.Command{
 		if err != nil {
 			return exitWithError(err.Error())
 		}
-		if storage != "sqlite" {
+		if storage != storageSQLite {
 			return exitWithError("source vault must be sqlite")
 		}
 

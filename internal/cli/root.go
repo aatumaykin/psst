@@ -148,6 +148,7 @@ const (
 
 	storageGit    = "git"
 	storageSQLite = "sqlite"
+	goosWindows   = "windows"
 )
 
 func resolveVaultPath(cfg globalConfig) (string, error) {

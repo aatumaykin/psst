@@ -94,7 +94,8 @@ func initGitVault(f *output.Formatter, cfg globalConfig, remote string, allowIns
 		return exitWithError(err.Error())
 	}
 
-	if !keyring.IsEnvPasswordSet() && !term.IsTerminal(int(os.Stdin.Fd())) {
+	stdinTTY := term.IsTerminal(int(os.Stdin.Fd())) //nolint:gosec // fd fits int on supported platforms
+	if !keyring.IsEnvPasswordSet() && !stdinTTY {
 		return exitWithError(
 			"Set PSST_PASSWORD before running init:\n" +
 				"  export PSST_PASSWORD=\"your-password\"\n" +

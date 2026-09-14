@@ -31,17 +31,17 @@ func readNewPassword(useStdin bool) (string, error) {
 		}
 		return pw, nil
 	}
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
+	if !term.IsTerminal(int(os.Stdin.Fd())) { //nolint:gosec // fd fits int on supported platforms
 		return "", errors.New("no terminal available: pass the new password via --stdin")
 	}
 	fmt.Fprint(os.Stderr, "New password: ")
-	b1, err := term.ReadPassword(int(os.Stdin.Fd()))
+	b1, err := term.ReadPassword(int(os.Stdin.Fd())) //nolint:gosec // fd fits int on supported platforms
 	fmt.Fprintln(os.Stderr)
 	if err != nil {
 		return "", fmt.Errorf("read password: %w", err)
 	}
 	fmt.Fprint(os.Stderr, "Confirm: ")
-	b2, err := term.ReadPassword(int(os.Stdin.Fd()))
+	b2, err := term.ReadPassword(int(os.Stdin.Fd())) //nolint:gosec // fd fits int on supported platforms
 	fmt.Fprintln(os.Stderr)
 	if err != nil {
 		return "", fmt.Errorf("read password: %w", err)

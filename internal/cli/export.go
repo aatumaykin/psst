@@ -28,7 +28,7 @@ var exportCmd = &cobra.Command{
 			}
 
 			if envFile != "" {
-				if runtime.GOOS != "windows" {
+				if runtime.GOOS != goosWindows {
 					if info, statErr := os.Lstat(envFile); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
 						return exitWithError("Refusing to write to symlink: " + envFile)
 					}

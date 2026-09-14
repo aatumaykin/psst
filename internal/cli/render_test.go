@@ -49,7 +49,7 @@ func TestWriteRenderedOutputPerms(t *testing.T) {
 }
 
 func TestWriteRenderedOutputRefusesSymlink(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		t.Skip("symlink refusal is disabled on windows")
 	}
 	dir := t.TempDir()

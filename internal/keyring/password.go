@@ -25,10 +25,10 @@ func (p *PasswordProvider) resolve() (string, error) {
 	if pw := os.Getenv("PSST_PASSWORD"); pw != "" {
 		return pw, nil
 	}
-	if p.allowPrompt && term.IsTerminal(int(os.Stdin.Fd())) {
+	if p.allowPrompt && term.IsTerminal(int(os.Stdin.Fd())) { //nolint:gosec // fd fits int on supported platforms
 		p.once.Do(func() {
 			fmt.Fprint(os.Stderr, "Enter vault password: ")
-			b, err := term.ReadPassword(int(os.Stdin.Fd()))
+			b, err := term.ReadPassword(int(os.Stdin.Fd())) //nolint:gosec // fd fits int on supported platforms
 			fmt.Fprintln(os.Stderr)
 			if err != nil {
 				p.promptErr = fmt.Errorf("read password: %w", err)

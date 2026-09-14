@@ -168,7 +168,8 @@ func LockRepoWait(repoDir string, wait time.Duration) (*RepoLock, error) {
 	}
 	deadline := time.Now().Add(wait)
 	for {
-		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		fd := int(f.Fd()) //nolint:gosec // fd fits int on supported platforms
+		err = syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB)
 		if err == nil {
 			return &RepoLock{path: path, f: f}, nil
 		}
@@ -185,7 +186,8 @@ func LockRepoWait(repoDir string, wait time.Duration) (*RepoLock, error) {
 }
 
 func (l *RepoLock) Unlock() error {
-	if err := syscall.Flock(int(l.f.Fd()), syscall.LOCK_UN); err != nil {
+	fd := int(l.f.Fd()) //nolint:gosec // fd fits int on supported platforms
+	if err := syscall.Flock(fd, syscall.LOCK_UN); err != nil {
 		_ = l.f.Close()
 		return fmt.Errorf("unlock repo: %w", err)
 	}

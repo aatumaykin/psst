@@ -32,7 +32,7 @@ func newSessionID() string {
 }
 
 func sessionCookieHeader(id string, maxAge int) *http.Cookie {
-	return &http.Cookie{ //nolint:gosec // Secure omitted: UI is served over plain HTTP on localhost; remote access is SSH-tunnel only
+	return &http.Cookie{
 		Name:     sessionCookie,
 		Value:    id,
 		Path:     "/",

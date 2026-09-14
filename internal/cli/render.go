@@ -35,7 +35,7 @@ func formatUnresolved(unresolved []render.Unresolved) string {
 }
 
 func writeRenderedOutput(path string, data []byte) error {
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != goosWindows {
 		if info, statErr := os.Lstat(path); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
 			return errors.New("Refusing to write to symlink: " + path)
 		}
