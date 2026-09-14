@@ -197,7 +197,7 @@ type twoClones struct {
 func newTwoClones(t *testing.T) *twoClones {
 	t.Helper()
 	remote := filepath.Join(t.TempDir(), "remote.git")
-	if out, err := exec.Command("git", "init", "--bare", remote).CombinedOutput(); err != nil {
+	if out, err := exec.Command("git", "init", "--bare", "-b", "main", remote).CombinedOutput(); err != nil {
 		t.Fatalf("bare: %v\n%s", err, out)
 	}
 	tc := &twoClones{t: t, remote: remote, a: newTestEnv(t), b: newTestEnv(t)}
@@ -339,7 +339,7 @@ func TestAcceptRotationNoopAndFlags(t *testing.T) {
 func TestRotatePushFailureRecoveryHint(t *testing.T) {
 	e := newTestEnv(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
-	if out, err := exec.Command("git", "init", "--bare", remote).CombinedOutput(); err != nil {
+	if out, err := exec.Command("git", "init", "--bare", "-b", "main", remote).CombinedOutput(); err != nil {
 		t.Fatalf("bare: %v\n%s", err, out)
 	}
 	e.run("init", "--storage", "git", "--remote", remote)

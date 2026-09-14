@@ -518,6 +518,28 @@ func TestCloneGitVaultRelativePath(t *testing.T) {
 	}
 }
 
+func TestCloneGitVaultMasterHeadedRemote(t *testing.T) {
+	ctx := context.Background()
+
+	remote := newMasterHeadedRemote(t)
+	g := newSeededStore(t, remote)
+	iv := make([]byte, 12)
+	if err := g.SetSecret(ctx, "KEY", []byte("ct"), iv, nil); err != nil {
+		t.Fatal(err)
+	}
+	clone, err := CloneGitVault(remote, filepath.Join(t.TempDir(), "repo"), GitOptions{Remote: remote})
+	if err != nil {
+		t.Fatalf("clone: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(clone.repoDir, "psst.yaml")); err != nil {
+		t.Fatalf("psst.yaml missing in clone (empty checkout): %v", err)
+	}
+	got, err := clone.GetSecret(ctx, "KEY")
+	if err != nil || got == nil {
+		t.Fatalf("get after clone: %v %v", got, err)
+	}
+}
+
 func TestGitStoreListUpdatedBy(t *testing.T) {
 	ctx := context.Background()
 

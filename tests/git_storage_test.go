@@ -31,7 +31,7 @@ func (e *testEnv) gitRun(args ...string) (string, int) {
 func (e *testEnv) newBareRemote(t *testing.T) string {
 	t.Helper()
 	p := filepath.Join(e.dir, "remote.git")
-	if out, err := exec.Command("git", "init", "--bare", p).CombinedOutput(); err != nil {
+	if out, err := exec.Command("git", "init", "--bare", "-b", "main", p).CombinedOutput(); err != nil {
 		t.Fatalf("bare: %v\n%s", err, out)
 	}
 	return p

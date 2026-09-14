@@ -45,7 +45,7 @@ var allowedSubcommands = map[string]bool{
 	"clone": true, "init": true, "config": true, "fetch": true,
 	"pull": true, "add": true, "rm": true, "mv": true,
 	"commit": true, "push": true, "log": true, "show": true,
-	"status": true,
+	"status": true, "checkout": true,
 }
 
 func gitEnv() ([]string, error) {

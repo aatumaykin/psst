@@ -11,8 +11,18 @@ import (
 func newBareRemote(t *testing.T) string {
 	t.Helper()
 	remote := filepath.Join(t.TempDir(), "remote.git")
-	if out, err := exec.Command("git", "init", "--bare", remote).CombinedOutput(); err != nil {
+	if out, err := exec.Command("git", "init", "--bare", "-b", "main", remote).CombinedOutput(); err != nil {
 		t.Fatalf("git init --bare: %v\n%s", err, out)
+	}
+	return remote
+}
+
+func newMasterHeadedRemote(t *testing.T) string {
+	t.Helper()
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	args := []string{"-c", "init.defaultBranch=master", "init", "--bare", remote}
+	if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare master: %v\n%s", err, out)
 	}
 	return remote
 }

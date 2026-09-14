@@ -57,7 +57,20 @@ func CloneGitVault(remote, repoDir string, opts GitOptions) (*GitStore, error) {
 	if _, err := NewGitRunner(filepath.Dir(repoDir)).Run("clone", remote, repoDir); err != nil {
 		return nil, fmt.Errorf("git clone: %w", err)
 	}
-	return NewGitStore(repoDir, opts)
+	git := NewGitRunner(repoDir)
+	if !git.RunOK("log", "-1", "--format=%H") && git.RunOK("log", "-1", "--format=%H", "origin/main") {
+		if _, err := git.Run("checkout", "main"); err != nil {
+			return nil, fmt.Errorf("checkout main: %w", err)
+		}
+	}
+	g, err := NewGitStore(repoDir, opts)
+	if err != nil {
+		return nil, err
+	}
+	if err := g.ensureIdentity(); err != nil {
+		return nil, err
+	}
+	return g, nil
 }
 
 func NewGitStore(repoDir string, opts GitOptions) (*GitStore, error) {

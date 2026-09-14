@@ -574,7 +574,7 @@ func TestWriteRequiresUnlock(t *testing.T) {
 func newBareRemote(t *testing.T) string {
 	t.Helper()
 	remote := filepath.Join(t.TempDir(), "remote.git")
-	if out, err := exec.Command("git", "init", "--bare", remote).CombinedOutput(); err != nil {
+	if out, err := exec.Command("git", "init", "--bare", "-b", "main", remote).CombinedOutput(); err != nil {
 		t.Fatalf("git init --bare: %v\n%s", err, out)
 	}
 	return remote
@@ -835,7 +835,8 @@ func TestDivergedWarning(t *testing.T) {
 	if err := otherV.SetSecret(context.Background(), "OTHER_KEY", []byte("other-secret123"), nil); err != nil {
 		t.Fatalf("other set (pushes): %v", err)
 	}
-	if out, err := exec.Command("git", "-C", repo, "commit", "--allow-empty", "-m", "local-only").CombinedOutput(); err != nil {
+	args := []string{"-C", repo, "-c", "user.name=psst-test", "-c", "user.email=psst@test.invalid", "commit", "--allow-empty", "-m", "local-only"}
+	if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
 		t.Fatalf("local commit: %v\n%s", err, out)
 	}
 
